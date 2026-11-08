@@ -30,6 +30,7 @@ Browse a digital comic collection the way you would in a comic server, without l
 - **Publisher and series pages** — drill from publisher, to series, to individual issues, with per-issue actions available inline.
 - **Metadata browser** — browse the collection by the metadata in your ComicInfo.xml files rather than by folder structure.
 - **Folder thumbnails** — auto-generated cover thumbnails for folders, cached to a dedicated `/cache` volume.
+- **Custom folder thumbnails** — upload your own image as a folder's thumbnail; regenerating thumbnails leaves it in place until you remove it.
 - **Favorites** — mark publishers, series and individual issues as favorites.
 - **Want to Read / On the Stack** — queue up what you plan to read next, straight from a folder or series.
 - **Search** — search across the indexed library by filename and metadata.

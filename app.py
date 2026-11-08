@@ -6269,6 +6269,13 @@ def generate_folder_thumbnail():
     if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
         return jsonify({"error": "Invalid folder path"}), 400
 
+    from core.folder_thumbnails import is_custom_thumbnail
+
+    if is_custom_thumbnail(folder_path):
+        return jsonify(
+            {"error": "This folder has a custom thumbnail. Remove it first."}
+        ), 400
+
     try:
         # Single source of truth for the rendering itself — see
         # generate_folder_thumbnail_internal below. This route is the explicit
