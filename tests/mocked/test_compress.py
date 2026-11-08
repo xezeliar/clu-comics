@@ -157,9 +157,9 @@ class TestAutoCompress:
         real = compress._shrink_page
         calls = []
 
-        def shrink_then_replace(data):
+        def shrink_then_replace(data, *args):
             calls.append(1)
-            result = real(data)
+            result = real(data, *args)
             if len(calls) == 3:  # the Wanted sweep replaces the file mid-encode
                 big_cbz.write_bytes(b"new content")
             return result
@@ -197,9 +197,9 @@ class TestCompressingMarker:
         seen = []
         real = compress._shrink_page
 
-        def spy(data):
+        def spy(data, *args):
             seen.append(compress_status.is_compressing(str(big_cbz)))
-            return real(data)
+            return real(data, *args)
 
         with patch.object(compress, "_shrink_page", spy):
             compress.compress_cbz(str(big_cbz))
@@ -250,3 +250,129 @@ class TestAutoCompressLogging:
         auto_compress(str(cbz), logger)
 
         assert "left 'Text 001.cbz' unchanged" in logger.info.call_args[0][0]
+
+
+def _noisy_png(width, height):
+    """A photo-like page: noise on a gradient, so WebP quality visibly changes the size."""
+    import random
+    rng = random.Random(7)
+    img = Image.linear_gradient("L").resize((width, height)).convert("RGB")
+    px = img.load()
+    for _ in range(width * height // 6):
+        px[rng.randrange(width), rng.randrange(height)] = (rng.randrange(256),) * 3
+    out = io.BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def _page_sizes(cbz_path):
+    """(width, height) of every page in a CBZ."""
+    with zipfile.ZipFile(cbz_path) as zf:
+        return [Image.open(io.BytesIO(zf.read(m))).size for m in zf.infolist()
+                if m.filename.lower().endswith((".webp", ".png", ".jpg"))]
+
+
+class TestCompressionLevels:
+    """compress_level picks the WebP quality and an optional cap on a page's longest side."""
+
+    @pytest.fixture(scope="class")
+    def tall(self):
+        return _noisy_png(1000, 1500)
+
+    def test_levels_table(self):
+        from cbz_ops import compress
+        assert set(compress.LEVELS) == {"full", "balanced", "small"}
+        assert compress.DEFAULT_LEVEL == "full"
+        assert compress.LEVELS["small"][1] == 1600
+        assert compress.LEVELS["full"][1] is None and compress.LEVELS["balanced"][1] is None
+
+    @pytest.mark.parametrize("value,expected", [
+        ("small", "small"), ("BALANCED", "balanced"), (" full ", "full"),
+        ("", "full"), (None, "full"), ("tiny", "full"), (3, "full"),
+    ])
+    def test_normalize_level_never_raises(self, value, expected):
+        from cbz_ops.compress import normalize_level
+        assert normalize_level(value) == expected
+
+    def test_get_level_reads_the_setting_each_call(self):
+        from cbz_ops import compress
+        with patch("cbz_ops.compress.get_setting", return_value="small"):
+            assert compress.get_level() == "small"
+        with patch("cbz_ops.compress.get_setting", return_value="garbage"):
+            assert compress.get_level() == "full"
+
+    def test_lower_quality_is_smaller_at_the_same_size(self, tall):
+        from cbz_ops import compress
+        full = compress._shrink_page(tall, "full")
+        balanced = compress._shrink_page(tall, "balanced")
+        assert full and balanced
+        assert len(balanced[0]) < len(full[0])
+        assert Image.open(io.BytesIO(balanced[0])).size == (1000, 1500)  # resolution kept
+
+    def test_small_caps_the_longest_side_and_keeps_the_aspect(self):
+        from cbz_ops import compress
+        shrunk = compress._shrink_page(_noisy_png(2000, 3000), "small")
+        assert shrunk
+        w, h = Image.open(io.BytesIO(shrunk[0])).size
+        assert max(w, h) == 1600
+        assert abs(w / h - 2000 / 3000) < 0.01
+
+    def test_small_caps_a_landscape_spread_by_its_width(self):
+        from cbz_ops import compress
+        shrunk = compress._shrink_page(_noisy_png(3200, 2000), "small")
+        assert Image.open(io.BytesIO(shrunk[0])).size == (1600, 1000)
+
+    def test_small_never_upscales_a_smaller_page(self, tall):
+        from cbz_ops import compress
+        shrunk = compress._shrink_page(tall, "small")  # 1000x1500 is already under 1600
+        assert Image.open(io.BytesIO(shrunk[0])).size == (1000, 1500)
+
+    def test_unknown_level_behaves_as_full(self, tall):
+        from cbz_ops import compress
+        assert compress._shrink_page(tall, "nonsense") == compress._shrink_page(tall, "full")
+
+    def test_compress_cbz_applies_the_configured_level(self, tmp_path):
+        from cbz_ops import compress
+        cbz = tmp_path / "Big 001.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("ComicInfo.xml", COMICINFO)
+            zf.writestr("001.png", _noisy_png(2000, 3000))
+            zf.writestr("002.png", _noisy_png(1000, 1500))
+        with patch("cbz_ops.compress.get_setting", return_value="small"):
+            old, new = compress.compress_cbz(str(cbz))
+
+        assert new < old
+        assert sorted(_page_sizes(cbz)) == sorted([(1067, 1600), (1000, 1500)])
+        with zipfile.ZipFile(cbz) as zf:
+            assert zf.read("ComicInfo.xml") == COMICINFO
+
+    def test_level_is_read_once_per_comic(self, tmp_path):
+        """A setting change mid-run must not leave one comic half one level, half another."""
+        from cbz_ops import compress
+        cbz = tmp_path / "Big 002.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            for i in range(3):
+                zf.writestr(f"{i:03d}.png", _noisy_png(1000, 1500))
+        seen = []
+        real = compress._shrink_page
+
+        def spy(data, level):
+            seen.append(level)
+            return real(data, level)
+
+        with patch("cbz_ops.compress.get_setting", return_value="balanced") as gs, \
+                patch.object(compress, "_shrink_page", spy):
+            compress.compress_cbz(str(cbz))
+        assert seen == ["balanced"] * 3
+        assert gs.call_count == 1
+
+    def test_auto_compress_names_the_level_in_its_start_line(self, tmp_path):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+        cbz = tmp_path / "Big 003.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("001.png", _noisy_png(1000, 1500))
+        logger = MagicMock()
+        with patch("cbz_ops.compress.get_setting", return_value="balanced"):
+            auto_compress(str(cbz), logger)
+        assert "level balanced" in logger.info.call_args_list[0][0][0]

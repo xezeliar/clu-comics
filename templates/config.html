@@ -423,6 +423,19 @@
                                 </small>
                             </div>
                         </div>
+                        <div class="col-md-6">
+                            <label for="compressLevel" class="form-label">Compression Level</label>
+                            <select class="form-select" id="compressLevel" name="compressLevel">
+                                <option value="full" {% if compressLevel == 'full' %}selected{% endif %}>Full &ndash; keep resolution, quality 90 (about 30% smaller)</option>
+                                <option value="balanced" {% if compressLevel == 'balanced' %}selected{% endif %}>Balanced &ndash; keep resolution, quality 80 (about 55% smaller)</option>
+                                <option value="small" {% if compressLevel == 'small' %}selected{% endif %}>Small &ndash; pages at most 1600 px, quality 75 (about 90% smaller)</option>
+                            </select>
+                            <small class="form-text text-muted">
+                                Used by Auto-Compress and by the Compress button. Small shrinks a comic the
+                                most and looks fine on a phone or tablet, but pages are softer on a large
+                                monitor and the original resolution cannot be restored.
+                            </small>
+                        </div>
                     </div>
                     <div class="row mt-3">
                         <div class="col-md-6">
@@ -2354,6 +2367,7 @@
             monitorEnabled: document.getElementById('monitorEnabled')?.checked || false,
             autoConvert: document.getElementById('autoConvert')?.checked || false,
             autoCompress: document.getElementById('autoCompress')?.checked || false,
+            compressLevel: document.getElementById('compressLevel')?.value || 'full',
             readSubdirectories: document.getElementById('readSubdirectories')?.checked || false,
             autoRenameMonitor: document.getElementById('autoRenameMonitor')?.checked ?? true,
             moveDirectory: document.getElementById('moveDirectory')?.checked || false,
