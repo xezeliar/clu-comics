@@ -816,6 +816,13 @@ body.collection-select-mode {
     font-size: 0.65rem;
 }
 
+/* Read issues: filled book in green. A fixed dark green, like the badge's fixed
+   ink, because the gold badge is the same on every theme (#198754 is too light
+   on it). */
+.issue-badge .read-icon.bi-book-fill {
+    color: #146c43;
+}
+
 /* A comic whose issue number is unknown still shows its read status, so the
    badge renders with the icon alone -- there is nothing to its left to separate
    it from. */
