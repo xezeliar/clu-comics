@@ -3,6 +3,7 @@ import time
 import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+import core.watchdog_warnings  # noqa: F401  (hides a harmless duplicate-watch warning)
 from core.database import (
     add_file_index_entry,
     forget_deleted_path,

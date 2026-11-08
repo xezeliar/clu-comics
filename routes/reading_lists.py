@@ -186,8 +186,12 @@ def view_list(list_id):
     # template so only one place knows the four source schemes.
     syncable = reading_list_sync.is_syncable(reading_list.get('source'))
 
+    # For the Set up series dialog's library picker.
+    from core.database import get_libraries
+    libraries = get_libraries(enabled_only=True) or []
+
     return render_template('reading_list_view.html', reading_list=reading_list,
-                           syncable=syncable)
+                           syncable=syncable, libraries=libraries)
 
 def process_cbl_import(task_id, content, filename, source, rename_pattern=None):
     """Background worker to process CBL import."""
@@ -422,6 +426,136 @@ def set_track_wanted(list_id):
         'message': ('Unmatched issues will be added to your Wanted list'
                     if enabled else 'Removed from your Wanted list'),
     })
+
+# ---------------------------------------------------------------------------
+# Set up the series a list touches (core/series_setup.py).
+#
+# Two background steps, each polled through /api/reading-lists/series-setup/<id>:
+# resolve (find each series on Metron; writes nothing) and apply (subscribe the
+# ones the user ticked). Both make Metron calls -- one or two per series -- so
+# neither runs inside the request.
+
+setup_tasks = {}
+
+
+def _setup_task(kind, list_id, total):
+    task_id = str(uuid.uuid4())
+    setup_tasks[task_id] = {
+        'kind': kind, 'list_id': list_id, 'status': 'pending',
+        'message': 'Queued', 'processed': 0, 'total': total,
+    }
+    return task_id
+
+
+def _run_setup_task(app, task_id, label, work):
+    """Run ``work(api, progress)`` for a setup task, inside an app context.
+
+    The subscribe path writes series.json through current_app, so the thread
+    needs the context as well as the Metron client.
+    """
+    task = setup_tasks[task_id]
+    op_id = app_state.register_operation("import", label, total=task['total'])
+
+    def progress(done, total, name):
+        task['processed'] = done
+        task['total'] = total
+        task['message'] = name
+        app_state.update_operation(op_id, current=done, detail=name)
+
+    try:
+        with app.app_context():
+            api = get_flask_api(app)
+            if not api:
+                raise RuntimeError('Metron is not configured or is unavailable')
+            task['status'] = 'processing'
+            task['result'] = work(api, progress)
+        task['status'] = 'complete'
+        task['message'] = 'Done'
+        app_state.complete_operation(op_id)
+    except Exception as e:
+        app_logger.error(f"[{label}] {e}")
+        task['status'] = 'error'
+        task['message'] = str(e)
+        app_state.complete_operation(op_id, error=True)
+
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/series-setup/resolve', methods=['POST'])
+def series_setup_resolve(list_id):
+    """Start finding the series behind a list's entries (a preview; writes nothing)."""
+    from core.series_setup import group_entries, resolve_list
+
+    reading_list = get_reading_list(list_id)
+    if not reading_list:
+        return jsonify({'success': False, 'message': 'Reading list not found'}), 404
+    if not is_metron_configured():
+        return jsonify({'success': False, 'message': 'Metron is not configured'}), 400
+
+    entries = reading_list.get('entries') or []
+    pattern = current_app.config.get('CUSTOM_MOVE_PATTERN') or None
+    task_id = _setup_task('resolve', list_id, len(group_entries(entries)))
+    label = f"Finding series: {reading_list.get('name') or list_id}"
+
+    threading.Thread(
+        target=_run_setup_task,
+        args=(current_app._get_current_object(), task_id, label,
+              lambda api, progress: resolve_list(api, entries, pattern, progress)),
+        daemon=True,
+    ).start()
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/series-setup/apply', methods=['POST'])
+def series_setup_apply(list_id):
+    """Start subscribing the chosen series, then optionally track the list's issues.
+
+    Body: ``{"series": [{"series_id", "path"}], "monitored": bool,
+    "track_wanted": bool, "library_path": str}``. ``monitored`` defaults to
+    False: following an event, the list decides what is wanted.
+    """
+    from core.series_setup import apply_setup
+
+    reading_list = get_reading_list(list_id)
+    if not reading_list:
+        return jsonify({'success': False, 'message': 'Reading list not found'}), 404
+    if not is_metron_configured():
+        return jsonify({'success': False, 'message': 'Metron is not configured'}), 400
+
+    data = request.get_json(silent=True) or {}
+    choices = [c for c in (data.get('series') or []) if isinstance(c, dict)]
+    if not choices:
+        return jsonify({'success': False, 'message': 'No series chosen'}), 400
+    monitored = data.get('monitored') is True
+    track_wanted = data.get('track_wanted', True) is not False
+    library_path = data.get('library_path') or None
+    pattern = current_app.config.get('CUSTOM_MOVE_PATTERN') or None
+
+    def work(api, progress):
+        results = apply_setup(api, choices, monitored=monitored, pattern=pattern,
+                              library_path=library_path, progress_cb=progress)
+        tracked = False
+        if track_wanted and any(r['ok'] for r in results):
+            tracked = set_reading_list_track_wanted(list_id, True)
+        # Echoed back so the dialog can say which Monitor setting was applied.
+        return {'series': results, 'track_wanted': tracked, 'monitored': monitored}
+
+    task_id = _setup_task('apply', list_id, len(choices))
+    label = f"Setting up series: {reading_list.get('name') or list_id}"
+    threading.Thread(
+        target=_run_setup_task,
+        args=(current_app._get_current_object(), task_id, label, work),
+        daemon=True,
+    ).start()
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@reading_lists_bp.route('/api/reading-lists/series-setup/<task_id>')
+def series_setup_status(task_id):
+    """Progress, and the result once complete, of a resolve or apply task."""
+    task = setup_tasks.get(task_id)
+    if not task:
+        return jsonify({'success': False, 'message': 'Task not found'}), 404
+    return jsonify({'success': True, **task})
+
 
 @reading_lists_bp.route('/api/reading-lists/<int:list_id>/auto-sync', methods=['POST'])
 def set_exclude_auto_sync(list_id):

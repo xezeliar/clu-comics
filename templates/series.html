@@ -317,13 +317,19 @@
                         {% set manual = manual_status.get(issue.number|string, {}) if manual_status else {} %}
                         {% set has_manual = manual.get('status') %}
                         {% set is_upcoming = issue.store_date and (issue.store_date|string) > today %}
+                        {# "Wanted" means searched for. On a Not monitored series that is
+                           only an issue a tracked reading list still needs (list_wants);
+                           any other missing issue is just missing. #}
+                        {% set is_missing = mapped_path and not status.get('found') and not has_manual and not is_upcoming %}
+                        {% set wanting_lists = list_wants.get(issue.number|string) if list_wants else none %}
+                        {% set is_wanted = is_missing and (series_monitored or wanting_lists) %}
                         {# Year used to narrow GetComics/Usenet searches — the issue's own
                            publication year, never the series start year (a wrong year now
                            actively filters results). #}
                         {% set issue_year = (issue.store_date|string)[:4] if issue.store_date
                         else ((issue.cover_date|string)[:4] if issue.cover_date else '') %}
                         <tr data-issue-number="{{ issue.number }}" data-issue-year="{{ issue_year }}"
-                            class="{% if mapped_path %}{% if status.get('found') or has_manual == 'owned' %}table-success{% elif has_manual == 'skipped' %}table-warning{% elif is_upcoming %}table-info{% else %}table-danger{% endif %}{% endif %}">
+                            class="{% if mapped_path %}{% if status.get('found') or has_manual == 'owned' %}table-success{% elif has_manual == 'skipped' %}table-warning{% elif is_upcoming %}table-info{% elif is_wanted %}table-danger{% endif %}{% endif %}">
                             {% if mapped_path %}
                             <td class="ps-3">
                                 <input type="checkbox" class="form-check-input issue-checkbox"
@@ -348,8 +354,12 @@
                                 {% endif %}
                                 #{{ '%03d'|format(issue.number|int) if issue.number|int|string == issue.number|string
                                 else issue.number }}
-                                {% if mapped_path and not status.get('found') and not has_manual and not is_upcoming %}
-                                <span class="badge bg-warning text-dark ms-2">Wanted</span>
+                                {% if is_wanted %}
+                                <span class="badge bg-warning text-dark ms-2"
+                                    {% if wanting_lists and not series_monitored %}title="Wanted by reading list: {{ wanting_lists|join(', ') }}"{% endif %}>Wanted{% if wanting_lists and not series_monitored %} <i class="bi bi-list-ol" aria-hidden="true"></i>{% endif %}</span>
+                                {% elif is_missing %}
+                                <span class="badge bg-secondary ms-2"
+                                    title="Not searched for: this series is not monitored and no tracked reading list needs this issue">Missing</span>
                                 {% endif %}
                             </td>
                             <td class="issue-date-cell">{{ issue.store_date or '-' }}</td>
@@ -456,7 +466,21 @@
             {% set manual_not_found.count = manual_not_found.count + 1 %}
             {% endif %}
             {% endfor %}
-            {% set wanted_count = issues|length - found_count - manual_not_found.count %}
+            {% set missing_count = issues|length - found_count - manual_not_found.count %}
+            {# Monitored: every missing issue is wanted. Not monitored: only the
+               ones a tracked reading list needs (list_wants), as in the rows. #}
+            {% set wanted = namespace(count=0) %}
+            {% if series_monitored %}
+            {% set wanted.count = missing_count %}
+            {% else %}
+            {% for issue in issues %}
+            {% set num = issue.number|string %}
+            {% if list_wants and num in list_wants and not issue_status.get(num, {}).get('found')
+                  and not (manual_status and num in manual_status) %}
+            {% set wanted.count = wanted.count + 1 %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
             <small>
                 <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>{{ found_count }} found</span>
                 {% if manual_count > 0 %}
@@ -464,7 +488,11 @@
                 <span class="text-success"><i class="bi bi-bookmark-check me-1"></i>{{ manual_count }} marked</span>
                 {% endif %}
                 <span class="mx-2">|</span>
-                <span class="text-warning"><i class="bi bi-star-fill me-1"></i>{{ wanted_count }} wanted</span>
+                <span class="text-warning"><i class="bi bi-star-fill me-1"></i>{{ wanted.count }} wanted</span>
+                {% if not series_monitored and missing_count > wanted.count %}
+                <span class="mx-2">|</span>
+                <span class="text-muted" title="Not searched for: this series is not monitored">{{ missing_count - wanted.count }} missing</span>
+                {% endif %}
             </small>
             {% else %}
             <small></small>
@@ -845,6 +873,11 @@
                     <input type="text" class="form-control" id="subscribePath">
                     <small class="text-muted">Based on your CUSTOM_MOVE_PATTERN setting</small>
                 </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="subscribeMonitored" checked>
+                    <label class="form-check-label" for="subscribeMonitored">Monitor this series</label>
+                    <div class="form-text">Search for its missing and new issues. Untick to only file the issues you download yourself.</div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -1126,7 +1159,10 @@
             const resp = await fetch('/api/series/{{ series.id }}/subscribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path: path })
+                body: JSON.stringify({
+                    path: path,
+                    monitored: document.getElementById('subscribeMonitored').checked
+                })
             });
             const data = await resp.json();
 

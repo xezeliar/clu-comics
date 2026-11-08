@@ -62,6 +62,7 @@ Track curated runs, story arcs and crossovers, and see which issues you already 
 - **Create lists manually**, tag them, and drag-and-drop to reorder entries.
 - **Map entries to local files** so a list shows what you have and what is missing.
 - **Export**, bulk delete, per-list thumbnails, and scheduled sync to keep imported lists current.
+- **Set up series** — one click finds every series a list touches on Metron (by issue id, ComicVine id or name) and subscribes the ones you tick: folder, `cvinfo` and `series.json`, as Not monitored by default, with the list tracked as wanted. Following an event then wants only the event's issues, with nothing to mark Skipped. Series already on your Pull List are left alone, and a name shared by several series asks you to pick.
 
 📖 [Reading lists docs](https://clucomics.org/features/collection/reading-lists/)
 
@@ -138,6 +139,7 @@ CLU is a comic metadata editor as well as a file tool. Metadata is written to `C
 Track ongoing series and new weekly comic releases.
 
 - **Pull List** — subscribe to series, with status color-coding, filtering, a Monitored flag with bulk multi-select toggling, and export/import.
+  - **Subscribe without monitoring** — untick *Monitor this series* in the Subscribe dialog to get the folder, `cvinfo` and `series.json` without wanting every missing issue.
   - **Finished series stop being monitored on their own** — once a series has ended (Completed, Cancelled or Ended) and every issue is in its folder, Monitor is turned off: when the last issue lands, after the nightly sync, or on a Wanted refresh. It happens once per series and never over your own choice; issues marked Skipped don't count as owned.
 - **Releases** — weekly comic releases from Metron, with a publisher filter.
 - **Wanted** — issues you are missing, reconciled against what is actually on disk, with per-issue delete and re-mark-wanted.
