@@ -1214,6 +1214,13 @@ def _init_db_locked():
         if "monitored" not in series_columns:
             c.execute("ALTER TABLE series ADD COLUMN monitored INTEGER DEFAULT 1")
             app_logger.info("Added monitored column to series table")
+        # 1 once Monitor has been decided for this series -- by the user (any
+        # manual toggle) or by core.auto_monitor turning a finished, fully owned
+        # series off. Auto-monitor never touches a series with this set, so a
+        # user who turns Monitor back on keeps it on.
+        if "monitor_locked" not in series_columns:
+            c.execute("ALTER TABLE series ADD COLUMN monitor_locked INTEGER DEFAULT 0")
+            app_logger.info("Added monitor_locked column to series table")
 
         # Create metron_series_publishers table (series_id -> publisher name).
         # Metron's /issue/ list endpoint returns BaseIssue objects, which carry
@@ -11194,17 +11201,28 @@ def get_series_subscription(series_id):
         return False
 
 
-def set_series_monitored(series_id, enabled):
-    """Set whether a series is monitored (searched for new/missing issues)."""
+def set_series_monitored(series_id, enabled, lock=False):
+    """Set whether a series is monitored (searched for new/missing issues).
+
+    ``lock=True`` also records that Monitor has been decided for the series
+    (``monitor_locked``), so core.auto_monitor leaves it alone from then on.
+    The user-facing toggles pass it; automatic callers do not.
+    """
     try:
         conn = get_db_connection()
         if not conn:
             return False
         c = conn.cursor()
-        c.execute(
-            "UPDATE series SET monitored = ? WHERE id = ?",
-            (1 if enabled else 0, series_id)
-        )
+        if lock:
+            c.execute(
+                "UPDATE series SET monitored = ?, monitor_locked = 1 WHERE id = ?",
+                (1 if enabled else 0, series_id)
+            )
+        else:
+            c.execute(
+                "UPDATE series SET monitored = ? WHERE id = ?",
+                (1 if enabled else 0, series_id)
+            )
         conn.commit()
         conn.close()
         return True
@@ -11213,8 +11231,11 @@ def set_series_monitored(series_id, enabled):
         return False
 
 
-def set_series_monitored_bulk(series_ids, enabled):
-    """Set monitored for many series at once. Returns the number of rows updated."""
+def set_series_monitored_bulk(series_ids, enabled, lock=False):
+    """Set monitored for many series at once. Returns the number of rows updated.
+
+    ``lock`` has the same meaning as in :func:`set_series_monitored`.
+    """
     ids = [int(sid) for sid in series_ids]
     if not ids:
         return 0
@@ -11224,8 +11245,9 @@ def set_series_monitored_bulk(series_ids, enabled):
             return 0
         c = conn.cursor()
         placeholders = ",".join("?" for _ in ids)
+        locked = ", monitor_locked = 1" if lock else ""
         c.execute(
-            f"UPDATE series SET monitored = ? WHERE id IN ({placeholders})",
+            f"UPDATE series SET monitored = ?{locked} WHERE id IN ({placeholders})",
             [1 if enabled else 0, *ids],
         )
         updated = c.rowcount
@@ -11254,6 +11276,37 @@ def get_series_monitored(series_id):
     except Exception as e:
         app_logger.error(f"Failed to get series monitored: {e}")
         return True
+
+
+def auto_unmonitor_series(series_id):
+    """Turn Monitor off for a series nobody has decided Monitor for yet.
+
+    One conditional UPDATE, so a user who toggles Monitor at the same moment
+    always wins: the row changes only while it is still monitored (NULL counts
+    as monitored, as everywhere else) and still unlocked. It also locks the
+    row, so this happens at most once per series. Returns True only when this
+    call changed the row.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            c = conn.cursor()
+            c.execute(
+                """
+                UPDATE series SET monitored = 0, monitor_locked = 1
+                WHERE id = ?
+                  AND (monitored IS NULL OR monitored = 1)
+                  AND (monitor_locked IS NULL OR monitor_locked = 0)
+                """,
+                (series_id,),
+            )
+            changed = c.rowcount == 1
+            conn.commit()
+            return changed
+    except Exception as e:
+        app_logger.error(f"Failed to auto-unmonitor series {series_id}: {e}")
+        return False
 
 
 # Per-series owned/missing aggregate behind the Pull List. "Missing" = an issue

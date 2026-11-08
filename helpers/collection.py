@@ -1370,6 +1370,16 @@ def reconcile_wanted_for_series(series_id):
         series_obj = SeriesObj(series)
         status = match_issues_to_collection(mapped_path, issue_objs, series_obj)
 
+        # The file that just landed may be the last one a finished series was
+        # missing; core.auto_monitor turns Monitor off then (once, never over
+        # the user's own choice). Isolated: it must not fail the reconcile.
+        try:
+            from core.auto_monitor import maybe_auto_unmonitor
+
+            maybe_auto_unmonitor(series_id, series, status)
+        except Exception as e:
+            app_logger.warning(f"Auto-monitor check failed for series {series_id}: {e}")
+
         found_numbers = [num for num, s in status.items() if s.get("found")]
         removed = remove_wanted_issues(series_id, found_numbers)
         if removed:

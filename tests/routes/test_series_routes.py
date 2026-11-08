@@ -761,14 +761,14 @@ class TestSeriesMonitored:
         resp = client.post("/api/series/100/monitored", json={"enabled": True})
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
-        mock_set.assert_called_once_with(100, True)
+        mock_set.assert_called_once_with(100, True, lock=True)
 
     @patch("core.database.set_series_monitored", return_value=True)
     def test_toggle_monitored_disable(self, mock_set, client):
         resp = client.post("/api/series/100/monitored", json={"enabled": False})
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
-        mock_set.assert_called_once_with(100, False)
+        mock_set.assert_called_once_with(100, False, lock=True)
 
 
 class TestSeriesBulkMonitored:
@@ -783,7 +783,7 @@ class TestSeriesBulkMonitored:
         body = resp.get_json()
         assert body["success"] is True
         assert body["updated"] == 3
-        mock_set.assert_called_once_with([1, 2, 3], True)
+        mock_set.assert_called_once_with([1, 2, 3], True, lock=True)
 
     @patch("core.database.set_series_monitored_bulk", return_value=2)
     def test_bulk_disable_coerces_ids(self, mock_set, client):
@@ -794,7 +794,7 @@ class TestSeriesBulkMonitored:
         assert resp.status_code == 200
         assert resp.get_json()["success"] is True
         # Non-int ids are dropped, the rest coerced to ints.
-        mock_set.assert_called_once_with([4, 5], False)
+        mock_set.assert_called_once_with([4, 5], False, lock=True)
 
     @patch("core.database.set_series_monitored_bulk", return_value=0)
     def test_bulk_empty(self, mock_set, client):
@@ -803,7 +803,7 @@ class TestSeriesBulkMonitored:
         )
         assert resp.status_code == 200
         assert resp.get_json()["updated"] == 0
-        mock_set.assert_called_once_with([], True)
+        mock_set.assert_called_once_with([], True, lock=True)
 
 
 class TestSeriesPageSearchYear:
