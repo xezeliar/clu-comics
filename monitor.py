@@ -11,6 +11,7 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 from cbz_ops.rename import rename_file, clean_directory_name
 from cbz_ops.single_file import convert_to_cbz
+from cbz_ops.compress import auto_compress
 from core.config import load_config, get_watch_dir, get_target_dir
 from core.settings import get_bool, get_int, get_list
 from helpers import is_hidden, extract_rar_with_unar, match_parent_permissions
@@ -109,6 +110,7 @@ class DownloadCompleteHandler(FileSystemEventHandler):
         self.target_directory = target_directory
         self.ignored_extensions = set(ext.lower() for ext in ignored_extensions)
         self.autoconvert = autoconvert
+        self.auto_compress = get_bool("AUTO_COMPRESS")
         self.subdirectories = subdirectories
         self.move_directories = move_directories
         self.consolidate_directories = consolidate_directories
@@ -160,6 +162,7 @@ class DownloadCompleteHandler(FileSystemEventHandler):
         self.ignored_extensions = set(ext.lower() for ext in get_list("IGNORED_EXTENSIONS"))
 
         self.autoconvert = get_bool("AUTOCONVERT")
+        self.auto_compress = get_bool("AUTO_COMPRESS")
         self.subdirectories = get_bool("READ_SUBDIRECTORIES")
         self.move_directories = get_bool("MOVE_DIRECTORY")
         self.consolidate_directories = get_bool("CONSOLIDATE_DIRECTORIES")
@@ -1124,6 +1127,9 @@ class DownloadCompleteHandler(FileSystemEventHandler):
                     monitor_logger.info(f"File '{target_path}' is not a CBR file. No conversion needed.")
             else:
                 monitor_logger.warning(f"File move verification failed: {target_path} not found.")
+
+            if self.auto_compress:
+                auto_compress(final_target_path, monitor_logger)
 
             # Make the moved/converted file as accessible as its library folder,
             # so it stays readable regardless of the download's original perms or

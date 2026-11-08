@@ -41,6 +41,7 @@ SETTINGS_SCHEMA = {
     # core.config.seed_monitor_from_env imports once (default off).
     "MONITOR_ENABLED": _s("monitor_enabled", _B, False, "file_processing"),
     "AUTOCONVERT": _s("autoconvert", _B, False, "file_processing"),
+    "AUTO_COMPRESS": _s("auto_compress", _B, False, "file_processing"),
     "READ_SUBDIRECTORIES": _s("read_subdirectories", _B, False, "file_processing"),
     "CONVERT_SUBDIRECTORIES": _s("convert_subdirectories", _B, False, "file_processing"),
     "MOVE_DIRECTORY": _s("move_directory", _B, False, "file_processing"),

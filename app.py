@@ -6656,6 +6656,7 @@ def save_file_processing_config():
         if "monitorEnabled" in data:
             set_setting("MONITOR_ENABLED", bool(data.get("monitorEnabled")))
         set_setting("AUTOCONVERT", bool(data.get("autoConvert", False)))
+        set_setting("AUTO_COMPRESS", bool(data.get("autoCompress", False)))
         set_setting("READ_SUBDIRECTORIES", bool(data.get("readSubdirectories", False)))
         set_setting("AUTO_RENAME_MONITOR", bool(data.get("autoRenameMonitor", True)))
         set_setting("MOVE_DIRECTORY", bool(data.get("moveDirectory", False)))
@@ -7099,6 +7100,7 @@ def config_page():
         ignored_files=st["IGNORED_FILES"],
         ignored_extensions=st["IGNORED_EXTENSIONS"],
         autoConvert=st["AUTOCONVERT"],
+        autoCompress=st["AUTO_COMPRESS"],
         readSubdirectories=st["READ_SUBDIRECTORIES"],
         convertSubdirectories=st["CONVERT_SUBDIRECTORIES"],
         pdfImageFormat=str(get_user_preference("pdf_image_format", default="jpeg") or "jpeg"),
@@ -7230,6 +7232,7 @@ def stream_logs(script_type):
         "delete",
         "enhance_single",
         "add",
+        "compress",
     ]
 
     # Check if the correct parameter is passed for single_file scripts
@@ -7325,13 +7328,17 @@ def stream_logs(script_type):
         "missing",
         "enhance_dir",
         "comicinfo",
+        "compress_dir",
     ]:
         if not directory or not os.path.isdir(directory):
             return Response("Invalid or missing directory path.", status=400)
 
         # Scripts in cbz_ops/ package vs root
         cbz_ops_scripts = ["rebuild", "rename", "convert", "pdf", "enhance_dir"]
-        if script_type in cbz_ops_scripts:
+        if script_type == "compress_dir":
+            # One module handles a file or a directory.
+            script_cmd = ["-m", "cbz_ops.compress"]
+        elif script_type in cbz_ops_scripts:
             script_cmd = ["-m", f"cbz_ops.{script_type}"]
         else:
             script_cmd = [f"{script_type}.py"]
@@ -7396,7 +7403,7 @@ def stream_logs(script_type):
                                 continue
                     else:
                         # No output available, send keepalive for long operations
-                        if script_type in ["convert", "rebuild"]:
+                        if script_type in ["convert", "rebuild", "compress_dir"]:
                             yield f"data: \n\n"  # Keepalive to prevent timeout
 
             except GeneratorExit:
