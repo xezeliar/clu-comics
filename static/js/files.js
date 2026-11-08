@@ -492,6 +492,18 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
   }
   leftContainer.appendChild(nameSpan);
 
+  // Auto-compress is rewriting this comic in place: say so, so nobody moves it
+  // half-written (the server refuses the move too).
+  if (type === "file" && fileData.compressing) {
+    const compressingBadge = document.createElement("span");
+    compressingBadge.className = "badge text-bg-warning ms-2 compressing-badge";
+    compressingBadge.title = "Being compressed. Wait for this to finish before moving it.";
+    compressingBadge.innerHTML =
+      '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Compressing…';
+    leftContainer.appendChild(compressingBadge);
+    li.classList.add("opacity-75");
+  }
+
   console.log('Checking CBZ condition:', {
     type: type,
     filename: fileData.name,
@@ -1343,7 +1355,7 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
     li.onclick = e => e.stopPropagation();
   }
 
-  if (isDraggable) {
+  if (isDraggable && !(type === "file" && fileData.compressing)) {
     li.classList.add("draggable");
     li.setAttribute("draggable", "true");
     li.addEventListener("dragstart", function (e) {
@@ -1560,6 +1572,7 @@ function loadDirectories(path, panel) {
         renderDirectoryListing(data, 'source');
         // Restore scroll position if navigating back
         restoreScrollPosition('source', data.current_path);
+        watchCompressing('source', data);
       } else {
         currentDestinationPath = data.current_path;
         // Reset file tracking AFTER updating global path variable
@@ -1576,6 +1589,7 @@ function loadDirectories(path, panel) {
         renderDirectoryListing(data, 'destination');
         // Restore scroll position if navigating back
         restoreScrollPosition('destination', data.current_path);
+        watchCompressing('destination', data);
       }
     })
     .catch(error => {
@@ -1584,6 +1598,38 @@ function loadDirectories(path, panel) {
                                     Error loading directory.
                                   </div>`;
     });
+}
+
+// While a listed comic is being compressed, check the folder every few seconds
+// and redraw the panel once nothing in it is compressing any more (so the badge
+// goes away and the file becomes movable). Polls quietly: the redraw happens
+// only when the answer changes, and stops as soon as the panel moves elsewhere.
+const compressWatchTimers = {};
+function watchCompressing(panel, data, kind = 'directories') {
+  clearTimeout(compressWatchTimers[panel]);
+  const path = data && data.current_path;
+  if (!path || !Array.isArray(data.files) || !data.files.some(f => f && f.compressing)) return;
+  // The Downloads button lists TARGET through its own route and loader.
+  const listUrl = kind === 'downloads' ? '/list-downloads' : '/list-directories';
+  const reload = kind === 'downloads' ? loadDownloads : loadDirectories;
+
+  const check = () => {
+    const stillHere = (panel === 'source' ? currentSourcePath : currentDestinationPath) === path;
+    if (!stillHere) return;
+    fetch(`${listUrl}?path=${encodeURIComponent(path)}`)
+      .then(r => r.json())
+      .then(next => {
+        const stillHereNow = (panel === 'source' ? currentSourcePath : currentDestinationPath) === path;
+        if (!stillHereNow || next.error) return;
+        if ((next.files || []).some(f => f && f.compressing)) {
+          compressWatchTimers[panel] = setTimeout(check, 4000);
+        } else {
+          reload(path, panel);
+        }
+      })
+      .catch(() => { compressWatchTimers[panel] = setTimeout(check, 8000); });
+  };
+  compressWatchTimers[panel] = setTimeout(check, 4000);
 }
 
 // Function to render the directory listing.
@@ -1745,6 +1791,7 @@ function loadDownloads(path, panel) {
         appendEmptyListing(container, 'No downloads waiting',
           'Finished downloads land here until they are moved into a library.', 'bi-cloud-check');
       }
+      watchCompressing(panel, data, 'downloads');
     })
     .catch(error => {
       console.error("Error loading downloads:", error);

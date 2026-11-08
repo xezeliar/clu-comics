@@ -1535,3 +1535,39 @@ class TestMergePages:
             "pages": [{"src": "base", "entry": "p1.png"}],
         })
         assert resp.status_code == 403
+
+
+class TestMoveRefusedWhileCompressing:
+    """A comic that auto-compress is rewriting must not be moved out from under it."""
+
+    @patch("routes.files.is_critical_path", return_value=False)
+    @patch("routes.files.threading.Thread")
+    def test_move_refused(self, mock_thread, mock_crit, client, tmp_path):
+        src = tmp_path / "comic.cbz"
+        src.write_bytes(b"x")
+        with patch("routes.files.compress_status.is_busy", return_value=True):
+            resp = client.post("/move", json={"source": str(src),
+                                              "destination": str(tmp_path / "d.cbz")})
+        assert resp.status_code == 409
+        assert "compressed" in resp.get_json()["error"]
+        mock_thread.assert_not_called()
+        assert src.exists()
+
+    @patch("routes.files.is_critical_path", return_value=False)
+    @patch("routes.files.threading.Thread")
+    def test_one_compressing_item_rejects_whole_batch(self, mock_thread, mock_crit,
+                                                      client, tmp_path):
+        busy = tmp_path / "busy.cbz"
+        free = tmp_path / "free.cbz"
+        busy.write_bytes(b"x")
+        free.write_bytes(b"x")
+        with patch("routes.files.compress_status.is_busy",
+                   side_effect=lambda p: p == str(busy)):
+            resp = client.post("/move-batch", json={"items": [
+                {"source": str(free), "destination": str(tmp_path / "d" / "free.cbz")},
+                {"source": str(busy), "destination": str(tmp_path / "d" / "busy.cbz")},
+            ]})
+        assert resp.status_code == 409
+        assert "busy.cbz" in resp.get_json()["error"]
+        mock_thread.assert_not_called()
+        assert free.exists() and busy.exists()

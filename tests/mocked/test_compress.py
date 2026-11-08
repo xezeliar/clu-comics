@@ -179,3 +179,74 @@ def test_monitor_compresses_after_conversion_when_enabled():
     assert src.index("convert_to_cbz(target_path)") < hook < src.index("moved = True", hook)
     assert "if self.auto_compress:" in src[hook - 80:hook]
     assert 'self.auto_compress = get_bool("AUTO_COMPRESS")' in src
+
+
+class TestCompressingMarker:
+    """compress_cbz marks the comic as compressing for exactly the length of the run."""
+
+    @pytest.fixture(autouse=True)
+    def marker_dir(self, tmp_path, monkeypatch):
+        from core import compress_status
+        cfg = tmp_path / "cfg"
+        cfg.mkdir()
+        monkeypatch.setattr(compress_status, "get_config_dir", lambda: str(cfg))
+
+    def test_marked_while_running_and_cleared_after(self, big_cbz):
+        from cbz_ops import compress
+        from core import compress_status
+        seen = []
+        real = compress._shrink_page
+
+        def spy(data):
+            seen.append(compress_status.is_compressing(str(big_cbz)))
+            return real(data)
+
+        with patch.object(compress, "_shrink_page", spy):
+            compress.compress_cbz(str(big_cbz))
+
+        assert seen and all(seen)
+        assert not compress_status.is_compressing(str(big_cbz))
+
+    def test_cleared_when_the_compress_fails(self, big_cbz):
+        from cbz_ops import compress
+        from core import compress_status
+        with patch.object(compress, "_shrink_page", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError):
+                compress.compress_cbz(str(big_cbz))
+        assert not compress_status.is_compressing(str(big_cbz))
+
+    def test_not_marked_when_the_file_is_refused_up_front(self, tmp_path):
+        from cbz_ops import compress
+        from core import compress_status
+        cbr = tmp_path / "a.cbr"
+        cbr.write_bytes(b"x")
+        with pytest.raises(ValueError):
+            compress.compress_cbz(str(cbr))
+        assert compress_status.compressing_paths() == set()
+
+
+class TestAutoCompressLogging:
+    """A large issue takes tens of seconds: the log must say it started and how it ended."""
+
+    def test_start_then_result_are_logged(self, big_cbz):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+
+        logger = MagicMock()
+        auto_compress(str(big_cbz), logger)
+
+        lines = [c[0][0] for c in logger.info.call_args_list]
+        assert lines[0].startswith("Auto-compressing 'Series 001.cbz'")
+        assert lines[-1].startswith("Auto-compressed 'Series 001.cbz'")
+
+    def test_an_unshrinkable_comic_is_still_reported(self, tmp_path):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+
+        cbz = tmp_path / "Text 001.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("ComicInfo.xml", COMICINFO)
+        logger = MagicMock()
+        auto_compress(str(cbz), logger)
+
+        assert "left 'Text 001.cbz' unchanged" in logger.info.call_args[0][0]

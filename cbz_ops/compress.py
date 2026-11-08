@@ -14,10 +14,12 @@ every CBZ directly inside it (not subfolders).
 import io
 import os
 import sys
+import time
 import zipfile
 
 from PIL import Image
 
+from core import compress_status
 from core.app_logging import app_logger
 from helpers import is_hidden, open_zip_for_write
 
@@ -49,9 +51,22 @@ def _shrink_page(data):
 
 def compress_cbz(cbz_path):
     """Compress one CBZ in place. Returns (old_size, new_size); equal when the
-    file was left untouched."""
+    file was left untouched.
+
+    The file is marked as compressing for the whole run (see
+    core.compress_status) so the File Manager can say so and /move can refuse
+    to take it away half-rewritten. Every caller -- the monitor's auto-compress
+    and the manual one -- goes through here, so the marker cannot be forgotten."""
     if not cbz_path.lower().endswith(".cbz"):
         raise ValueError("only CBZ files can be compressed; convert it to CBZ first")
+    compress_status.begin(cbz_path)
+    try:
+        return _compress_cbz(cbz_path)
+    finally:
+        compress_status.end(cbz_path)
+
+
+def _compress_cbz(cbz_path):
     old_size = os.path.getsize(cbz_path)
     with zipfile.ZipFile(cbz_path) as src:
         members = [m for m in src.infolist() if not m.is_dir()]
@@ -107,13 +122,22 @@ def auto_compress(path, logger):
     failure can only cost the saving, never the move that called it."""
     if not path or not path.lower().endswith(".cbz") or not os.path.exists(path):
         return
+    name = os.path.basename(path)
+    # A large issue takes tens of seconds; without a start line the log is silent
+    # for the whole run and it looks as though nothing is happening.
     try:
+        logger.info(f"Auto-compressing '{name}' ({_mb(os.path.getsize(path))}); "
+                    "it is marked as compressing until this finishes")
+        started = time.monotonic()
         old, new = compress_cbz(path)
     except Exception as e:
         logger.warning(f"Auto-compress skipped for '{path}': {e}")
         return
+    took = f"{time.monotonic() - started:.0f}s"
     if new < old:
-        logger.info(f"Auto-compressed '{os.path.basename(path)}': {_mb(old)} -> {_mb(new)}")
+        logger.info(f"Auto-compressed '{name}': {_mb(old)} -> {_mb(new)} in {took}")
+    else:
+        logger.info(f"Auto-compress left '{name}' unchanged (no worthwhile saving) after {took}")
 
 
 def _mb(n):

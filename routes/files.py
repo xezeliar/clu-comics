@@ -22,6 +22,7 @@ import zipfile
 from flask import Blueprint, request, jsonify, render_template_string, Response
 from core.app_logging import app_logger
 from core.auth import file_op_refusal
+from core import compress_status
 from helpers.library import (is_critical_path, get_critical_path_error_message, is_valid_library_path,
                              get_default_library_root)
 from helpers.trash import move_to_trash, is_trash_path, get_trash_dir, get_trash_size, get_trash_max_size_bytes, get_trash_contents, empty_trash as do_empty_trash, permanently_delete_from_trash, restore_from_trash, get_trash_manifest
@@ -73,6 +74,12 @@ def _validate_move(source, destination):
     if not os.path.exists(source):
         app_logger.warning(f"Source path does not exist: {source}")
         return "Source path does not exist", 404
+
+    # Auto-compress rewrites the comic in place after it lands in TARGET; moving
+    # it now would make the compress fail (it checks) or, worse, race the write.
+    if compress_status.is_busy(source):
+        app_logger.info(f"Refused move of a comic that is still compressing: {source}")
+        return "Still being compressed. Wait for it to finish, then move it.", 409
 
     if is_critical_path(source):
         app_logger.error(f"Attempted to move critical folder: {source}")

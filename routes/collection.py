@@ -25,6 +25,7 @@ from core.app_logging import app_logger
 from core.metadata_normalize import strip_provider_ids
 from core import folder_thumbnails
 from core import app_state
+from core import compress_status
 from helpers import find_folder_thumbnail
 from helpers.paging import COLLECTION_DEFAULT_PER_PAGE, DEFAULT_PER_PAGE
 from helpers.library import (get_library_roots,
@@ -1105,7 +1106,7 @@ def list_directories():
             return jsonify({
                 "current_path": current_path,
                 "directories": cached_data["directories"],
-                "files": cached_data["files"],
+                "files": compress_status.annotate_files(current_path, cached_data["files"]),
                 "parent": parent_dir,
                 "cached": True
             })
@@ -1125,7 +1126,7 @@ def list_directories():
         return jsonify({
             "current_path": current_path,
             "directories": listing_data["directories"],
-            "files": listing_data["files"],
+            "files": compress_status.annotate_files(current_path, listing_data["files"]),
             "parent": parent_dir,
             "cached": False
         })
@@ -1251,7 +1252,7 @@ def list_downloads():
             return jsonify({
                 "current_path": current_path,
                 "directories": cached_data["directories"],
-                "files": cached_data["files"],
+                "files": compress_status.annotate_files(current_path, cached_data["files"]),
                 "parent": parent_dir,
                 "cached": True
             })
@@ -1271,7 +1272,7 @@ def list_downloads():
         return jsonify({
             "current_path": current_path,
             "directories": listing_data["directories"],
-            "files": listing_data["files"],
+            "files": compress_status.annotate_files(current_path, listing_data["files"]),
             "parent": parent_dir,
             "cached": False
         })
