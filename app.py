@@ -6649,6 +6649,7 @@ def save_file_processing_config():
         if "monitorEnabled" in data:
             set_setting("MONITOR_ENABLED", bool(data.get("monitorEnabled")))
         set_setting("AUTOCONVERT", bool(data.get("autoConvert", False)))
+        set_setting("AUTO_COMPRESS", bool(data.get("autoCompress", False)))
         set_setting("READ_SUBDIRECTORIES", bool(data.get("readSubdirectories", False)))
         set_setting("AUTO_RENAME_MONITOR", bool(data.get("autoRenameMonitor", True)))
         set_setting("MOVE_DIRECTORY", bool(data.get("moveDirectory", False)))
@@ -7092,6 +7093,7 @@ def config_page():
         ignored_files=st["IGNORED_FILES"],
         ignored_extensions=st["IGNORED_EXTENSIONS"],
         autoConvert=st["AUTOCONVERT"],
+        autoCompress=st["AUTO_COMPRESS"],
         readSubdirectories=st["READ_SUBDIRECTORIES"],
         convertSubdirectories=st["CONVERT_SUBDIRECTORIES"],
         pdfImageFormat=str(get_user_preference("pdf_image_format", default="jpeg") or "jpeg"),

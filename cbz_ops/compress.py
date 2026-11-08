@@ -1,7 +1,7 @@
 """Compress a CBZ: shrink its page images to save disk space.
 
-Each page taller than MAX_PAGE_HEIGHT is scaled down to that height, and every
-page is re-encoded as WebP at WEBP_QUALITY. A page whose new version is not
+Every page is re-encoded as WebP at WEBP_QUALITY, at its original resolution:
+the aim is a smaller file with no visible loss, not a smaller picture. A page whose new version is not
 smaller keeps its original bytes, and a comic that would not shrink by at least
 MIN_SAVING is left untouched. Page order is kept: a page keeps its name and only
 its extension changes. Everything that is not a page (ComicInfo.xml and other
@@ -21,11 +21,11 @@ from PIL import Image
 from core.app_logging import app_logger
 from helpers import is_hidden, open_zip_for_write
 
-# Tall enough for a 12.9" iPad (2732 px) to show no visible loss; most HD
-# scans are around 3000-3300 px tall. Height, not the long edge, so a
-# double-page spread keeps the same detail as a single page.
-MAX_PAGE_HEIGHT = 2400
-WEBP_QUALITY = 80
+# Measured on two HD comics (1988x3056 JPEG pages): quality 90 at full size
+# matches the "small" downloads Batcave serves (PSNR ~42-44 dB against the
+# original) and saves 27-44%. Scaling pages down saved far more but was the
+# main source of visible softening, so pages keep their resolution.
+WEBP_QUALITY = 90
 MIN_SAVING = 0.05
 
 PAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
@@ -38,9 +38,6 @@ def _shrink_page(data):
             img.load()
             if img.mode not in ("RGB", "RGBA", "L", "LA"):
                 img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
-            if img.height > MAX_PAGE_HEIGHT:
-                width = round(img.width * MAX_PAGE_HEIGHT / img.height)
-                img = img.resize((width, MAX_PAGE_HEIGHT), Image.LANCZOS)
             out = io.BytesIO()
             img.save(out, "WEBP", quality=WEBP_QUALITY, method=4)
     except Exception as e:  # unreadable page: keep it exactly as it was
@@ -84,6 +81,11 @@ def compress_cbz(cbz_path):
     if after > before * (1 - MIN_SAVING):
         return old_size, old_size
 
+    # Encoding takes a while; if the comic was moved or replaced meanwhile (the
+    # Wanted sweep files TARGET comics away), writing would resurrect or clobber it.
+    if not os.path.exists(cbz_path) or os.path.getsize(cbz_path) != old_size:
+        raise RuntimeError("file was moved or changed while compressing; left as it is")
+
     # Built on local storage and moved into place: a failure leaves the
     # original untouched.
     with open_zip_for_write(cbz_path, zipfile.ZIP_DEFLATED) as dst:
@@ -98,6 +100,20 @@ def compress_cbz(cbz_path):
     except Exception as e:  # the comic is already written; a cache miss is harmless
         app_logger.warning(f"Compress: could not refresh thumbnail for {cbz_path}: {e}")
     return old_size, os.path.getsize(cbz_path)
+
+
+def auto_compress(path, logger):
+    """Pipeline hook: compress ``path`` if it is a CBZ. Never raises, so a
+    failure can only cost the saving, never the move that called it."""
+    if not path or not path.lower().endswith(".cbz") or not os.path.exists(path):
+        return
+    try:
+        old, new = compress_cbz(path)
+    except Exception as e:
+        logger.warning(f"Auto-compress skipped for '{path}': {e}")
+        return
+    if new < old:
+        logger.info(f"Auto-compressed '{os.path.basename(path)}': {_mb(old)} -> {_mb(new)}")
 
 
 def _mb(n):

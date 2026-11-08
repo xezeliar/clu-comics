@@ -412,6 +412,20 @@
                     </div>
                     <div class="row mt-3">
                         <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="autoCompress"
+                                    name="autoCompress" {% if autoCompress %}checked{% endif %}>
+                                <label class="form-check-label" for="autoCompress">Auto-Compress CBZ Files</label>
+                                <small class="form-text text-muted">
+                                    <br />When the folder monitor moves a comic into the Target folder (after any
+                                    CBR --> CBZ conversion), re-encode its pages as high-quality WebP to save
+                                    disk space. Comics that would not get smaller are left untouched.
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
                             <label for="skippedFiles" class="form-label">Skipped File Types</label>
                             <input type="text" name="skippedFiles" id="skippedFiles" value="{{ skippedFiles }}"
                                 class="form-control">
@@ -2339,6 +2353,7 @@
             target: document.getElementById('target')?.value || '',
             monitorEnabled: document.getElementById('monitorEnabled')?.checked || false,
             autoConvert: document.getElementById('autoConvert')?.checked || false,
+            autoCompress: document.getElementById('autoCompress')?.checked || false,
             readSubdirectories: document.getElementById('readSubdirectories')?.checked || false,
             autoRenameMonitor: document.getElementById('autoRenameMonitor')?.checked ?? true,
             moveDirectory: document.getElementById('moveDirectory')?.checked || false,

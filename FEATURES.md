@@ -74,7 +74,7 @@ Bulk operations that run across a whole folder — the core of what CLU was buil
 - **Rebuild All Files** — rewrite archive structure so every file in a directory is consistent.
 - **Missing Issue Check** — find gaps in a series based on the issues present on disk.
 - **Enhance Images** — batch contrast, brightness and sharpening adjustments.
-- **Compress CBZ Files** — shrink every CBZ in a folder by scaling pages over 2400 px tall down and re-encoding them as WebP; comics that would not shrink are left untouched.
+- **Compress CBZ Files** — shrink every CBZ in a folder by re-encoding its pages as high-quality WebP at full resolution; comics that would not shrink are left untouched.
 - **Update ComicInfo.xml** — batch field updates across every file in a directory.
 
 📖 [Directory features docs](https://clucomics.org/features/directory-features/) · [Convert](https://clucomics.org/features/directory-features/convert/) · [Rename](https://clucomics.org/features/directory-features/rename/) · [PDF to CBZ](https://clucomics.org/features/directory-features/pdf/) · [Missing issues](https://clucomics.org/features/directory-features/missing/)
@@ -180,6 +180,7 @@ Point CLU at a downloads folder and let it file new comics automatically.
 
 - **Auto-rename** new arrivals using your naming pattern.
 - **Auto-convert to CBZ** as files land.
+- **Auto-compress CBZ** (optional, off by default) — after a comic reaches the Target folder and any CBR → CBZ conversion, its pages are re-encoded as high-quality WebP to save space.
 - **Always unpacks archives** dropped in the watch folder — ZIP and RAR, including hybrid and multipart releases. An archive of pages becomes a CBZ; a pack of comics is extracted.
 - **Process sub-directories** and move them into the target library.
 - **Custom naming patterns** for the destination.

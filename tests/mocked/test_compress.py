@@ -38,7 +38,7 @@ def no_thumbnail_cache():
 class TestCompressCbz:
 
     def test_shrinks_and_converts_pages(self, big_cbz):
-        from cbz_ops.compress import compress_cbz, MAX_PAGE_HEIGHT
+        from cbz_ops.compress import compress_cbz
 
         old, new = compress_cbz(str(big_cbz))
 
@@ -49,12 +49,11 @@ class TestCompressCbz:
             # Same order, same stems; pages now WebP.
             assert names == ["ComicInfo.xml", "001.webp", "002.webp", "003.webp"]
             assert zf.read("ComicInfo.xml") == COMICINFO
-            with Image.open(io.BytesIO(zf.read("001.webp"))) as img:
-                assert img.format == "WEBP"
-                assert img.size == (800, MAX_PAGE_HEIGHT)
-            # Pages under the cap keep their size, spreads included.
-            with Image.open(io.BytesIO(zf.read("003.webp"))) as img:
-                assert img.size == (2000, 1500)
+            # Pages keep their resolution, spreads included.
+            for name, size in (("001.webp", (1000, 3000)), ("003.webp", (2000, 1500))):
+                with Image.open(io.BytesIO(zf.read(name))) as img:
+                    assert img.format == "WEBP"
+                    assert img.size == size
 
     def test_leaves_already_small_file_untouched(self, tmp_path):
         from cbz_ops.compress import compress_cbz
@@ -113,3 +112,70 @@ class TestCompressPath:
         assert failed == 1
         with zipfile.ZipFile(big_cbz) as zf:
             assert "001.webp" in zf.namelist()
+
+
+class TestAutoCompress:
+    """The pipeline hook the folder monitor calls after moving a comic to TARGET."""
+
+    def test_compresses_cbz_and_logs(self, big_cbz):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+
+        old = os.path.getsize(big_cbz)
+        logger = MagicMock()
+        auto_compress(str(big_cbz), logger)
+
+        assert os.path.getsize(big_cbz) < old
+        assert "Auto-compressed" in logger.info.call_args[0][0]
+
+    def test_ignores_non_cbz_and_missing(self, tmp_path):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+
+        cbr = tmp_path / "x.cbr"
+        cbr.write_bytes(b"rar")
+        logger = MagicMock()
+        auto_compress(str(cbr), logger)
+        auto_compress(str(tmp_path / "gone.cbz"), logger)
+        auto_compress(None, logger)
+
+        assert cbr.read_bytes() == b"rar"
+        logger.warning.assert_not_called()
+
+    def test_failure_is_logged_never_raised(self, big_cbz):
+        from unittest.mock import MagicMock
+        from cbz_ops.compress import auto_compress
+
+        logger = MagicMock()
+        with patch("cbz_ops.compress.compress_cbz", side_effect=OSError("disk full")):
+            auto_compress(str(big_cbz), logger)
+        assert "disk full" in logger.warning.call_args[0][0]
+
+    def test_file_changed_mid_compress_is_not_overwritten(self, big_cbz):
+        from cbz_ops import compress
+
+        real = compress._shrink_page
+        calls = []
+
+        def shrink_then_replace(data):
+            calls.append(1)
+            result = real(data)
+            if len(calls) == 3:  # the Wanted sweep replaces the file mid-encode
+                big_cbz.write_bytes(b"new content")
+            return result
+
+        with patch.object(compress, "_shrink_page", shrink_then_replace):
+            with pytest.raises(RuntimeError):
+                compress.compress_cbz(str(big_cbz))
+        assert big_cbz.read_bytes() == b"new content"
+
+
+def test_monitor_compresses_after_conversion_when_enabled():
+    """Structural: the hook sits after the CBR->CBZ block, before the move is
+    reported, and is gated on the setting (monitor.py cannot run in tests)."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[2] / "monitor.py").read_text()
+    hook = src.index("auto_compress(final_target_path, monitor_logger)")
+    assert src.index("convert_to_cbz(target_path)") < hook < src.index("moved = True", hook)
+    assert "if self.auto_compress:" in src[hook - 80:hook]
+    assert 'self.auto_compress = get_bool("AUTO_COMPRESS")' in src
