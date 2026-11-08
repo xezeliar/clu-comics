@@ -177,7 +177,10 @@ def test_monitor_compresses_after_conversion_when_enabled():
     src = (pathlib.Path(__file__).resolve().parents[2] / "monitor.py").read_text()
     hook = src.index("auto_compress(final_target_path, monitor_logger)")
     assert src.index("convert_to_cbz(target_path)") < hook < src.index("moved = True", hook)
-    assert "if self.auto_compress:" in src[hook - 80:hook]
+    guard = src.rindex("if self.auto_compress:", 0, hook)
+    # The compress call is inside that block (nothing dedents back out of it first).
+    between = src[guard:hook].split("\n")[1:]
+    assert all(line.startswith("                ") or not line.strip() for line in between)
     assert 'self.auto_compress = get_bool("AUTO_COMPRESS")' in src
 
 
