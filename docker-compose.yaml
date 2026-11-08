@@ -1,7 +1,7 @@
 version: '3.9'
 services:
     comic-utils:
-        image: allaboutduncan/comic-utils-web:latest
+        image: xezeliars/comic-utils-web:latest
 
         container_name: comic-utils
         logging:
@@ -14,17 +14,20 @@ services:
             - '5577:5577'
         volumes:
             - '/var/run/docker.sock:/tmp/docker.sock:ro' # do not change this line
-            - '/path/to/local/config:/config' # Maps local folder to container
             ## update the line below to map to your library.
             ## '/data' is the default library path. Any other path (e.g. '/comics')
             ## also works once it is set under Settings -> Libraries.
-            - "/e/Comics:/data"
+            - 'D:/clu-comics/Comics:/data/comics'
             ## Additional folder if you want to use Folder Monitoring.
-            - "/f/downloads:/downloads"
+            - 'D:/clu-comics/Downloads:/downloads'
             - 'config-volume:/config'
-            - '/path/to/cache:/cache' # Maps local folder for thumbnail cache (the SQLite DB lives in /config)
+            - 'D:/clu-comics/cache:/cache' # Maps local folder for thumbnail cache (the SQLite DB lives in /config)
         environment:
             - FLASK_ENV=development
+            - MONITOR=yes
+            - PUID=1000
+            - PGID=1000
+            - UMASK=000
             ## Optional: Set username and password to require login
             # - CLU_USERNAME=admin
             # - CLU_PASSWORD=changeme
@@ -54,8 +57,8 @@ services:
         #networks:
         #    - gcd-network
 
-#volumes:
-#  config-volume:
+volumes:
+ config-volume:
 
 #networks:
 #  gcd-network:
