@@ -888,6 +888,20 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
       enhanceItem.appendChild(enhanceLink);
       dropdownMenu.appendChild(enhanceItem);
 
+      // Compress option: shrink the page images of every CBZ in this folder
+      const compressDirItem = document.createElement("li");
+      const compressDirLink = document.createElement("a");
+      compressDirLink.className = "dropdown-item";
+      compressDirLink.href = "#";
+      compressDirLink.innerHTML = '<i class="bi bi-file-zip me-2"></i>Compress CBZ Files';
+      compressDirLink.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        executeScriptOnDirectory('compress_dir', fullPath, panel);
+      };
+      compressDirItem.appendChild(compressDirLink);
+      dropdownMenu.appendChild(compressDirItem);
+
       // Smart Rename option
       const smartRenameItem = document.createElement("li");
       const smartRenameLink = document.createElement("a");
@@ -1124,6 +1138,22 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
       };
       enhanceItem.appendChild(enhanceLink);
       dropdownMenu.appendChild(enhanceItem);
+
+      // Compress option: shrink the page images (CBZ only)
+      if (fullPath.toLowerCase().endsWith('.cbz')) {
+        const compressItem = document.createElement("li");
+        const compressLink = document.createElement("a");
+        compressLink.className = "dropdown-item";
+        compressLink.href = "#";
+        compressLink.textContent = "Compress (smaller file)";
+        compressLink.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          executeScriptOnFile('compress', fullPath, panel);
+        };
+        compressItem.appendChild(compressLink);
+        dropdownMenu.appendChild(compressItem);
+      }
 
       // Add Blank to End option
       const addBlankItem = document.createElement("li");

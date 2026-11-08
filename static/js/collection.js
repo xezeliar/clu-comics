@@ -2132,6 +2132,7 @@ function renderGrid(items) {
                     '.action-edit': () => initEditMode(item.path),
                     '.action-rebuild': () => executeScript('single_file', item.path),
                     '.action-enhance': () => executeScript('enhance_single', item.path),
+                    '.action-compress': () => executeScript('compress', item.path),
                     '.action-metadata': () => fetchMetadataCollection(item.path, item.name),
                     '.action-force-metadata': () => forceMetadataCollection(item.path, item.name),
                     '.action-set-read-date': () => openSetReadDateModal(item.path, readIssuesSet.has(item.path)),

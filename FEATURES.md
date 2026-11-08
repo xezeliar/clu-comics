@@ -74,6 +74,7 @@ Bulk operations that run across a whole folder — the core of what CLU was buil
 - **Rebuild All Files** — rewrite archive structure so every file in a directory is consistent.
 - **Missing Issue Check** — find gaps in a series based on the issues present on disk.
 - **Enhance Images** — batch contrast, brightness and sharpening adjustments.
+- **Compress CBZ Files** — shrink every CBZ in a folder by scaling pages over 2400 px tall down and re-encoding them as WebP; comics that would not shrink are left untouched.
 - **Update ComicInfo.xml** — batch field updates across every file in a directory.
 
 📖 [Directory features docs](https://clucomics.org/features/directory-features/) · [Convert](https://clucomics.org/features/directory-features/convert/) · [Rename](https://clucomics.org/features/directory-features/rename/) · [PDF to CBZ](https://clucomics.org/features/directory-features/pdf/) · [Missing issues](https://clucomics.org/features/directory-features/missing/)
@@ -90,6 +91,7 @@ A full CBZ editor in the browser — no unzipping, no image editor, no re-zippin
 - **Combine CBZ** — merge multiple files into one.
 - **Single-file rebuild / convert** — CBR to CBZ for one file with live progress reporting.
 - **Enhance images** — contrast, brightness and blur adjustments for a single file.
+- **Compress** — the same page shrinking for a single CBZ.
 - **Read date** — set or correct an issue's read date.
 - **Delete file**, with a trash can and restore manifest so deletions are recoverable.
 

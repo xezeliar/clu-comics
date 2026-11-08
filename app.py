@@ -7223,6 +7223,7 @@ def stream_logs(script_type):
         "delete",
         "enhance_single",
         "add",
+        "compress",
     ]
 
     # Check if the correct parameter is passed for single_file scripts
@@ -7318,13 +7319,17 @@ def stream_logs(script_type):
         "missing",
         "enhance_dir",
         "comicinfo",
+        "compress_dir",
     ]:
         if not directory or not os.path.isdir(directory):
             return Response("Invalid or missing directory path.", status=400)
 
         # Scripts in cbz_ops/ package vs root
         cbz_ops_scripts = ["rebuild", "rename", "convert", "pdf", "enhance_dir"]
-        if script_type in cbz_ops_scripts:
+        if script_type == "compress_dir":
+            # One module handles a file or a directory.
+            script_cmd = ["-m", "cbz_ops.compress"]
+        elif script_type in cbz_ops_scripts:
             script_cmd = ["-m", f"cbz_ops.{script_type}"]
         else:
             script_cmd = [f"{script_type}.py"]
@@ -7389,7 +7394,7 @@ def stream_logs(script_type):
                                 continue
                     else:
                         # No output available, send keepalive for long operations
-                        if script_type in ["convert", "rebuild"]:
+                        if script_type in ["convert", "rebuild", "compress_dir"]:
                             yield f"data: \n\n"  # Keepalive to prevent timeout
 
             except GeneratorExit:
