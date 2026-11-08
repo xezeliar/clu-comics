@@ -1577,7 +1577,8 @@ def toggle_series_monitored(series_id):
     try:
         data = request.get_json()
         enabled = data.get("enabled", True)
-        set_series_monitored(series_id, enabled)
+        # lock: the user decided, so core.auto_monitor must not override it.
+        set_series_monitored(series_id, enabled, lock=True)
         return jsonify({"success": True})
     except Exception as e:
         app_logger.error(f"Error toggling monitored for series {series_id}: {e}")
@@ -1598,7 +1599,7 @@ def bulk_toggle_series_monitored():
                 series_ids.append(int(sid))
             except (TypeError, ValueError):
                 continue
-        updated = set_series_monitored_bulk(series_ids, enabled)
+        updated = set_series_monitored_bulk(series_ids, enabled, lock=True)
         return jsonify({"success": True, "updated": updated})
     except Exception as e:
         app_logger.error(f"Error bulk-toggling monitored: {e}")

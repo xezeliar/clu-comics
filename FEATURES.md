@@ -138,6 +138,7 @@ CLU is a comic metadata editor as well as a file tool. Metadata is written to `C
 Track ongoing series and new weekly comic releases.
 
 - **Pull List** — subscribe to series, with status color-coding, filtering, a Monitored flag with bulk multi-select toggling, and export/import.
+  - **Finished series stop being monitored on their own** — once a series has ended (Completed, Cancelled or Ended) and every issue is in its folder, Monitor is turned off: when the last issue lands, after the nightly sync, or on a Wanted refresh. It happens once per series and never over your own choice; issues marked Skipped don't count as owned.
 - **Releases** — weekly comic releases from Metron, with a publisher filter.
 - **Wanted** — issues you are missing, reconciled against what is actually on disk, with per-issue delete and re-mark-wanted.
 - **Weekly Packs** — track and grab weekly release packs, with tri-state availability and a scheduler that backfills oldest-first.

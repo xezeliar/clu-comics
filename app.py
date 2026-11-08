@@ -726,6 +726,17 @@ def scheduled_series_sync():
             f"✅ Sync completed: {success_count} updated, {skip_count} skipped, {fail_count} failed in {elapsed:.2f}s"
         )
 
+        # The sync is what learns that a series ended. Turn Monitor off for any
+        # finished series whose every issue is already in its folder (once per
+        # series, never over the user's own choice). Isolated: it must never
+        # fail the sync.
+        try:
+            from core.auto_monitor import sweep_finished_series
+
+            sweep_finished_series()
+        except Exception as e:
+            app_logger.error(f"Auto-monitor sweep failed: {e}")
+
         # Repair files tagged from a half-entered Metron record. Credits are
         # routinely added hours after a comic ships, and once ComicInfo carries
         # Notes nothing re-tags the file, so this is the only thing that fixes
@@ -3153,6 +3164,18 @@ def refresh_wanted_cache_background():
             issue_status = match_issues_to_collection(
                 mapped_path, issue_objs, series_obj
             )
+
+            # A finished series with every issue on disk stops being monitored
+            # here too (core.auto_monitor: once per series, never over the
+            # user's choice). It has nothing wanted either way.
+            try:
+                from core.auto_monitor import maybe_auto_unmonitor
+
+                maybe_auto_unmonitor(series_id, series, issue_status)
+            except Exception as e:
+                app_logger.warning(
+                    f"Auto-monitor check failed for series {series_id}: {e}"
+                )
 
             # Get manual status for this series (owned/skipped)
             manual_status = get_manual_status_for_series(series_id)

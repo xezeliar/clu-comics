@@ -649,15 +649,20 @@ class TestSyncAndMatch:
 class TestDefaultMonitorOff:
     """On import, a fully-owned Cancelled/Completed series defaults Monitor off."""
 
-    def _sync(self, tmp_path, series, match_status, *, monitored=True):
+    # The once-only / already-off / user-decided checks are one conditional
+    # UPDATE inside core.database.auto_unmonitor_series (covered against a real
+    # database in tests/integration/test_auto_monitor.py); here we only assert
+    # whether the import asks for it.
+
+    def _sync(self, tmp_path, series, match_status, *, changed=True):
         folder = str(tmp_path)
         with patch("core.database.get_series_mapping", return_value=folder), \
              patch("core.database.get_issues_for_series", return_value=[{"number": "1"}]), \
              patch("core.database.get_series_by_id", return_value=series), \
              patch("helpers.collection.match_issues_to_collection",
                    return_value=match_status), \
-             patch("core.database.get_series_monitored", return_value=monitored), \
-             patch("core.database.set_series_monitored") as set_mon:
+             patch("core.database.auto_unmonitor_series",
+                   return_value=changed) as set_mon:
             library_automap._sync_and_match(api=None, series_id=series["id"])
         return set_mon
 
@@ -665,13 +670,13 @@ class TestDefaultMonitorOff:
         series = {"id": 1, "name": "Y The Last Man", "status": "Cancelled"}
         status = {"1": {"found": True}, "2": {"found": True}}
         set_mon = self._sync(tmp_path, series, status)
-        set_mon.assert_called_once_with(1, False)
+        set_mon.assert_called_once_with(1)
 
     def test_off_when_complete_and_completed(self, tmp_path):
         series = {"id": 2, "name": "Watchmen", "status": "Completed"}
         status = {"1": {"found": True}}
         set_mon = self._sync(tmp_path, series, status)
-        set_mon.assert_called_once_with(2, False)
+        set_mon.assert_called_once_with(2)
 
     def test_left_on_when_ongoing(self, tmp_path):
         series = {"id": 3, "name": "Batman", "status": "Ongoing"}
@@ -685,17 +690,17 @@ class TestDefaultMonitorOff:
         set_mon = self._sync(tmp_path, series, status)
         set_mon.assert_not_called()
 
-    def test_no_change_when_already_unmonitored(self, tmp_path):
+    def test_already_unmonitored_is_left_to_the_database_guard(self, tmp_path):
         series = {"id": 5, "name": "Preacher", "status": "Completed"}
         status = {"1": {"found": True}}
-        set_mon = self._sync(tmp_path, series, status, monitored=False)
-        set_mon.assert_not_called()
+        set_mon = self._sync(tmp_path, series, status, changed=False)
+        set_mon.assert_called_once_with(5)
 
     def test_status_match_is_case_insensitive(self, tmp_path):
         series = {"id": 6, "name": "Sandman", "status": "COMPLETED"}
         status = {"1": {"found": True}}
         set_mon = self._sync(tmp_path, series, status)
-        set_mon.assert_called_once_with(6, False)
+        set_mon.assert_called_once_with(6)
 
 
 class TestApplyExtra:
