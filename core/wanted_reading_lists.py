@@ -153,6 +153,35 @@ def _off_cooldown(row, now, cooldown_days):
     return True
 
 
+def tracked_list_wants(series_name, issue_numbers):
+    """Which of a series' issues a tracked reading list wants, and which lists.
+
+    For the series page, which used to call every missing issue "Wanted" --
+    wrong for a Not monitored series, where only the issues a tracked list
+    still needs are searched for. Matched the way the sweep de-duplicates
+    (series name and issue number, normalised), since a reading-list entry
+    carries no series id.
+
+    Returns ``{issue_number: [list name, ...]}`` keyed by the numbers given.
+    """
+    want = _norm_series(series_name)
+    lists_by_issue = {}
+    for row in reading_list_wanted_rows():
+        if _norm_series(row.get("series")) != want:
+            continue
+        names = lists_by_issue.setdefault(_norm_issue(row.get("issue_number")), [])
+        name = row.get("reading_list_name")
+        if name and name not in names:
+            names.append(name)
+
+    out = {}
+    for number in issue_numbers or ():
+        names = lists_by_issue.get(_norm_issue(number))
+        if names:
+            out[str(number)] = names
+    return out
+
+
 def get_reading_list_wanted_items(released_only=False, today=None):
     """Wanted items derived from opted-in reading lists, de-duplicated.
 

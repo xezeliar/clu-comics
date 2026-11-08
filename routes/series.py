@@ -1184,6 +1184,23 @@ def series_view(slug):
         series_subscription = get_series_subscription(series_id)
         series_monitored = get_series_monitored(series_id)
 
+        # Issues a tracked reading list wants. For a Not monitored series these
+        # are the only missing issues that are actually searched for, so the
+        # page labels just these "Wanted" (see templates/series.html).
+        list_wants = {}
+        if mapped_path and not series_monitored:
+            from core.wanted_reading_lists import tracked_list_wants
+
+            series_name_for_lists = (
+                series_info.get("name") if isinstance(series_info, dict)
+                else getattr(series_info, "name", None)
+            )
+            list_wants = tracked_list_wants(
+                series_name_for_lists,
+                [i.get("number") if isinstance(i, dict) else getattr(i, "number", None)
+                 for i in all_issues],
+            )
+
         has_series_json = False
         if mapped_path:
             from models.series_json import SERIES_JSON_FILENAME
@@ -1209,6 +1226,7 @@ def series_view(slug):
             default_library=default_library,
             series_subscription=series_subscription,
             series_monitored=series_monitored,
+            list_wants=list_wants,
             has_series_json=has_series_json,
             char_map=load_char_map(),
         )
@@ -1477,78 +1495,27 @@ def update_series_search_aliases(series_id):
 
 @series_bp.route("/api/series/<int:series_id>/subscribe", methods=["POST"])
 def subscribe_series(series_id):
-    """Create folder, map series, and create cvinfo file."""
-    from core.database import save_series_mapping
+    """Create folder, map series, and create cvinfo file.
+
+    The body is core.series_subscribe.subscribe_series, shared with setting up
+    a reading list's series in bulk. ``monitored: false`` creates the series as
+    Not monitored (the Subscribe dialog's checkbox).
+    """
+    from core.series_subscribe import SubscribeError
+    from core.series_subscribe import subscribe_series as subscribe_to_folder
 
     data = request.get_json() or {}
     path = data.get("path", "").strip()
+    monitored = data.get("monitored", True) is not False
 
     if not path:
         return jsonify({"success": False, "error": "Path required"}), 400
 
-    # Safety net: the path comes from a user-editable field (#subscribePath) and
-    # is handed straight to os.makedirs. Sanitize each segment (never the '/'
-    # separators) so filesystem-hostile characters can't reach disk. Mirrors the
-    # client-side sanitizePathSegment() in templates/series.html.
-    from helpers import sanitize_path_segment
-
-    leading_slash = path.startswith("/")
-    segments = [sanitize_path_segment(seg) for seg in path.split("/")]
-    segments = [seg for seg in segments if seg]
-    path = ("/" if leading_slash else "") + "/".join(segments)
-
-    if not path or path == "/":
-        return jsonify({"success": False, "error": "Path required"}), 400
-
     try:
-        series = get_series_by_id(series_id)
-        if not series:
-            return jsonify({"success": False, "error": "Series not found"}), 404
-
-        os.makedirs(path, exist_ok=True)
-        app_logger.info(f"Created folder for subscription: {path}")
-
-        save_series_mapping(series, path)
-        app_logger.info(f"Subscribed series {series_id} to {path}")
-
-        # Background: pre-populate the GetComics scrape index for this series
-        # so we're ready for searches without hitting GetComics live
-        from models.getcomics import prepopulate_series_index
-        series_name = series.get("name", "")
-        if series_name:
-            prepopulate_series_index(series_name)
-
-        # Create cvinfo file with available metadata
-        cv_id = series.get("cv_id")
-        metron_id = series.get("id") or series_id
-        cvinfo_path = os.path.join(path, "cvinfo")
-
-        # Use metron.create_cvinfo_file to properly handle missing cv_id
-        success = metron.create_cvinfo_file(
-            cvinfo_path,
-            cv_id=cv_id,  # Pass None if cv_id is missing
-            series_id=metron_id,
-            publisher_name=series.get("publisher_name"),
-            start_year=series.get("year_began"),
-        )
-
-        if success:
-            if not cv_id:
-                app_logger.warning(
-                    f"Created cvinfo without ComicVine ID for series {series_id} at {cvinfo_path}"
-                )
-            else:
-                app_logger.info(f"Created cvinfo at {cvinfo_path} with CV ID {cv_id}")
-        else:
-            app_logger.error(f"Failed to create cvinfo at {cvinfo_path}")
-
-        from models.series_json import write_series_json
-        from core.series_json_builder import with_description_fallback
-        write_series_json(
-            path, with_description_fallback(series, path), api=metron.get_flask_api()
-        )
-
+        path = subscribe_to_folder(series_id, path, monitored=monitored)
         return jsonify({"success": True, "path": path})
+    except SubscribeError as e:
+        return jsonify({"success": False, "error": str(e)}), e.status
     except Exception as e:
         app_logger.error(f"Error subscribing series {series_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

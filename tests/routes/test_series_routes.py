@@ -263,10 +263,10 @@ class TestSubscribeSeries:
     @patch("models.series_json.write_series_json")
     @patch("models.getcomics.prepopulate_series_index")
     @patch("core.database.save_series_mapping", return_value=True)
-    @patch("routes.series.metron")
-    @patch("routes.series.get_series_by_id",
+    @patch("core.series_subscribe.metron")
+    @patch("core.series_subscribe.get_series_by_id",
             return_value={"id": 100, "name": "Batman"})
-    @patch("routes.series.os.makedirs")
+    @patch("core.series_subscribe.os.makedirs")
     def test_subscribe_sanitizes_path(
         self, mock_makedirs, mock_get, mock_metron, mock_save,
         mock_prepop, mock_write, client,
@@ -296,10 +296,10 @@ class TestSubscribeSeries:
     @patch("models.series_json.write_series_json")
     @patch("models.getcomics.prepopulate_series_index")
     @patch("core.database.save_series_mapping", return_value=True)
-    @patch("routes.series.metron")
-    @patch("routes.series.get_series_by_id",
+    @patch("core.series_subscribe.metron")
+    @patch("core.series_subscribe.get_series_by_id",
             return_value={"id": 100, "name": "Batman"})
-    @patch("routes.series.os.makedirs")
+    @patch("core.series_subscribe.os.makedirs")
     def test_subscribe_path_follows_character_map(
         self, mock_makedirs, mock_get, mock_metron, mock_save,
         mock_prepop, mock_write, mock_map, client,
@@ -314,12 +314,47 @@ class TestSubscribeSeries:
         assert resp.status_code == 200
         assert resp.get_json()["path"] == "/data/DC Comics/Batman - Year One and Two/v1987"
 
-    @patch("routes.series.os.makedirs")
+    @patch("core.series_subscribe.os.makedirs")
     def test_subscribe_rejects_empty_after_sanitize(self, mock_makedirs, client):
         # A path made up entirely of illegal chars collapses to empty -> 400.
         resp = client.post("/api/series/100/subscribe", json={"path": '/<>|?*/'})
         assert resp.status_code == 400
         mock_makedirs.assert_not_called()
+
+    @patch("core.series_subscribe.get_series_by_id", return_value=None)
+    @patch("core.series_subscribe.os.makedirs")
+    def test_subscribe_unknown_series_is_404(self, mock_makedirs, mock_get, client):
+        resp = client.post("/api/series/100/subscribe", json={"path": "/data/X"})
+        assert resp.status_code == 404
+        mock_makedirs.assert_not_called()
+
+    @pytest.mark.parametrize("payload, expect_off", [
+        ({}, False),
+        ({"monitored": True}, False),
+        ({"monitored": False}, True),
+    ])
+    @patch("core.database.set_series_monitored", return_value=True)
+    @patch("models.series_json.write_series_json")
+    @patch("models.getcomics.prepopulate_series_index")
+    @patch("core.database.save_series_mapping", return_value=True)
+    @patch("core.series_subscribe.metron")
+    @patch("core.series_subscribe.get_series_by_id",
+           return_value={"id": 100, "name": "Batman"})
+    @patch("core.series_subscribe.os.makedirs")
+    def test_monitor_checkbox(
+        self, mock_makedirs, mock_get, mock_metron, mock_save,
+        mock_prepop, mock_write, mock_set, client, payload, expect_off,
+    ):
+        """Unticked, the series starts Not monitored, locked as the user's choice."""
+        mock_metron.create_cvinfo_file.return_value = True
+        mock_metron.get_flask_api.return_value = None
+        resp = client.post("/api/series/100/subscribe",
+                           json={"path": "/data/DC/Batman", **payload})
+        assert resp.status_code == 200
+        if expect_off:
+            mock_set.assert_called_once_with(100, False, lock=True)
+        else:
+            mock_set.assert_not_called()
 
 
 class TestDeleteSeriesMapping:
@@ -820,6 +855,78 @@ class TestSeriesPageSearchYear:
         # Seeded issues have store_date 2020-mm-10.
         assert 'data-issue-year="2020"' in html
         assert "searchGetComics(this.dataset.series, this.dataset.issue, this.dataset.year)" in html
+
+
+class TestSeriesPageWantedLabels:
+    """"Wanted" on the series page means "searched for".
+
+    It used to label every missing issue Wanted, so a series set up as Not
+    monitored for an event looked as if its whole run was wanted. Seeded Batman
+    #1-3 are all missing (their folder does not exist in tests).
+    """
+
+    WANTED_BADGE = 'badge bg-warning text-dark ms-2'
+    MISSING_BADGE = '>Missing</span>'
+
+    @staticmethod
+    def _page(app, client):
+        app.jinja_env.globals["generate_series_slug"] = (
+            lambda name, sid, volume=None: f"{sid}-slug"
+        )
+        # The footer's counts render only for a folder that exists: pretend it
+        # does, holding none of the three issues.
+        nothing_found = {str(n): {"found": False, "file_path": None} for n in (1, 2, 3)}
+        with patch("routes.series.os.path.isdir", return_value=True), \
+             patch("routes.series.match_issues_to_collection", return_value=nothing_found):
+            resp = client.get("/series/batman-v2020-100")
+        assert resp.status_code == 200
+        return resp.get_data(as_text=True)
+
+    @staticmethod
+    def _tracked_list(*numbers):
+        from core.database import (
+            add_reading_list_entry, create_reading_list, set_reading_list_track_wanted,
+        )
+
+        list_id = create_reading_list("Batman Event")
+        for number in numbers:
+            add_reading_list_entry(list_id, {"series": "Batman", "issue_number": number})
+        set_reading_list_track_wanted(list_id, True)
+
+    def test_monitored_series_wants_every_missing_issue(self, app, client_with_data):
+        html = self._page(app, client_with_data)
+        assert html.count(self.WANTED_BADGE) == 3
+        assert self.MISSING_BADGE not in html
+        assert "3 wanted" in html
+
+    def test_not_monitored_series_wants_nothing_on_its_own(self, app, client_with_data):
+        from core.database import set_series_monitored
+
+        set_series_monitored(100, False)
+        html = self._page(app, client_with_data)
+        assert html.count(self.WANTED_BADGE) == 0
+        assert html.count(self.MISSING_BADGE) == 3
+        assert "0 wanted" in html and "3 missing" in html
+
+    def test_not_monitored_series_wants_only_what_a_tracked_list_needs(self, app, client_with_data):
+        from core.database import set_series_monitored
+
+        set_series_monitored(100, False)
+        self._tracked_list("002")  # zero-padded in the list, "2" in the series
+        html = self._page(app, client_with_data)
+        assert html.count(self.WANTED_BADGE) == 1
+        assert 'title="Wanted by reading list: Batman Event"' in html
+        assert html.count(self.MISSING_BADGE) == 2
+        assert "1 wanted" in html and "2 missing" in html
+
+    def test_an_untracked_list_wants_nothing(self, app, client_with_data):
+        from core.database import add_reading_list_entry, create_reading_list, set_series_monitored
+
+        set_series_monitored(100, False)
+        list_id = create_reading_list("Just Reading")
+        add_reading_list_entry(list_id, {"series": "Batman", "issue_number": "2"})
+        html = self._page(app, client_with_data)
+        assert html.count(self.WANTED_BADGE) == 0
 
 
 class _MetronSeries:

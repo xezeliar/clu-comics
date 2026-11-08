@@ -244,6 +244,13 @@
                 title="Re-run file matching for this list (manual mappings are kept)">
                 <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Re-match
             </button></li>
+            {# Subscribe every series this list touches in one go
+               (core/series_setup.py, static/js/reading-list-series-setup.js). #}
+            <li><button class="dropdown-item" id="seriesSetupBtn"
+                onclick="CLU.openSeriesSetup({{ reading_list.id }})"
+                title="Create folders, cvinfo and series.json for every series in this list">
+                <i class="bi bi-folder-plus me-2" aria-hidden="true"></i>Set up series
+            </button></li>
             {% endif %}
         {% endif %}
     {% endcall %}
@@ -509,6 +516,81 @@
         </div>
     </div>
 </div>
+
+<!-- Set Up Series Modal (static/js/reading-list-series-setup.js) -->
+<div class="modal fade" id="seriesSetupModal" tabindex="-1" aria-labelledby="seriesSetupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="seriesSetupModalLabel">
+                    <i class="bi bi-folder-plus me-2" aria-hidden="true"></i>Set up series
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Creates a folder, <code>cvinfo</code> and <code>series.json</code> for each ticked series,
+                    the same as Subscribe. Series already on your Pull List are left as they are.
+                </p>
+                <div id="seriesSetupProgress" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status" aria-hidden="true"></div>
+                    <div class="mt-2 text-muted" id="seriesSetupProgressText">Finding series on Metron…</div>
+                </div>
+                <div id="seriesSetupBody" class="d-none">
+                    <div class="row g-3 mb-3 align-items-end">
+                        {% if libraries and libraries|length > 1 %}
+                        <div class="col-md-5">
+                            <label class="form-label fw-bold" for="seriesSetupLibrary">Library</label>
+                            <select class="form-select form-select-sm" id="seriesSetupLibrary">
+                                {% for lib in libraries %}
+                                <option value="{{ lib.path }}">{{ lib.name }} ({{ lib.path }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+                        <div class="col-md">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="seriesSetupMonitored" autocomplete="off">
+                                <label class="form-check-label" for="seriesSetupMonitored">Monitor these series</label>
+                                <div class="form-text">Leave unticked to want only this list's issues, not whole runs.</div>
+                            </div>
+                        </div>
+                        <div class="col-md">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="seriesSetupTrackWanted" checked autocomplete="off">
+                                <label class="form-check-label" for="seriesSetupTrackWanted">Track this list's issues as wanted</label>
+                                <div class="form-text">Missing issues show on Wanted and are searched nightly.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th scope="col" style="width: 2rem;"><span class="visually-hidden">Set up</span></th>
+                                    <th scope="col">Series</th>
+                                    <th scope="col">Issues in this list</th>
+                                    <th scope="col">Folder</th>
+                                </tr>
+                            </thead>
+                            <tbody id="seriesSetupRows"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="seriesSetupResults" class="d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="seriesSetupCancelBtn">Cancel</button>
+                <button type="button" class="btn btn-success" id="seriesSetupApplyBtn" disabled>
+                    <i class="bi bi-folder-plus me-1" aria-hidden="true"></i><span>Set up</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    window._cluSeriesSetupDefaultLibrary = {{ (libraries[0].path if libraries else '/data')|tojson }};
+</script>
 {% endif %}
 
 <script>
@@ -529,4 +611,5 @@
 <script src="{{ url_for('static', filename='js/clu-utils.js') }}?v={{ range(1, 10000) | random }}"></script>
 <script src="{{ url_for('static', filename='js/reader.js') }}?v={{ range(1, 10000) | random }}"></script>
 <script src="{{ url_for('static', filename='js/reading_list.js') }}?v={{ range(1, 10000) | random }}"></script>
+<script src="{{ url_for('static', filename='js/reading-list-series-setup.js') }}?v={{ range(1, 10000) | random }}"></script>
 {% endblock %}
