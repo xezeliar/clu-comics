@@ -42,6 +42,9 @@ SETTINGS_SCHEMA = {
     "MONITOR_ENABLED": _s("monitor_enabled", _B, False, "file_processing"),
     "AUTOCONVERT": _s("autoconvert", _B, False, "file_processing"),
     "AUTO_COMPRESS": _s("auto_compress", _B, False, "file_processing"),
+    # How hard Compress squeezes a CBZ: full | balanced | small (cbz_ops.compress.LEVELS).
+    # Unknown values read as "full" there, so a bad stored value is harmless.
+    "COMPRESS_LEVEL": _s("compress_level", _S, "full", "file_processing"),
     "READ_SUBDIRECTORIES": _s("read_subdirectories", _B, False, "file_processing"),
     "CONVERT_SUBDIRECTORIES": _s("convert_subdirectories", _B, False, "file_processing"),
     "MOVE_DIRECTORY": _s("move_directory", _B, False, "file_processing"),

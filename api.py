@@ -36,6 +36,7 @@ from core.config import load_config, load_flask_config, get_watch_dir, get_targe
 from core.settings import get_bool, get_int, get_list, get_setting
 from core.download_utils import download_notification_body
 from core.download_runs import set_download_outcome
+from core import compress_status
 
 # Load config and initialize Flask app.
 app = Flask(__name__)
@@ -614,6 +615,13 @@ def process_download(task):
                                     continue
                                 total += 1
                         if total == 0:
+                            # WATCH empties the moment the monitor moves the file
+                            # into TARGET, but Auto-Compress is still rewriting it
+                            # there. Filing it now would move it mid-compress and
+                            # the compress would give up, so wait it out.
+                            target_dir = get_target_dir() or "/downloads/processed"
+                            if compress_status.is_busy(target_dir):
+                                continue
                             monitor_logger.info("WATCH folder empty, checking wanted issues")
                             from app import process_incoming_wanted_issues
                             process_incoming_wanted_issues()

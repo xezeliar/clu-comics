@@ -2,6 +2,7 @@ import os
 import re
 import logging
 from core.app_logging import app_logger
+from core import compress_status
 
 
 # Matches any year token variant ({volume_year}/{cover_year}/{issue_year}/
@@ -771,6 +772,12 @@ def collect_target_candidates(
     restricted = library_root_for(target_folder) is not None
     protected = _resolve_mapped_dirs(mapped_dirs)
     skipped = 0
+    # Read once per scan, not per file. A comic Auto-Compress is rewriting must
+    # not be filed away mid-rewrite: the compress would refuse to write and the
+    # filed copy would keep its original size. The caller (api.py) waits for the
+    # compress and runs the pass again, so it is filed afterwards, not forgotten.
+    compressing = compress_status.compressing_paths()
+    deferred = 0
 
     for root, dirs, filenames in os.walk(target_folder):
         if restricted:
@@ -819,7 +826,13 @@ def collect_target_candidates(
                     f"  SKIP: {os.path.join(root, f)} (already converted to .cbz)"
                 )
                 continue
+            if compressing and os.path.normpath(os.path.join(root, f)) in compressing:
+                deferred += 1
+                continue
             files.append((f, os.path.join(root, f)))
+
+    if deferred:
+        app_logger.info(f"Left {deferred} comic(s) in TARGET: still being compressed")
 
     # One line per scan, not per skipped folder -- this runs once per completed
     # download, and a per-item line here is what filled 930 lines of a reported

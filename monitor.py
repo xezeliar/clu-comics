@@ -12,6 +12,7 @@ from watchdog.events import FileSystemEventHandler
 from cbz_ops.rename import rename_file, clean_directory_name
 from cbz_ops.single_file import convert_to_cbz
 from cbz_ops.compress import auto_compress
+from core import compress_status
 from core.config import load_config, get_watch_dir, get_target_dir
 from core.settings import get_bool, get_int, get_list
 from helpers import is_hidden, extract_rar_with_unar, match_parent_permissions
@@ -1062,6 +1063,15 @@ class DownloadCompleteHandler(FileSystemEventHandler):
                 cleaned_target_dir = os.path.join(parent, stripped)
         target_path = os.path.join(cleaned_target_dir, os.path.basename(target_path))
 
+        # Paths this move has claimed as "being compressed" (core.compress_status).
+        # WATCH reads as empty the instant the file lands in TARGET, and that is
+        # what api.py waits for before filing TARGET into the library -- so the
+        # claim must exist BEFORE the move, not when the compress starts, or the
+        # comic is filed away mid-compress (the compress then refuses to write
+        # and the filed copy keeps its original size). Released after the
+        # compress step, whatever happens.
+        claimed = []
+
         try:
             # Ensure that the target sub-directory exists.
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -1074,6 +1084,10 @@ class DownloadCompleteHandler(FileSystemEventHandler):
                 monitor_logger.warning(f"File already exists at destination. Using unique filename to prevent overwrite.")
                 monitor_logger.info(f"Original target: {original_target_path}")
                 monitor_logger.info(f"New target: {target_path}")
+
+            if self.auto_compress:
+                compress_status.begin(target_path)
+                claimed.append(target_path)
 
             move_download(filepath, target_path)
             monitor_logger.info(f"Moved file to: {target_path}")
@@ -1129,6 +1143,9 @@ class DownloadCompleteHandler(FileSystemEventHandler):
                 monitor_logger.warning(f"File move verification failed: {target_path} not found.")
 
             if self.auto_compress:
+                if final_target_path != target_path:  # a CBR became a CBZ: claim that name too
+                    compress_status.begin(final_target_path)
+                    claimed.append(final_target_path)
                 auto_compress(final_target_path, monitor_logger)
 
             # Make the moved/converted file as accessible as its library folder,
@@ -1146,6 +1163,9 @@ class DownloadCompleteHandler(FileSystemEventHandler):
             # Allow filesystem update
             time.sleep(1)
             moved = False
+
+        for path in claimed:
+            compress_status.end(path)
 
         # Remove empty directories along the processed file's source path,
         # but only those in the chain up to the main watch folder.

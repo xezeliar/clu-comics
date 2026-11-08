@@ -78,6 +78,7 @@ from core.config import (
 from core.settings import all_settings, get_bool, get_int, get_list, get_setting
 from core.auth import enforce_path_access, current_user, filter_paths_for_user, file_op_refusal
 from helpers.library import is_allowed_path
+from cbz_ops.compress import normalize_level as normalize_compress_level
 from cbz_ops.edit import (
     get_edit_modal,
     save_cbz,
@@ -6657,6 +6658,9 @@ def save_file_processing_config():
             set_setting("MONITOR_ENABLED", bool(data.get("monitorEnabled")))
         set_setting("AUTOCONVERT", bool(data.get("autoConvert", False)))
         set_setting("AUTO_COMPRESS", bool(data.get("autoCompress", False)))
+        # Absent means "not on this form", never "reset to full".
+        if "compressLevel" in data:
+            set_setting("COMPRESS_LEVEL", normalize_compress_level(data.get("compressLevel")))
         set_setting("READ_SUBDIRECTORIES", bool(data.get("readSubdirectories", False)))
         set_setting("AUTO_RENAME_MONITOR", bool(data.get("autoRenameMonitor", True)))
         set_setting("MOVE_DIRECTORY", bool(data.get("moveDirectory", False)))
@@ -7101,6 +7105,7 @@ def config_page():
         ignored_extensions=st["IGNORED_EXTENSIONS"],
         autoConvert=st["AUTOCONVERT"],
         autoCompress=st["AUTO_COMPRESS"],
+        compressLevel=normalize_compress_level(st["COMPRESS_LEVEL"]),
         readSubdirectories=st["READ_SUBDIRECTORIES"],
         convertSubdirectories=st["CONVERT_SUBDIRECTORIES"],
         pdfImageFormat=str(get_user_preference("pdf_image_format", default="jpeg") or "jpeg"),

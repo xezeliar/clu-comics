@@ -1,9 +1,10 @@
 """Compress a CBZ: shrink its page images to save disk space.
 
-Every page is re-encoded as WebP at WEBP_QUALITY, at its original resolution:
-the aim is a smaller file with no visible loss, not a smaller picture. A page whose new version is not
-smaller keeps its original bytes, and a comic that would not shrink by at least
-MIN_SAVING is left untouched. Page order is kept: a page keeps its name and only
+Every page is re-encoded as WebP. How hard is the ``compress_level`` setting
+(see LEVELS): "full" keeps the resolution at quality 90, "balanced" keeps it at
+quality 80, "small" also limits a page's longest side to 1600 px at quality 75.
+A page whose new version is not smaller keeps its original bytes, and a comic
+that would not shrink by at least MIN_SAVING is left untouched. Page order is kept: a page keeps its name and only
 its extension changes. Everything that is not a page (ComicInfo.xml and other
 files) is copied byte-for-byte.
 
@@ -21,27 +22,56 @@ from PIL import Image
 
 from core import compress_status
 from core.app_logging import app_logger
+from core.settings import get_setting
 from helpers import is_hidden, open_zip_for_write
 
-# Measured on two HD comics (1988x3056 JPEG pages): quality 90 at full size
-# matches the "small" downloads Batcave serves (PSNR ~42-44 dB against the
-# original) and saves 27-44%. Scaling pages down saved far more but was the
-# main source of visible softening, so pages keep their resolution.
-WEBP_QUALITY = 90
+# level -> (WebP quality, longest side in px or None to keep the resolution).
+# Measured on HD comics (1988x3056 JPEG pages), as a share of the original size:
+#   full      q90, full size      ~68%   no visible loss; scaling down was the
+#                                        main source of visible softening
+#   balanced  q80, full size      ~43%
+#   small     q75, longest 1600   ~12%   what Batcave serves (1041x1600 pages);
+#                                        fine on a phone or tablet, softer on a
+#                                        large monitor, and not reversible
+LEVELS = {
+    "full": (90, None),
+    "balanced": (80, None),
+    "small": (75, 1600),
+}
+DEFAULT_LEVEL = "full"
 MIN_SAVING = 0.05
 
 PAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 
 
-def _shrink_page(data):
+def normalize_level(value):
+    """A valid level name for ``value``; anything unknown is the default, so a
+    stale or hand-edited preference can never make a compress fail."""
+    level = str(value or "").strip().lower()
+    return level if level in LEVELS else DEFAULT_LEVEL
+
+
+def get_level():
+    """The configured level, asked per call: never a module constant, because the
+    monitor, the web worker and the manual subprocess must all follow a change."""
+    return normalize_level(get_setting("COMPRESS_LEVEL"))
+
+
+def _shrink_page(data, level=DEFAULT_LEVEL):
     """Return (bytes, ext) for a smaller version of one page, or None to keep it."""
+    quality, max_side = LEVELS[normalize_level(level)]
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.load()
             if img.mode not in ("RGB", "RGBA", "L", "LA"):
                 img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+            longest = max(img.size)
+            if max_side and longest > max_side:  # never upscale a smaller page
+                scale = max_side / longest
+                img = img.resize((max(1, round(img.width * scale)),
+                                  max(1, round(img.height * scale))), Image.LANCZOS)
             out = io.BytesIO()
-            img.save(out, "WEBP", quality=WEBP_QUALITY, method=4)
+            img.save(out, "WEBP", quality=quality, method=4)
     except Exception as e:  # unreadable page: keep it exactly as it was
         app_logger.debug(f"Compress: keeping unreadable page as-is: {e}")
         return None
@@ -67,6 +97,7 @@ def compress_cbz(cbz_path):
 
 
 def _compress_cbz(cbz_path):
+    level = get_level()  # once per comic, so one file is never half one level, half another
     old_size = os.path.getsize(cbz_path)
     with zipfile.ZipFile(cbz_path) as src:
         members = [m for m in src.infolist() if not m.is_dir()]
@@ -83,7 +114,7 @@ def _compress_cbz(cbz_path):
             if is_page:
                 done += 1
                 print(f"Processing page {done}/{len(pages)}", flush=True)
-                shrunk = _shrink_page(data)
+                shrunk = _shrink_page(data, level)
                 if shrunk:
                     new_name = os.path.splitext(name)[0] + shrunk[1]
                     # Never collide with another member (e.g. 01.jpg + 01.webp).
@@ -126,8 +157,8 @@ def auto_compress(path, logger):
     # A large issue takes tens of seconds; without a start line the log is silent
     # for the whole run and it looks as though nothing is happening.
     try:
-        logger.info(f"Auto-compressing '{name}' ({_mb(os.path.getsize(path))}); "
-                    "it is marked as compressing until this finishes")
+        logger.info(f"Auto-compressing '{name}' ({_mb(os.path.getsize(path))}, level "
+                    f"{get_level()}); it is marked as compressing until this finishes")
         started = time.monotonic()
         old, new = compress_cbz(path)
     except Exception as e:
@@ -157,6 +188,7 @@ def compress_path(target):
 
     failed = 0
     saved = 0
+    print(f"Compression level: {get_level()}", flush=True)
     for i, path in enumerate(files, 1):
         name = os.path.basename(path)
         print(f"Processing file: {name} ({i}/{len(files)})", flush=True)
