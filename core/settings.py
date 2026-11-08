@@ -106,6 +106,11 @@ SETTINGS_SCHEMA = {
     # Site-default page width (core/page_width.py); users override it on
     # /account. Never in an ini.
     "PAGE_WIDTH": _s("page_width", _S, "auto", "personalization"),
+    # Comic reader (static/js/reader.js, routes/reading.py /api/reader-prefs).
+    # Site defaults; each account overrides them with a per-user setting of the
+    # same pref name, written by the reader's own toolbar buttons.
+    "READER_MODE": _s("reader_mode", _S, "paged", "personalization"),
+    "READER_FIT": _s("reader_fit", _S, "width", "personalization"),
     # Guided Setup (core/setup_state.py). Never in an ini; init_db stamps the
     # state once, and "" (undecided) deliberately does not redirect.
     "GUIDED_SETUP_STATE": _s("guided_setup_state", _S, "", "onboarding"),

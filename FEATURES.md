@@ -42,6 +42,9 @@ Browse a digital comic collection the way you would in a comic server, without l
 CLU includes a browser-based comic reader, so a CLU install is usable on its own without a separate comic server.
 
 - **Page-by-page web reader** for CBZ files.
+- **Fits the window on open** — a page fills the window's width by default (no empty side margins on a wide screen). Read down it with the wheel, `W`/`S` or `Space`, and the next flick turns the page. The zoom buttons step from that fit, and a toolbar button switches to fitting the whole page instead.
+- **Continuous scroll (webtoon) mode** — a toolbar button stacks every page into one vertical scroll with no gap or page turn. Pages load as you approach them and are released behind you, so a 100-page issue stays light. The page counter, page menu, progress bar, resume position and mark-as-read all follow the page you are on, and the zoom buttons narrow or widen the column.
+- Both choices are **remembered per account**; the site defaults (paged, fit to width) are the `READER_MODE` and `READER_FIT` settings.
 - **Resume where you left off** — reading positions are saved per user and restored when you reopen an issue.
 - **Mark as read** and automatic completion tracking.
 - **Continue Reading** and **On the Stack** views surface what is in progress.

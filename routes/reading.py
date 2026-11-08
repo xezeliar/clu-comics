@@ -29,9 +29,68 @@ from core.database import (
     save_reading_position,
     get_reading_position,
     delete_reading_position,
+    get_user_setting,
+    set_user_setting,
 )
+from core.settings import get_setting
 
 reading_bp = Blueprint("reading", __name__)
+
+# How the reader lays pages out. ``paged`` is one page at a time (Swiper);
+# ``scroll`` is one continuous vertical strip (webtoon style). ``fit`` is what a
+# page is scaled to on open: the window's width (no side margins) or its height
+# (the whole page visible).
+READER_MODES = ("paged", "scroll")
+READER_FITS = ("width", "height")
+
+# request/response field -> (schema key, allowed values)
+_READER_PREFS = {
+    "mode": ("READER_MODE", READER_MODES),
+    "fit": ("READER_FIT", READER_FITS),
+}
+
+
+def _reader_pref(field):
+    """Effective value for this user: personal override, else site default.
+
+    A stored value outside the allowed set (hand-edited row, a value from a
+    future version) degrades to the schema default rather than reaching the JS.
+    """
+    key, allowed = _READER_PREFS[field]
+    default = get_setting(key)
+    value = get_user_setting(key.lower(), default=default)
+    return value if value in allowed else (default if default in allowed else allowed[0])
+
+
+@reading_bp.route("/api/reader-prefs", methods=["GET", "POST"])
+def api_reader_prefs():
+    """
+    The signed-in user's comic reader layout preferences.
+
+    GET  -> {"success": True, "mode": "paged"|"scroll", "fit": "width"|"height"}
+    POST {mode?, fit?}  -> same body after saving. Only the fields sent are
+         changed; an unknown value is a 400 and nothing is written.
+    """
+    if request.method == "POST":
+        data = _request_payload()
+        if data is None:
+            return jsonify({"success": False, "error": "Invalid or missing JSON body"}), 400
+
+        updates = {}
+        for field, (key, allowed) in _READER_PREFS.items():
+            if field not in data:
+                continue
+            if data[field] not in allowed:
+                return jsonify({"success": False, "error": f"Invalid {field}"}), 400
+            updates[key.lower()] = data[field]
+
+        for pref, value in updates.items():
+            if not set_user_setting(pref, value):
+                return jsonify({"success": False, "error": "Could not save reader preference"}), 500
+
+    return jsonify(
+        {"success": True, "mode": _reader_pref("mode"), "fit": _reader_pref("fit")}
+    )
 
 
 def _request_payload():
