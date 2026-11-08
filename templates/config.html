@@ -427,14 +427,21 @@
                             <label for="compressLevel" class="form-label">Compression Level</label>
                             <select class="form-select" id="compressLevel" name="compressLevel">
                                 <option value="full" {% if compressLevel == 'full' %}selected{% endif %}>Full &ndash; keep resolution, quality 90 (about 30% smaller)</option>
-                                <option value="balanced" {% if compressLevel == 'balanced' %}selected{% endif %}>Balanced &ndash; keep resolution, quality 80 (about 55% smaller)</option>
+                                <option value="balanced" {% if compressLevel == 'balanced' %}selected{% endif %}>Balanced (Recommended) &ndash; keep resolution, quality 80 (about 55% smaller)</option>
                                 <option value="small" {% if compressLevel == 'small' %}selected{% endif %}>Small &ndash; pages at most 1600 px, quality 75 (about 90% smaller)</option>
                             </select>
                             <small class="form-text text-muted">
-                                Used by Auto-Compress and by the Compress button. Small shrinks a comic the
-                                most and looks fine on a phone or tablet, but pages are softer on a large
-                                monitor and the original resolution cannot be restored.
+                                Used by Auto-Compress and by the Compress button. Balanced is the best
+                                trade-off for most readers. Small shrinks a comic the most and looks fine
+                                on a phone or tablet, but pages are softer on a large monitor and the
+                                original resolution cannot be restored.
                             </small>
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
+                                    data-bs-target="#compressCompareModal">
+                                    <i class="bi bi-images me-1"></i>Compare levels
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="row mt-3">
@@ -2183,6 +2190,46 @@
         <button type="button" class="btn btn-primary" id="confirmEnableFolderMonitorBtn">
           <i class="bi bi-folder-check me-1"></i>Enable
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="compressCompareModal" tabindex="-1" aria-labelledby="compressCompareModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="compressCompareModalLabel"><i class="bi bi-images me-2"></i>Compare compression levels</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="btn-group mb-3 flex-wrap" role="group" aria-label="Compression level to preview">
+          <input type="radio" class="btn-check" name="compressCompareChoice" id="compressCompareOriginal" autocomplete="off" checked
+            data-src="{{ url_for('static', filename='images/compress-compare-original.webp') }}"
+            data-note="The untouched page, before any compression.">
+          <label class="btn btn-outline-secondary" for="compressCompareOriginal">Original</label>
+
+          <input type="radio" class="btn-check" name="compressCompareChoice" id="compressCompareFull" autocomplete="off"
+            data-src="{{ url_for('static', filename='images/compress-compare-full.webp') }}"
+            data-note="Full: same resolution, quality 90. About 30% smaller.">
+          <label class="btn btn-outline-secondary" for="compressCompareFull">Full</label>
+
+          <input type="radio" class="btn-check" name="compressCompareChoice" id="compressCompareBalanced" autocomplete="off"
+            data-src="{{ url_for('static', filename='images/compress-compare-balanced.webp') }}"
+            data-note="Balanced (recommended): same resolution, quality 80. About 55% smaller.">
+          <label class="btn btn-outline-secondary" for="compressCompareBalanced">Balanced (Recommended)</label>
+
+          <input type="radio" class="btn-check" name="compressCompareChoice" id="compressCompareSmall" autocomplete="off"
+            data-src="{{ url_for('static', filename='images/compress-compare-small.webp') }}"
+            data-note="Small: pages at most 1600 px, quality 75. About 90% smaller, slightly softer.">
+          <label class="btn btn-outline-secondary" for="compressCompareSmall">Small</label>
+        </div>
+        <img id="compressCompareImg" class="img-fluid rounded border" alt="Original page, before compression">
+        <p class="small text-muted mt-2 mb-0" id="compressCompareNote" aria-live="polite"></p>
+        <p class="small text-muted mt-1 mb-0">The same crop of one page at each level. Switch between them to compare.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
@@ -5490,6 +5537,30 @@
         // A link to another tab on this page (/config#database) changes only
         // the hash, which does not reload the page.
         window.addEventListener('hashchange', showTabFromHash);
+    })();
+</script>
+<script>
+    // Compare levels: one image, swapped on selection. Nothing loads until the
+    // modal opens, so the Config page does not fetch four large images.
+    (function () {
+        const modal = document.getElementById('compressCompareModal');
+        if (!modal) return;
+        const img = document.getElementById('compressCompareImg');
+        const note = document.getElementById('compressCompareNote');
+        const choices = modal.querySelectorAll('input[name="compressCompareChoice"]');
+
+        function show(choice) {
+            img.src = choice.dataset.src;
+            img.alt = (choice.nextElementSibling ? choice.nextElementSibling.textContent : '') + ' compression';
+            note.textContent = choice.dataset.note;
+        }
+        choices.forEach(function (c) {
+            c.addEventListener('change', function () { if (c.checked) show(c); });
+        });
+        modal.addEventListener('show.bs.modal', function () {
+            const checked = modal.querySelector('input[name="compressCompareChoice"]:checked');
+            if (checked) show(checked);
+        });
     })();
 </script>
 {% endblock %}

@@ -73,3 +73,65 @@ def test_compressor_reads_the_setting_per_call_not_at_import():
     src = (ROOT / "cbz_ops" / "compress.py").read_text(encoding="utf-8")
     assert re.search(r"^\w*LEVEL\w* = get_setting", src, re.M) is None
     assert 'get_setting("COMPRESS_LEVEL")' in src
+
+
+# ---- Recommended level and the comparison viewer -----------------------------
+
+CHOICES = ["original", *LEVELS]  # the viewer shows the untouched page plus every level
+
+
+def _select_block(config_html):
+    return config_html.split('id="compressLevel"')[1].split("</select>")[0]
+
+
+def _modal_block(config_html):
+    return config_html.split('id="compressCompareModal"')[1].split("{% include 'partials/modal_regenerate")[0]
+
+
+def test_balanced_is_the_recommended_level_and_only_balanced(config_html):
+    options = re.findall(r'<option value="([^"]+)"[^>]*>([^<]*)</option>', _select_block(config_html))
+    recommended = [value for value, label in options if "Recommended" in label]
+    assert recommended == ["balanced"]
+
+
+def test_recommendation_does_not_change_the_default():
+    """The label is advice; changing the default would silently alter every install."""
+    assert DEFAULT_LEVEL == "full"
+
+
+@pytest.mark.parametrize("choice", CHOICES)
+def test_comparison_image_ships_and_is_a_real_webp(choice):
+    path = ROOT / "static" / "images" / f"compress-compare-{choice}.webp"
+    head = path.read_bytes()[:12]
+    assert head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    assert 20_000 < path.stat().st_size < 1_000_000
+
+
+@pytest.mark.parametrize("choice", CHOICES)
+def test_modal_points_at_each_image_through_url_for(config_html, choice):
+    modal = _modal_block(config_html)
+    assert f"url_for('static', filename='images/compress-compare-{choice}.webp')" in modal
+
+
+def test_modal_has_one_radio_per_choice_and_original_starts_selected(config_html):
+    modal = _modal_block(config_html)
+    radios = re.findall(r'<input type="radio"[^>]*name="compressCompareChoice"[^>]*>', modal, re.S)
+    assert len(radios) == len(CHOICES)
+    assert "checked" in radios[0] and "compress-compare-original" in radios[0]
+
+
+def test_compare_button_opens_the_modal(config_html):
+    assert 'data-bs-target="#compressCompareModal"' in config_html
+
+
+def test_images_are_not_fetched_until_the_modal_opens(config_html):
+    """The <img> has no src of its own; the script sets it on show.bs.modal."""
+    modal = _modal_block(config_html)
+    tag = re.search(r'<img id="compressCompareImg"[^>]*>', modal).group(0)
+    assert " src=" not in tag
+    assert "show.bs.modal" in config_html.split("compressCompareModal")[-1]
+
+
+def test_comparison_uses_a_modal_not_a_native_dialog(config_html):
+    modal = _modal_block(config_html)
+    assert "alert(" not in modal and "confirm(" not in modal
