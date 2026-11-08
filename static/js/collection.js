@@ -1873,6 +1873,8 @@ function renderGrid(items) {
                         dropdownMenu.innerHTML = `
                             <li><a class="dropdown-item folder-action-gen-all-thumbs" href="#"><i class="bi bi-images"></i> Generate All Missing Thumbnails</a></li>
                             <li><a class="dropdown-item folder-action-regen-all-thumbs text-danger" href="#"><i class="bi bi-arrow-repeat"></i> Regenerate All Thumbnails</a></li>
+                            <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
+                            <li><a class="dropdown-item folder-action-remove-custom-thumb" href="#"><i class="bi bi-x-square"></i> Remove Custom Thumbnail</a></li>
                             <li><a class="dropdown-item folder-action-scan" href="#"><i class="bi bi-arrow-clockwise"></i> Scan Files</a></li>
                             <li><a class="dropdown-item folder-action-fetch-metadata" href="#"><i class="bi bi-cloud-download"></i> Fetch All Metadata</a></li>
                             <li><a class="dropdown-item folder-action-missing" href="#"><i class="bi bi-file-earmark-text"></i> Missing File Check</a></li>
@@ -1881,6 +1883,8 @@ function renderGrid(items) {
                         // For folders with files, show full menu
                         dropdownMenu.innerHTML = `
                         <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
+                        <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
+                        <li><a class="dropdown-item folder-action-remove-custom-thumb" href="#"><i class="bi bi-x-square"></i> Remove Custom Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-scan" href="#"><i class="bi bi-arrow-clockwise"></i> Scan Files</a></li>
                         <li><a class="dropdown-item folder-action-fetch-metadata" href="#"><i class="bi bi-cloud-download"></i> Fetch All Metadata</a></li>
                         <li><a class="dropdown-item folder-action-missing" href="#"><i class="bi bi-file-earmark-text"></i> Missing File Check</a></li>
@@ -1940,6 +1944,24 @@ function renderGrid(items) {
                                 CLU.addFolderToPullList(item.path, item.name);
                             };
                         }
+                    }
+
+                    // Bind custom thumbnail actions (root and nested folders)
+                    const customThumbAction = dropdownMenu.querySelector('.folder-action-custom-thumb');
+                    if (customThumbAction) {
+                        customThumbAction.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            uploadCustomFolderThumbnail(item.path, item.name);
+                        };
+                    }
+                    const removeCustomThumbAction = dropdownMenu.querySelector('.folder-action-remove-custom-thumb');
+                    if (removeCustomThumbAction) {
+                        removeCustomThumbAction.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removeCustomFolderThumbnail(item.path, item.name);
+                        };
                     }
 
                     // Bind Missing File Check action (available for both root and folders with files)
@@ -5228,6 +5250,87 @@ function removeFavoriteFromDashboard(path, name, button) {
  * @param {string} folderPath - Path to the folder
  * @param {string} folderName - Name of the folder
  */
+/**
+ * Show a folder's new art in the grid (or the folder icon when url is null)
+ * without reloading the page.
+ */
+function setFolderGridThumbnail(folderPath, thumbnailUrl) {
+    const gridItem = document.querySelector(`[data-path="${CSS.escape(folderPath)}"]`);
+    if (!gridItem) return;
+    const container = gridItem.querySelector('.thumbnail-container');
+    const img = gridItem.querySelector('.thumbnail');
+    const iconOverlay = gridItem.querySelector('.icon-overlay');
+    if (!img || !container) return;
+    const hasArt = Boolean(thumbnailUrl);
+    if (hasArt) {
+        // Cache-buster: the path stays folder.png, the image changed.
+        img.src = thumbnailUrl + (thumbnailUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+    }
+    img.style.display = hasArt ? 'block' : 'none';
+    gridItem.classList.toggle('has-thumbnail', hasArt);
+    container.classList.toggle('has-thumbnail', hasArt);
+    if (iconOverlay) iconOverlay.style.display = hasArt ? 'none' : '';
+}
+
+/**
+ * Pick an image and make it the folder's thumbnail. Regenerating thumbnails
+ * leaves it alone until it is removed again.
+ */
+function uploadCustomFolderThumbnail(folderPath, folderName) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp,image/gif';
+    input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('folder_path', folderPath);
+        form.append('image', file);
+        CLU.showProgressIndicator();
+        const progressText = document.getElementById('progress-text');
+        if (progressText) progressText.textContent = `Uploading thumbnail for ${folderName}...`;
+        fetch('/api/folder-thumbnail/custom', { method: 'POST', body: form })
+            .then(response => response.json())
+            .then(data => {
+                CLU.hideProgressIndicator();
+                if (data.success) {
+                    setFolderGridThumbnail(folderPath, data.thumbnail_url);
+                    CLU.showSuccess('Custom thumbnail set for ' + folderName);
+                } else {
+                    CLU.showError(data.error || 'Could not set the thumbnail');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                CLU.hideProgressIndicator();
+                CLU.showError('An error occurred while uploading the thumbnail.');
+            });
+    };
+    input.click();
+}
+
+/** Drop a folder's uploaded image and go back to generated art. */
+function removeCustomFolderThumbnail(folderPath, folderName) {
+    fetch('/api/folder-thumbnail/custom/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                setFolderGridThumbnail(folderPath, data.thumbnail_url);
+                CLU.showSuccess('Custom thumbnail removed for ' + folderName);
+            } else {
+                CLU.showError(data.error || 'Could not remove the thumbnail');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            CLU.showError('An error occurred while removing the thumbnail.');
+        });
+}
+
 function generateFolderThumbnail(folderPath, folderName) {
     // Show progress indicator
     CLU.showProgressIndicator();

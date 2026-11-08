@@ -492,3 +492,55 @@ class TestSelectCoverFiles:
         assert [os.path.basename(f) for f in files] == [
             "B0.cbz", "B1.cbz", "B2.cbz", "B3.cbz",
         ]
+
+
+def _image_bytes(fmt="JPEG", size=(300, 300), color="blue"):
+    import io
+    out = io.BytesIO()
+    Image.new("RGB", size, color).save(out, fmt)
+    return out.getvalue()
+
+
+class TestCustomThumbnail:
+    """An uploaded folder image: marked, kept by regenerate, removable."""
+
+    def test_save_writes_marked_2x3_png(self, tmp_path):
+        path = folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
+
+        assert path == str(tmp_path / "folder.png")
+        with Image.open(path) as img:
+            assert img.size == folder_thumbnails.CUSTOM_SIZE
+        assert folder_thumbnails.is_custom_thumbnail(str(tmp_path)) is True
+        # The temp file never survives.
+        assert sorted(os.listdir(tmp_path)) == ["folder.png"]
+
+    def test_save_replaces_other_folder_art(self, tmp_path):
+        (tmp_path / "folder.jpg").write_bytes(b"old art")
+        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes("PNG"))
+        assert sorted(os.listdir(tmp_path)) == ["folder.png"]
+
+    def test_generated_art_is_not_custom(self, tmp_path):
+        Image.new("RGB", (200, 300)).save(tmp_path / "folder.png")
+        assert folder_thumbnails.is_custom_thumbnail(str(tmp_path)) is False
+
+    def test_regenerate_may_not_overwrite_custom(self, tmp_path):
+        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
+        assert folder_thumbnails.may_write(str(tmp_path), overwrite=True) is False
+        assert folder_thumbnails.may_write(str(tmp_path), overwrite=False) is False
+
+    @pytest.mark.parametrize("data", [b"not an image", b""])
+    def test_rejects_non_images(self, tmp_path, data):
+        with pytest.raises(ValueError):
+            folder_thumbnails.save_custom_thumbnail(str(tmp_path), data)
+        assert os.listdir(tmp_path) == []
+
+    def test_rejects_oversized_upload(self, tmp_path):
+        data = b"x" * (folder_thumbnails.CUSTOM_MAX_UPLOAD_BYTES + 1)
+        with pytest.raises(ValueError):
+            folder_thumbnails.build_custom_thumbnail(data)
+
+    def test_remove(self, tmp_path):
+        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
+        assert folder_thumbnails.remove_custom_thumbnail(str(tmp_path)) is True
+        assert os.listdir(tmp_path) == []
+        assert folder_thumbnails.remove_custom_thumbnail(str(tmp_path)) is False
