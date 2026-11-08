@@ -63,7 +63,9 @@ class TestTapToggle:
 
     def test_tap_still_ignores_zoom_and_nav_buttons(self, reader_js):
         body = tap_handler(reader_js)
-        assert "zoom.scale > 1" in body
+        # "zoomed" means beyond the fitted scale: a page fitted to the width is
+        # always scaled above 1, and must still toggle the chrome on a tap.
+        assert "readerZoomedBeyondFit()" in body
         assert ".swiper-button-next" in body
 
     def test_double_tap_cancels_pending_toggle(self, reader_js):

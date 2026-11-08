@@ -54,6 +54,47 @@ const COMIC_EXTENSIONS = ['.cbz', '.cbr', '.cb7', '.zip', '.rar', '.7z', '.pdf']
 // Zoom step levels: 3 increments from minRatio (1) to maxRatio (3)
 const ZOOM_STEPS = [1, 1.67, 2.33, 3];
 
+// --- Layout: paged vs. scroll, and what a page is fitted to -------------------
+// readerMode  'paged'  one page at a time (Swiper)
+//             'scroll' one continuous vertical strip, webtoon style
+// readerFit   'width'  a page fills the window's width (no side margins)
+//             'height' a page is shown whole (the old behaviour)
+// Both are per-account preferences (/api/reader-prefs). The defaults here only
+// apply until that fetch answers, or when it fails.
+const READER_MODES = ['paged', 'scroll'];
+const READER_FITS = ['width', 'height'];
+let readerMode = 'paged';
+let readerFit = 'width';
+
+// Paged + fit-to-width. A portrait page is laid out by CSS to fit the window's
+// HEIGHT (that is what `max-height: 100%` does), so fitting its width is a
+// Swiper zoom of `slide width / laid-out image width`. fitBaseScale is that
+// scale for the active page (1 when nothing needs zooming); the zoom buttons
+// step relative to it, and "zoomed" means "beyond it".
+let fitBaseScale = 1;
+let pendingFitAlign = 'top';      // where to land on the next page: top | bottom
+let lastWheelTurnAt = 0;          // cooldown so one wheel flick turns one page
+const WHEEL_TURN_COOLDOWN_MS = 450;
+const FIT_STEP_MULTIPLIERS = [1.5, 2];  // zoom steps above the fitted scale
+let resizeTimer = null;
+
+// Scroll mode state (null unless the strip is on screen). See
+// initializeScrollReader().
+let scrollState = null;
+// True while setReaderMode() rebuilds the view on the page the user is on.
+// Landing there is navigation: it must not advance highestPageViewed.
+let rebuildingReaderView = false;
+const SCROLL_WIDTH_STEPS = [40, 55, 70, 85, 100, 125, 150];  // column width, %
+const SCROLL_DEFAULT_WIDTH = 100;
+// Pages are fetched from this far outside the viewport, and released once they
+// are this many viewport heights away, so a 100-page comic never has more than
+// a handful of decoded images alive.
+const SCROLL_LOAD_MARGIN = '200% 0px';
+const SCROLL_UNLOAD_VIEWPORTS = 6;
+// The page that counts as "current" is the one under this line (fraction of
+// the viewport height measured from the top).
+const SCROLL_READING_LINE = 0.35;
+
 // --- Panning the zoom window -------------------------------------------------
 // Zooming always centres on the page, so without these the zoomed-in reader can
 // only ever show the middle of the artwork. Keys that pan:
@@ -123,13 +164,147 @@ function _isFormControlTarget(target) {
  * @param {KeyboardEvent} e - The keydown event
  */
 function handleComicReaderKeydown(e) {
-    if (!comicReaderSwiper) return;
+    if (!readerHasView()) return;
     if (_isFormControlTarget(e.target)) return;
 
     // Spacebar to advance
     if (e.code === 'Space') {
         e.preventDefault(); // Prevent page scroll
-        comicReaderSwiper.slideNext();
+        if (scrollState) {
+            scrollReaderBy((e.shiftKey ? -1 : 1) * 0.9);
+        } else {
+            readerAdvance();
+        }
+    }
+}
+
+/** Is a reader view (paged or scroll) built and on screen? */
+function readerHasView() {
+    return !!(comicReaderSwiper || scrollState);
+}
+
+/** Zero-based index of the page the reader is on, in either mode. */
+function getReaderCurrentIndex() {
+    if (scrollState) return scrollState.index;
+    return comicReaderSwiper ? comicReaderSwiper.activeIndex : 0;
+}
+
+/** URL of one page image. */
+function readerPageUrl(pageNum) {
+    return `/api/read/${encodeFilePath(currentComicPath)}/page/${pageNum}`;
+}
+
+// ---------------------------------------------------------------------------
+// Layout preferences and the two toolbar buttons
+// ---------------------------------------------------------------------------
+
+/** Fetch this account's layout prefs. Never rejects: failure keeps defaults. */
+function loadReaderPrefs() {
+    return fetch('/api/reader-prefs')
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !data.success) return;
+            if (READER_MODES.includes(data.mode)) readerMode = data.mode;
+            if (READER_FITS.includes(data.fit)) readerFit = data.fit;
+        })
+        .catch(() => { /* keep whatever we had */ });
+}
+
+/** Persist the layout prefs. Best effort: the reader works without it. */
+function saveReaderPrefs() {
+    fetch('/api/reader-prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: readerMode, fit: readerFit })
+    }).catch(err => console.error('Failed to save reader preferences:', err));
+}
+
+/**
+ * Build the layout buttons on first use.
+ *
+ * Created here rather than in markup because the reader modal is duplicated
+ * across four templates; injecting them keeps those copies from drifting (the
+ * pan hint does the same).
+ */
+function ensureReaderViewControls() {
+    const controls = document.querySelector('.comic-reader-footer-controls');
+    if (!controls) return;
+
+    if (!document.getElementById('readerModeBtn')) {
+        const modeBtn = document.createElement('button');
+        modeBtn.id = 'readerModeBtn';
+        modeBtn.type = 'button';
+        modeBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
+        modeBtn.innerHTML = '<i class="bi bi-view-stacked text-light" aria-hidden="true"></i>';
+        modeBtn.onclick = () => setReaderMode(readerMode === 'scroll' ? 'paged' : 'scroll');
+        controls.insertBefore(modeBtn, document.getElementById('pageSelector'));
+    }
+    if (!document.getElementById('readerFitBtn')) {
+        const fitBtn = document.createElement('button');
+        fitBtn.id = 'readerFitBtn';
+        fitBtn.type = 'button';
+        fitBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
+        fitBtn.innerHTML = '<i class="bi text-light" aria-hidden="true"></i>';
+        fitBtn.onclick = () => setReaderFit(readerFit === 'width' ? 'height' : 'width');
+        controls.insertBefore(fitBtn, document.getElementById('pageSelector'));
+    }
+    updateReaderViewControls();
+}
+
+/** Make the buttons say what they are doing and what a click will do. */
+function updateReaderViewControls() {
+    const modeBtn = document.getElementById('readerModeBtn');
+    if (modeBtn) {
+        const scroll = readerMode === 'scroll';
+        const label = scroll ? 'Scroll mode is on. Switch to page-by-page' : 'Switch to continuous scroll';
+        modeBtn.title = label;
+        modeBtn.setAttribute('aria-label', label);
+        modeBtn.setAttribute('aria-pressed', scroll ? 'true' : 'false');
+        modeBtn.classList.toggle('active', scroll);
+    }
+    const fitBtn = document.getElementById('readerFitBtn');
+    if (fitBtn) {
+        const width = readerFit === 'width';
+        const label = width ? 'Fitted to width. Fit whole page instead' : 'Whole page shown. Fit to width instead';
+        fitBtn.title = label;
+        fitBtn.setAttribute('aria-label', label);
+        const icon = fitBtn.querySelector('i');
+        if (icon) {
+            icon.classList.toggle('bi-arrow-left-right', width);
+            icon.classList.toggle('bi-arrow-down-up', !width);
+        }
+        // Scroll mode is always as wide as its column; fit has no meaning there.
+        fitBtn.style.display = readerMode === 'scroll' ? 'none' : '';
+    }
+}
+
+/** Switch between paged and scroll, staying on the same page. */
+function setReaderMode(mode) {
+    if (!READER_MODES.includes(mode) || mode === readerMode) return;
+    readerMode = mode;
+    saveReaderPrefs();
+    updateReaderViewControls();
+    if (!currentComicPath || currentComicPageCount <= 0) return;
+
+    const index = getReaderCurrentIndex();
+    // Rebuilding is navigation, not reading: it must not count the page it
+    // lands on as read (highestPageViewed survives, see init handlers).
+    rebuildingReaderView = true;
+    try {
+        initializeComicReader(currentComicPageCount, index);
+    } finally {
+        rebuildingReaderView = false;
+    }
+}
+
+/** Change what pages are fitted to (paged mode). */
+function setReaderFit(fit) {
+    if (!READER_FITS.includes(fit) || fit === readerFit) return;
+    readerFit = fit;
+    saveReaderPrefs();
+    updateReaderViewControls();
+    if (comicReaderSwiper) {
+        resetPagedZoomToFit('top');
     }
 }
 
@@ -204,7 +379,7 @@ function _readerTotalTime() {
 function _readerPositionPayload() {
     return {
         comic_path: currentComicPath,
-        page_number: comicReaderSwiper ? comicReaderSwiper.activeIndex + 1 : 1,
+        page_number: getReaderCurrentIndex() + 1,
         total_pages: currentComicPageCount,
         time_spent: _readerTotalTime()
     };
@@ -220,7 +395,7 @@ function _readerPositionPayload() {
  * @param {boolean} [opts.useBeacon] Use a transport that survives page unload.
  */
 function persistReadingPosition({ useBeacon = false } = {}) {
-    if (!currentComicPath || !comicReaderSwiper || currentComicPageCount <= 0) return;
+    if (!currentComicPath || !readerHasView() || currentComicPageCount <= 0) return;
 
     const payload = _readerPositionPayload();
 
@@ -324,6 +499,10 @@ function hasFinishedCurrentComic() {
 
 /** Slide without counting the jump as pages read. */
 function readerSlideTo(index) {
+    if (scrollState) {
+        scrollToReaderPage(index);
+        return;
+    }
     if (!comicReaderSwiper) return;
     suppressProgressOnNextChange = true;
     comicReaderSwiper.slideTo(index);
@@ -373,6 +552,8 @@ function openComicReader(filePath) {
     // Reset bookmark button state
     updateBookmarkButtonState(false);
 
+    ensureReaderViewControls();
+
     // Show modal
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
@@ -402,7 +583,9 @@ function openComicReader(filePath) {
         // A failed position lookup must not stop the comic from opening.
         fetch(`/api/reading-position?path=${encodeURIComponent(filePath)}`)
             .then(r => r.json())
-            .catch(() => ({ page_number: null }))
+            .catch(() => ({ page_number: null })),
+        // Layout prefs: never rejects, a failure keeps the defaults.
+        loadReaderPrefs()
     ])
         .then(([comicData, positionData]) => {
             if (comicData.success) {
@@ -445,6 +628,16 @@ function openComicReader(filePath) {
  * @param {number} startPage - Page to start on (0-indexed, default 0)
  */
 function initializeComicReader(pageCount, startPage = 0) {
+    // Tear down whichever view is up (a mode switch rebuilds in place).
+    destroyReaderView();
+
+    if (readerMode === 'scroll') {
+        initializeScrollReader(pageCount, startPage);
+        initializePageSelector(pageCount, startPage);
+        initializeZoomControls();
+        return;
+    }
+
     const wrapper = document.getElementById('comicReaderWrapper');
     const pageInfoEl = document.getElementById('comicReaderPageInfo');
 
@@ -467,11 +660,6 @@ function initializeComicReader(pageCount, startPage = 0) {
         `;
 
         wrapper.appendChild(slide);
-    }
-
-    // Destroy existing swiper if it exists
-    if (comicReaderSwiper) {
-        comicReaderSwiper.destroy(true, true);
     }
 
     // Initialize Swiper with zoom support
@@ -498,7 +686,10 @@ function initializeComicReader(pageCount, startPage = 0) {
         zoom: {
             maxRatio: 3,
             minRatio: 1,
-            toggle: true, // Enable double-tap to toggle zoom
+            // Off: Swiper's own toggle zooms out to 1 or in to maxRatio, which
+            // knows nothing about the fitted scale. Our doubleTap handler below
+            // does the toggling.
+            toggle: false,
         },
         // Improve touch handling for mobile
         touchEventsTarget: 'container',
@@ -527,10 +718,17 @@ function initializeComicReader(pageCount, startPage = 0) {
                 }
                 updateReadingProgress(currentIndex);
 
-                // Reset zoom when changing slides
-                if (this.zoom) {
+                // Reset zoom when changing slides, then fit the new page. If its
+                // image is not in yet, loadComicPage() fits it when it lands.
+                // Not before the image is in: Swiper's zoom.out()/in() cache the
+                // slide they were first called on, and a call made while it
+                // has no image leaves zoom dead until the next slide change.
+                if (this.zoom && activePagedImage(this)) {
                     this.zoom.out();
                 }
+                fitBaseScale = 1;
+                applyReaderFit(pendingFitAlign);
+                pendingFitAlign = 'top';
 
                 // Check if reached last page - show next issue overlay if available
                 if (currentIndex === pageCount - 1) {
@@ -569,8 +767,9 @@ function initializeComicReader(pageCount, startPage = 0) {
             // Not gated on device: a mouse click hides it on desktop too, and the
             // gate is what left a rotated tablet unable to hide it.
             tap: function (swiper, event) {
-                // Don't toggle chrome when zoomed in (user is panning)
-                if (this.zoom && this.zoom.scale > 1) return;
+                // Don't toggle chrome when zoomed in (user is panning). Being
+                // fitted to the width is not "zoomed in".
+                if (readerZoomedBeyondFit()) return;
                 // Don't toggle chrome when tapping navigation buttons
                 if (event && event.target && event.target.closest('.swiper-button-next, .swiper-button-prev')) return;
                 // Start a 300ms timer; if a double-tap comes, it will cancel this
@@ -585,17 +784,20 @@ function initializeComicReader(pageCount, startPage = 0) {
                     clearTimeout(chromeToggleTimeout);
                     chromeToggleTimeout = null;
                 }
-                if (this.zoom.scale > 1) {
-                    this.zoom.out();
+                if (readerZoomedBeyondFit()) {
+                    resetPagedZoomToFit('top');
                 } else {
-                    this.zoom.in();
-                    maybeShowPanHint();
+                    stepZoom('in');
                 }
             },
             init: function () {
                 const initialPage = this.activeIndex;
                 pageInfoEl.textContent = `Page ${initialPage + 1} of ${pageCount}`;
-                highestPageViewed = initialPage;
+                // max(): a mode switch rebuilds mid-comic, and must not lower
+                // the evidence of how far the user has actually read.
+                if (!rebuildingReaderView) {
+                    highestPageViewed = Math.max(highestPageViewed, initialPage);
+                }
                 updateReadingProgress(initialPage);
 
                 // Load initial page and adjacent pages
@@ -641,14 +843,16 @@ function initializePageSelector(pageCount, startPage) {
     }
 
     // Add change event listener
-    pageSelector.addEventListener('change', function() {
+    // `onchange`, not addEventListener: this runs on every (re)build, and
+    // listeners would pile up.
+    pageSelector.onchange = function() {
         const selectedPage = parseInt(this.value, 10);
-        if (comicReaderSwiper && !isNaN(selectedPage)) {
+        if (readerHasView() && !isNaN(selectedPage)) {
             // Jumping is navigation, not reading -- don't let it count as
             // progress, or a peek at the last page marks the issue finished.
             readerSlideTo(selectedPage);
         }
-    });
+    };
 }
 
 /**
@@ -656,14 +860,25 @@ function initializePageSelector(pageCount, startPage) {
  * @param {'in'|'out'} direction - Zoom direction
  */
 function stepZoom(direction) {
+    if (scrollState) {
+        stepScrollWidth(direction);
+        return;
+    }
     if (!comicReaderSwiper || !comicReaderSwiper.zoom) return;
     const current = comicReaderSwiper.zoom.scale;
+    const steps = pagedZoomSteps();
+    // Zooming in from the fitted view keeps showing the top of the page rather
+    // than drifting to wherever Swiper's centre-zoom leaves the offset.
+    const wasAtFit = fitBaseScale > 1.02 && !readerZoomedBeyondFit() && current > 1.01;
 
     if (direction === 'in') {
         // Find the next step above the current scale
-        for (let i = 0; i < ZOOM_STEPS.length; i++) {
-            if (ZOOM_STEPS[i] > current + 0.01) {
-                comicReaderSwiper.zoom.in(ZOOM_STEPS[i]);
+        for (let i = 0; i < steps.length; i++) {
+            if (steps[i] > current + 0.01) {
+                comicReaderSwiper.zoom.in(steps[i]);
+                // Landing back on the fitted scale should show the top of the
+                // page, like opening it does.
+                if (wasAtFit || steps[i] === fitBaseScale) alignFitView('top');
                 // Zoom always lands on the centre of the page; tell the user how
                 // to get to the rest of it.
                 maybeShowPanHint();
@@ -672,18 +887,108 @@ function stepZoom(direction) {
         }
     } else {
         // Find the next step below the current scale
-        for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) {
-            if (ZOOM_STEPS[i] < current - 0.01) {
-                if (ZOOM_STEPS[i] <= 1) {
+        for (let i = steps.length - 1; i >= 0; i--) {
+            if (steps[i] < current - 0.01) {
+                if (steps[i] <= 1) {
                     comicReaderSwiper.zoom.out();
                 } else {
-                    comicReaderSwiper.zoom.in(ZOOM_STEPS[i]);
+                    comicReaderSwiper.zoom.in(steps[i]);
+                    if (steps[i] === fitBaseScale) alignFitView('top');
                 }
                 return;
             }
         }
         comicReaderSwiper.zoom.out();
     }
+}
+
+/**
+ * The scales the zoom buttons step through in paged mode. 1 is the whole page;
+ * when the page is fitted to the width the fitted scale and two steps above it
+ * follow, otherwise the classic 1 -> 3 ladder.
+ */
+function pagedZoomSteps() {
+    if (fitBaseScale <= 1.02) return ZOOM_STEPS;
+    const steps = [1, fitBaseScale];
+    FIT_STEP_MULTIPLIERS.forEach(m => steps.push(fitBaseScale * m));
+    return steps;
+}
+
+/** The active slide's loaded <img>, or null while it is still a spinner. */
+function activePagedImage(swiper) {
+    const slide = swiper && swiper.slides[swiper.activeIndex];
+    return slide ? slide.querySelector('.swiper-zoom-container img') : null;
+}
+
+/** Is the page zoomed in past what "fitted" means for it? */
+function readerZoomedBeyondFit() {
+    if (!comicReaderSwiper || !comicReaderSwiper.zoom) return false;
+    const scale = comicReaderSwiper.zoom.scale || 1;
+    return scale > Math.max(1, fitBaseScale) * 1.02;
+}
+
+/**
+ * Fit the active page to the window's width (readerFit === 'width').
+ *
+ * Needs the image to be in the DOM; loadComicPage() calls this when the active
+ * page lands, and slideChange calls it for a page that is already loaded.
+ *
+ * @param {'top'|'bottom'} align - Which end of the page to show.
+ */
+function applyReaderFit(align) {
+    const swiper = comicReaderSwiper;
+    if (!swiper || !swiper.zoom) return;
+    fitBaseScale = 1;
+    swiper.params.zoom.maxRatio = ZOOM_STEPS[ZOOM_STEPS.length - 1];
+    if (readerFit !== 'width') return;
+
+    const slide = swiper.slides[swiper.activeIndex];
+    const img = activePagedImage(swiper);
+    if (!img || !img.offsetWidth) return;
+
+    // Layout sizes ignore the transform, so this holds at any current zoom.
+    const scale = slide.clientWidth / img.offsetWidth;
+    if (scale <= 1.02) return;  // already as wide as the window allows
+
+    fitBaseScale = scale;
+    swiper.params.zoom.maxRatio = scale * FIT_STEP_MULTIPLIERS[FIT_STEP_MULTIPLIERS.length - 1];
+    swiper.zoom.in(scale);
+    alignFitView(align || 'top');
+    maybeShowPanHint();
+}
+
+/**
+ * Show the top (or bottom) of a fitted page instead of its middle: Swiper
+ * zooms about the centre, which for a tall page hides the start of it.
+ */
+function alignFitView(where) {
+    const ctx = getZoomPanContext();
+    if (!ctx) return;
+    applyZoomPan(ctx, 0, where === 'bottom' ? -ctx.maxY : ctx.maxY);
+}
+
+/** Drop any zoom and fit the active page again (fit button, resize, reset). */
+function resetPagedZoomToFit(align) {
+    if (!comicReaderSwiper || !comicReaderSwiper.zoom) return;
+    if (!activePagedImage(comicReaderSwiper)) return;  // see slideChange
+    comicReaderSwiper.zoom.out();
+    applyReaderFit(align);
+}
+
+/**
+ * Space in paged mode. A page fitted to the width is taller than the window, so
+ * Space reads down it first and only turns the page from the bottom.
+ */
+function readerAdvance() {
+    if (!comicReaderSwiper) return;
+    if (!readerZoomedBeyondFit()) {
+        const ctx = getZoomPanContext();
+        if (ctx && ctx.y > -ctx.maxY + 1) {
+            applyZoomPan(ctx, ctx.x, ctx.y - ctx.slide.offsetHeight * 0.85);
+            return;
+        }
+    }
+    comicReaderSwiper.slideNext();
 }
 
 /**
@@ -695,16 +1000,18 @@ function initializeZoomControls() {
 
     // Zoom in button - step up one increment
     if (zoomInBtn) {
-        zoomInBtn.addEventListener('click', function() {
+        // onclick, not addEventListener: initializeZoomControls runs on every
+        // (re)build, and stacked listeners made one click zoom several steps.
+        zoomInBtn.onclick = function() {
             stepZoom('in');
-        });
+        };
     }
 
     // Zoom out button - step down one increment
     if (zoomOutBtn) {
-        zoomOutBtn.addEventListener('click', function() {
+        zoomOutBtn.onclick = function() {
             stepZoom('out');
-        });
+        };
     }
 
     // Remove existing keyboard listener if present
@@ -828,7 +1135,10 @@ function panZoomedViewByKey(direction) {
 function recenterZoomedView() {
     const ctx = getZoomPanContext();
     if (!ctx) return false;
-    applyZoomPan(ctx, 0, 0);
+    // Centre, except on a page fitted to the width, whose natural resting place
+    // is its top.
+    const fitted = fitBaseScale > 1.02 && !readerZoomedBeyondFit();
+    applyZoomPan(ctx, 0, fitted ? ctx.maxY : 0);
     return true;
 }
 
@@ -933,6 +1243,10 @@ function isLightColor(r, g, b) {
  */
 function handleZoomKeyboard(event) {
     // Only handle if comic reader is open
+    if (scrollState) {
+        handleScrollKeyboard(event);
+        return;
+    }
     if (!comicReaderSwiper) return;
     if (_isFormControlTarget(event.target)) return;
 
@@ -1032,6 +1346,30 @@ function initializeMousewheelHandler() {
             const dx = event.shiftKey ? -deltaY : -deltaX;
             const dy = event.shiftKey ? 0 : -deltaY;
 
+            // A page fitted to the width is "zoomed" as far as Swiper cares, so
+            // the wheel reads down it. Once it hits the end the NEXT flick turns
+            // the page (one page per flick: momentum scrolling sends a stream
+            // of events, hence the cooldown).
+            const ctx = getZoomPanContext();
+            if (ctx && !readerZoomedBeyondFit() && !event.shiftKey && dy) {
+                const target = Math.max(-ctx.maxY, Math.min(ctx.maxY, ctx.y + dy));
+                if (Math.abs(target - ctx.y) < 0.5) {
+                    event.preventDefault();
+                    const now = Date.now();
+                    if (now - lastWheelTurnAt >= WHEEL_TURN_COOLDOWN_MS) {
+                        lastWheelTurnAt = now;
+                        if (dy < 0) {
+                            comicReaderSwiper.slideNext();
+                        } else {
+                            // Going back: land at the bottom of the earlier page.
+                            pendingFitAlign = 'bottom';
+                            comicReaderSwiper.slidePrev();
+                        }
+                    }
+                    return;
+                }
+            }
+
             if (panZoomedView(dx, dy)) {
                 event.preventDefault();
             }
@@ -1069,7 +1407,7 @@ function updateReadingProgress(pageIndex) {
     // hook the module-level `comicReaderSwiper` is not assigned yet.
     let currentIndex = pageIndex;
     if (currentIndex === undefined) {
-        currentIndex = comicReaderSwiper ? comicReaderSwiper.activeIndex : highestPageViewed;
+        currentIndex = readerHasView() ? getReaderCurrentIndex() : highestPageViewed;
     }
     const progress = ((currentIndex + 1) / currentComicPageCount) * 100;
     const progressBar = document.querySelector('.comic-reader-progress-fill');
@@ -1189,9 +1527,7 @@ function loadComicPage(pageNum) {
     // Mark as loading to prevent duplicate requests
     slide.dataset.loading = 'true';
 
-    // Encode the path properly for URL
-    const encodedPath = encodeFilePath(currentComicPath);
-    const imageUrl = `/api/read/${encodedPath}/page/${pageNum}`;
+    const imageUrl = readerPageUrl(pageNum);
 
     // Create image element
     const img = document.createElement('img');
@@ -1231,6 +1567,11 @@ function loadComicPage(pageNum) {
             }
         } catch (e) {
             // Silently ignore color extraction failures (e.g., CORS)
+        }
+
+        // The page the user is looking at has just appeared: fit it.
+        if (comicReaderSwiper && comicReaderSwiper.activeIndex === pageNum) {
+            applyReaderFit('top');
         }
     };
 
@@ -1272,6 +1613,367 @@ function unloadDistantPages(currentIndex, pageCount) {
             slide.dataset.loading = 'false';
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scroll (webtoon) mode
+// ---------------------------------------------------------------------------
+//
+// One scrolling column of every page, top to bottom, no gap and no page turn.
+// Built beside the Swiper (which is hidden, never initialised) rather than
+// inside it: Swiper is a carousel, and everything that makes a strip work --
+// native scrolling, lazy loading by IntersectionObserver, a reading line that
+// decides the "current" page -- fights it.
+//
+// The moving parts, all in `scrollState`:
+//   pages[]     one box per page, always present, so the scrollbar and the
+//               page numbers are right before a single image has loaded.
+//               An unloaded box keeps the height it last had (aspect-ratio).
+//   observer    loads a page's image when it comes within SCROLL_LOAD_MARGIN of
+//               the viewport; pages far away are released again so a 100-page
+//               comic never holds 100 decoded images.
+//   index       the page under the reading line. It drives the page counter,
+//               the dropdown, the progress bar, the autosave and
+//               highestPageViewed exactly as a slide change does in paged mode.
+//   programmatic  true while WE moved the scroll (resume, page dropdown, mode
+//               switch). Like suppressProgressOnNextChange in paged mode, that
+//               is navigation and not evidence of reading.
+
+/** Tear the scroll strip down and give the screen back to the Swiper. */
+function teardownScrollReader() {
+    const swiperEl = document.getElementById('comicReaderSwiper');
+    if (swiperEl) swiperEl.style.display = '';
+    if (!scrollState) return;
+
+    const s = scrollState;
+    scrollState = null;
+    if (s.observer) s.observer.disconnect();
+    clearTimeout(s.programmaticTimer);
+    clearTimeout(s.unloadTimer);
+    if (s.scroller) {
+        s.scroller.removeEventListener('scroll', s.onScroll);
+        s.scroller.removeEventListener('click', s.onClick);
+        s.scroller.remove();
+    }
+}
+
+/** Destroy whichever reader view is up (Swiper and/or the scroll strip). */
+function destroyReaderView() {
+    if (comicReaderSwiper) {
+        comicReaderSwiper.destroy(true, true);
+        comicReaderSwiper = null;
+    }
+    teardownScrollReader();
+}
+
+/**
+ * Build the scroll strip.
+ * @param {number} pageCount - Total number of pages
+ * @param {number} startPage - Page to land on (0-indexed)
+ */
+function initializeScrollReader(pageCount, startPage = 0) {
+    const swiperEl = document.getElementById('comicReaderSwiper');
+    const container = document.querySelector('.comic-reader-container');
+    if (!swiperEl || !container) return;
+
+    swiperEl.style.display = 'none';
+
+    const scroller = document.createElement('div');
+    scroller.id = 'comicReaderScroll';
+    scroller.className = 'comic-reader-scroll';
+    scroller.tabIndex = -1;
+    const column = document.createElement('div');
+    column.className = 'comic-reader-scroll-column';
+    column.style.width = SCROLL_DEFAULT_WIDTH + '%';
+    scroller.appendChild(column);
+
+    const pages = [];
+    for (let i = 0; i < pageCount; i++) {
+        const page = document.createElement('div');
+        page.className = 'comic-scroll-page';
+        page.dataset.pageNum = i;
+        page.innerHTML = scrollSpinnerHtml();
+        column.appendChild(page);
+        pages.push(page);
+    }
+    swiperEl.insertAdjacentElement('afterend', scroller);
+
+    const s = {
+        scroller, column, pages, pageCount,
+        index: 0,
+        widthPct: SCROLL_DEFAULT_WIDTH,
+        loaded: new Set(),
+        programmatic: false,
+        programmaticTimer: null,
+        unloadTimer: null,
+        framePending: false,
+        observer: null,
+        onScroll: null,
+        onClick: null
+    };
+    scrollState = s;
+
+    s.observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                loadScrollPage(parseInt(entry.target.dataset.pageNum, 10));
+            }
+        });
+    }, { root: scroller, rootMargin: SCROLL_LOAD_MARGIN });
+    pages.forEach(p => s.observer.observe(p));
+
+    s.onScroll = () => {
+        if (s.framePending) return;
+        s.framePending = true;
+        requestAnimationFrame(() => {
+            s.framePending = false;
+            if (scrollState === s) syncScrollIndex();
+        });
+        clearTimeout(s.unloadTimer);
+        s.unloadTimer = setTimeout(() => {
+            if (scrollState === s) unloadDistantScrollPages();
+        }, 250);
+    };
+    scroller.addEventListener('scroll', s.onScroll, { passive: true });
+
+    // A click on the page hides/shows the chrome, as a tap does when paged. Not
+    // after a text selection or a drag.
+    s.onClick = () => {
+        const sel = window.getSelection && window.getSelection();
+        if (sel && String(sel).length) return;
+        toggleReaderChrome();
+    };
+    scroller.addEventListener('click', s.onClick);
+
+    // Land on the start page. Navigation, not reading.
+    s.index = Math.max(0, Math.min(startPage, pageCount - 1));
+    applyScrollIndexUi(s.index);
+    if (!rebuildingReaderView) {
+        highestPageViewed = Math.max(highestPageViewed, s.index);
+    }
+    if (s.index > 0) scrollToReaderPage(s.index);
+}
+
+function scrollSpinnerHtml() {
+    return `
+        <div class="comic-page-loading">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Run a layout change without the reader losing its place. Anything that
+ * resizes a box above the reading line (an image arriving, the column width)
+ * would otherwise shove the page the user is on up or down the screen. The
+ * browser's own scroll anchoring is switched off in CSS: Safari lacks it, and
+ * two mechanisms adjusting at once overshoot.
+ */
+function withScrollAnchor(s, change) {
+    const anchor = s.pages[s.index];
+    const before = anchor ? anchor.offsetTop - s.scroller.scrollTop : 0;
+    change();
+    if (anchor) s.scroller.scrollTop = anchor.offsetTop - before;
+}
+
+/** Fetch one page's image into its box. */
+function loadScrollPage(pageNum) {
+    const s = scrollState;
+    if (!s) return;
+    const page = s.pages[pageNum];
+    if (!page || s.loaded.has(pageNum) || page.dataset.loading === 'true') return;
+    page.dataset.loading = 'true';
+
+    const img = document.createElement('img');
+    img.alt = `Page ${pageNum + 1}`;
+    img.decoding = 'async';
+    img.draggable = false;
+    img.onload = function () {
+        page.dataset.loading = 'false';
+        if (scrollState !== s) return;  // the strip was torn down meanwhile
+        withScrollAnchor(s, () => {
+            page.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+            page.innerHTML = '';
+            page.appendChild(img);
+            // Until measured, boxes use the first real page's shape: a strip of
+            // same-sized pages then barely moves as the images arrive.
+            if (!s.column.style.getPropertyValue('--scroll-page-ratio')) {
+                s.column.style.setProperty(
+                    '--scroll-page-ratio', `${img.naturalWidth} / ${img.naturalHeight}`);
+            }
+        });
+        s.loaded.add(pageNum);
+
+        try {
+            const color = extractEdgeColor(img);
+            pageEdgeColors.set(pageNum, color);
+            if (s.index === pageNum) applyReaderBackgroundColor(color.r, color.g, color.b);
+        } catch (e) {
+            // Ignore colour extraction failures, as paged mode does.
+        }
+    };
+    img.onerror = function () {
+        page.dataset.loading = 'false';
+        if (scrollState !== s) return;
+        page.innerHTML = `
+            <div class="comic-page-loading">
+                <p>Failed to load page ${pageNum + 1}</p>
+            </div>
+        `;
+    };
+    img.src = readerPageUrl(pageNum);
+}
+
+/** Release the images of pages far from the viewport. Boxes keep their height. */
+function unloadDistantScrollPages() {
+    const s = scrollState;
+    if (!s) return;
+    const limit = s.scroller.clientHeight * SCROLL_UNLOAD_VIEWPORTS;
+    const view = s.scroller.getBoundingClientRect();
+    Array.from(s.loaded).forEach(pageNum => {
+        const page = s.pages[pageNum];
+        const rect = page.getBoundingClientRect();
+        const distance = rect.bottom < view.top ? view.top - rect.bottom
+            : rect.top > view.bottom ? rect.top - view.bottom : 0;
+        if (distance <= limit) return;
+        // Release the decoded bitmap: drop the src, then the element.
+        const img = page.querySelector('img');
+        if (img) { img.onload = null; img.removeAttribute('src'); }
+        page.innerHTML = scrollSpinnerHtml();
+        page.dataset.loading = 'false';
+        s.loaded.delete(pageNum);
+    });
+}
+
+/** The page under the reading line. */
+function scrollPageIndexAtLine(s) {
+    const sc = s.scroller;
+    // The bottom of the strip is the last page, however short or tall it is.
+    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) return s.pageCount - 1;
+    const line = sc.scrollTop + sc.clientHeight * SCROLL_READING_LINE;
+    let lo = 0, hi = s.pageCount - 1;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (s.pages[mid].offsetTop <= line) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+}
+
+/** Counter, dropdown, progress and background for a page, in scroll mode. */
+function applyScrollIndexUi(index) {
+    const s = scrollState;
+    const total = s ? s.pageCount : currentComicPageCount;
+    const pageInfoEl = document.getElementById('comicReaderPageInfo');
+    if (pageInfoEl) pageInfoEl.textContent = `Page ${index + 1} of ${total}`;
+    const pageSelector = document.getElementById('pageSelector');
+    if (pageSelector) pageSelector.value = index;
+    updateReadingProgress(index);
+    const cached = pageEdgeColors.get(index);
+    if (cached) applyReaderBackgroundColor(cached.r, cached.g, cached.b);
+}
+
+/** Recompute the current page from the scroll position and react to a change. */
+function syncScrollIndex() {
+    const s = scrollState;
+    if (!s) return;
+    const index = scrollPageIndexAtLine(s);
+    if (index === s.index) return;
+    s.index = index;
+    applyScrollIndexUi(index);
+
+    // Same bookkeeping as a paged slideChange. A jump WE made is not reading.
+    if (!s.programmatic) {
+        if (index > highestPageViewed) highestPageViewed = index;
+        scheduleAutoSave();
+    }
+    if (index === s.pageCount - 1) {
+        checkAndShowNextIssueOverlay();
+    } else {
+        hideNextIssueOverlay();
+    }
+}
+
+/**
+ * Scroll so a page's top is at the top of the strip.
+ * Counts as navigation, not reading (see `programmatic` above).
+ */
+function scrollToReaderPage(index) {
+    const s = scrollState;
+    if (!s) return;
+    const target = Math.max(0, Math.min(index, s.pageCount - 1));
+    s.programmatic = true;
+    clearTimeout(s.programmaticTimer);
+    s.scroller.scrollTop = s.pages[target].offsetTop;
+    syncScrollIndex();
+    // Page boxes near the target may be re-measured as they load; keep the jump
+    // flagged until the scrolling has settled.
+    s.programmaticTimer = setTimeout(() => { s.programmatic = false; }, 300);
+}
+
+/** Scroll by a fraction of the viewport height (negative = up). */
+function scrollReaderBy(fraction) {
+    const s = scrollState;
+    if (!s) return;
+    s.scroller.scrollBy({ top: s.scroller.clientHeight * fraction, behavior: 'auto' });
+}
+
+/** Step the column width: the scroll-mode equivalent of the zoom buttons. */
+function stepScrollWidth(direction) {
+    const s = scrollState;
+    if (!s) return;
+    const steps = SCROLL_WIDTH_STEPS;
+    let next = s.widthPct;
+    if (direction === 'in') {
+        next = steps.find(w => w > s.widthPct) || steps[steps.length - 1];
+    } else {
+        for (let i = steps.length - 1; i >= 0; i--) {
+            if (steps[i] < s.widthPct) { next = steps[i]; break; }
+        }
+    }
+    if (next === s.widthPct) return;
+    s.widthPct = next;
+    withScrollAnchor(s, () => { s.column.style.width = next + '%'; });
+}
+
+/** Keyboard in scroll mode: arrows scroll, left/right turn pages. */
+function handleScrollKeyboard(event) {
+    const s = scrollState;
+    if (!s || _isFormControlTarget(event.target)) return;
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+
+    let handled = true;
+    switch (event.key) {
+        case 'ArrowDown': case 's': case 'S':
+            scrollReaderBy(0.15); break;
+        case 'ArrowUp': case 'w': case 'W':
+            scrollReaderBy(-0.15); break;
+        case 'PageDown':
+            scrollReaderBy(0.9); break;
+        case 'PageUp':
+            scrollReaderBy(-0.9); break;
+        case 'ArrowRight':
+            scrollToReaderPage(s.index + 1); break;
+        case 'ArrowLeft':
+            scrollToReaderPage(s.index - 1); break;
+        case 'd': case 'D':
+            s.scroller.scrollBy({ left: s.scroller.clientWidth * 0.2 }); break;
+        case 'a': case 'A':
+            s.scroller.scrollBy({ left: -s.scroller.clientWidth * 0.2 }); break;
+        case 'Home':
+            scrollToReaderPage(0); break;
+        case 'End':
+            s.programmatic = true;
+            clearTimeout(s.programmaticTimer);
+            s.scroller.scrollTop = s.scroller.scrollHeight;
+            syncScrollIndex();
+            s.programmaticTimer = setTimeout(() => { s.programmatic = false; }, 300);
+            break;
+        default:
+            handled = false;
+    }
+    if (handled) event.preventDefault();
 }
 
 /**
@@ -1328,12 +2030,11 @@ function closeComicReader() {
     savedReadingPosition = null;
     lastPersistedPage = null;
 
-    // Destroy swiper
-    if (comicReaderSwiper) {
-        comicReaderSwiper.destroy(true, true);
-        comicReaderSwiper = null;
-    }
+    // Destroy whichever view is up
+    destroyReaderView();
     cancelPendingAutoSave();
+    fitBaseScale = 1;
+    pendingFitAlign = 'top';
 
     // Hide overlays
     hideNextIssueOverlay();
@@ -1485,9 +2186,9 @@ function updateBookmarkButtonState(hasSavedPosition) {
  * Save current reading position
  */
 function saveReadingPosition() {
-    if (!currentComicPath || !comicReaderSwiper) return;
+    if (!currentComicPath || !readerHasView()) return;
 
-    const currentPage = comicReaderSwiper.activeIndex + 1; // 1-indexed for display
+    const currentPage = getReaderCurrentIndex() + 1; // 1-indexed for display
     const payload = _readerPositionPayload();
 
     fetch('/api/reading-position', {
@@ -1533,10 +2234,7 @@ function continueToNextIssue() {
     const modal = document.getElementById('comicReaderModal');
     modal.style.display = 'none';
 
-    if (comicReaderSwiper) {
-        comicReaderSwiper.destroy(true, true);
-        comicReaderSwiper = null;
-    }
+    destroyReaderView();
 
     // Reset state
     currentComicPath = null;
@@ -1597,6 +2295,17 @@ document.addEventListener('DOMContentLoaded', () => {
         persistReadingPosition({ useBeacon: true });
     });
 
+    // A resized window changes what "fits the width" means. Re-fit unless the
+    // user has zoomed in on purpose.
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            if (comicReaderSwiper && !readerZoomedBeyondFit()) {
+                resetPagedZoomToFit('top');
+            }
+        }, 150);
+    });
+
     // Next issue overlay handlers
     const nextIssueContinue = document.getElementById('nextIssueContinue');
     if (nextIssueContinue) {
@@ -1638,7 +2347,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Jump to the saved page WITHOUT counting it as pages read --
             // otherwise resuming a bookmark near the end instantly looks
             // "finished" and the next close deletes the bookmark.
-            if (comicReaderSwiper && savedReadingPosition) {
+            if (readerHasView() && savedReadingPosition) {
                 readerSlideTo(savedReadingPosition - 1); // 1-indexed -> 0-indexed
             }
         });

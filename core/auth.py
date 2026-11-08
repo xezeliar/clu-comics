@@ -338,6 +338,7 @@ _READER_WRITE_PREFIXES = (
     "/api/read/",              # /api/read/<path>/page/<n>
     "/api/mark-comic-read",    # records the reader's own read history
     "/api/reading-position",
+    "/api/reader-prefs",       # the reader's own layout preference (per user)
     "/api/reading-stats",
     "/api/favorites",          # favorites_bp
     "/api/to-read",
