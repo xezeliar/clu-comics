@@ -28,3 +28,7 @@ CLAUDE.md
 *.log
 .claude/settings.local.json
 *.db
+
+# Local folder
+Comics/
+Downloads/
