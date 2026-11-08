@@ -369,3 +369,77 @@ class TestThumbnailSweeps:
 
         touched = {call.args[0] for call in gen.call_args_list}
         assert str(library / "Superman") in touched
+
+
+def _jpeg():
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new("RGB", (300, 450), "green").save(out, "JPEG")
+    return out.getvalue()
+
+
+class TestCustomFolderThumbnail:
+
+    def _upload(self, client, folder, data):
+        import io
+        return client.post(
+            "/api/folder-thumbnail/custom",
+            data={"folder_path": folder, "image": (io.BytesIO(data), "cover.jpg")},
+            content_type="multipart/form-data",
+        )
+
+    def test_upload_sets_custom_art(self, client, data_dir_library):
+        from core import folder_thumbnails
+        folder = os.path.join(data_dir_library, "Batman")
+        os.makedirs(folder)
+
+        response = self._upload(client, folder, _jpeg())
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["success"] is True and body["thumbnail_url"]
+        assert folder_thumbnails.is_custom_thumbnail(folder)
+
+    def test_upload_rejects_non_image(self, client, data_dir_library):
+        folder = os.path.join(data_dir_library, "Batman")
+        os.makedirs(folder)
+
+        response = self._upload(client, folder, b"not an image")
+
+        assert response.status_code == 400
+        assert not os.path.exists(os.path.join(folder, "folder.png"))
+
+    def test_upload_refuses_folder_outside_libraries(self, client, data_dir_library, tmp_path):
+        outside = tmp_path / "elsewhere"
+        outside.mkdir()
+
+        response = self._upload(client, str(outside), _jpeg())
+
+        assert response.status_code == 400
+        assert not (outside / "folder.png").exists()
+
+    def test_remove_regenerates(self, client, data_dir_library):
+        from core import folder_thumbnails
+        folder = os.path.join(data_dir_library, "Batman")
+        os.makedirs(folder)
+        folder_thumbnails.save_custom_thumbnail(folder, _jpeg())
+
+        with patch("app.generate_folder_thumbnail_internal", return_value=True) as gen:
+            response = client.post(
+                "/api/folder-thumbnail/custom/remove", json={"folder_path": folder}
+            )
+
+        assert response.status_code == 200
+        assert not folder_thumbnails.is_custom_thumbnail(folder)
+        gen.assert_called_once_with(folder, overwrite=True)
+
+    def test_remove_without_custom_art(self, client, data_dir_library):
+        folder = os.path.join(data_dir_library, "Batman")
+        os.makedirs(folder)
+
+        response = client.post(
+            "/api/folder-thumbnail/custom/remove", json={"folder_path": folder}
+        )
+
+        assert response.status_code == 400

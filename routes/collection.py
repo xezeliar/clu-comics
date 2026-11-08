@@ -41,7 +41,8 @@ from core.database import (
     invalidate_browse_cache, add_file_index_entry, delete_file_index_entry,
     search_file_index, get_user_preference, get_files_recursive_paged,
     count_files_recursive,
-    get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin
+    get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin,
+    set_directory_has_thumbnail,
 )
 
 collection_bp = Blueprint('collection', __name__)
@@ -1562,6 +1563,81 @@ def unpin_folder_thumbnail():
     delete_folder_pin(folder_path)
     _regenerate(folder_path)
 
+    return jsonify({
+        "success": True,
+        "folder_path": folder_path,
+        "thumbnail_url": _thumbnail_url(folder_path),
+    })
+
+
+@collection_bp.route('/api/folder-thumbnail/custom', methods=['POST'])
+def upload_custom_folder_thumbnail():
+    """Use an uploaded image as a folder's thumbnail. Regenerating skips it."""
+    folder_path = request.form.get('folder_path')
+    upload = request.files.get('image')
+
+    if not folder_path or not os.path.isdir(folder_path):
+        return jsonify({"success": False, "error": "Invalid folder path"}), 400
+    # Folder art belongs to library folders; is_allowed_path adds the realpath
+    # check, so a symlink out of the allowed roots is refused too.
+    if not (is_valid_library_path(folder_path) and is_allowed_path(folder_path)):
+        return jsonify({"success": False, "error": "Invalid folder path"}), 400
+    denied = enforce_path_access(folder_path)
+    if denied:
+        return denied
+    if upload is None:
+        return jsonify({"success": False, "error": "No image uploaded"}), 400
+
+    # Read one byte past the cap so an oversized upload is refused, not cut.
+    data = upload.stream.read(folder_thumbnails.CUSTOM_MAX_UPLOAD_BYTES + 1)
+    try:
+        folder_thumbnails.save_custom_thumbnail(folder_path, data)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except OSError as e:
+        app_logger.error(f"Could not write custom thumbnail for {folder_path}: {e}")
+        return jsonify({"success": False, "error": "Could not save the image"}), 500
+
+    from app import invalidate_cache_for_path
+
+    set_directory_has_thumbnail(folder_path, True)
+    invalidate_cache_for_path(folder_path)
+    app_logger.info(f"Set custom folder thumbnail: {folder_path}")
+    return jsonify({
+        "success": True,
+        "folder_path": folder_path,
+        "thumbnail_url": _thumbnail_url(folder_path),
+    })
+
+
+@collection_bp.route('/api/folder-thumbnail/custom/remove', methods=['POST'])
+def remove_custom_folder_thumbnail():
+    """Drop an uploaded folder image and go back to generated art."""
+    data = request.get_json() or {}
+    folder_path = data.get('folder_path')
+
+    if not folder_path or not os.path.isdir(folder_path):
+        return jsonify({"success": False, "error": "Invalid folder path"}), 400
+    # Folder art belongs to library folders; is_allowed_path adds the realpath
+    # check, so a symlink out of the allowed roots is refused too.
+    if not (is_valid_library_path(folder_path) and is_allowed_path(folder_path)):
+        return jsonify({"success": False, "error": "Invalid folder path"}), 400
+    denied = enforce_path_access(folder_path)
+    if denied:
+        return denied
+
+    if not folder_thumbnails.remove_custom_thumbnail(folder_path):
+        return jsonify(
+            {"success": False, "error": "This folder has no custom thumbnail"}
+        ), 400
+
+    from app import invalidate_cache_for_path
+
+    if not _regenerate(folder_path):
+        # Nothing to build from (no comics): the folder icon shows again.
+        set_directory_has_thumbnail(folder_path, False)
+    invalidate_cache_for_path(folder_path)
+    app_logger.info(f"Removed custom folder thumbnail: {folder_path}")
     return jsonify({
         "success": True,
         "folder_path": folder_path,

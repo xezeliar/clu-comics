@@ -535,16 +535,102 @@ def may_write(folder_path, overwrite):
     """Whether generation is allowed to write ``folder.png`` into a folder.
 
     The explicit menu actions pass ``overwrite=True`` — the user asked for new
-    art and expects the old image replaced. Auto-generation passes False, and
+    art and expects the old image replaced, unless it is a custom upload. Auto-generation passes False, and
     any existing ``folder.*`` (including formats we generate but never produce,
     like an uploaded .gif) makes this the user's image to keep.
     """
     if overwrite:
-        return True
+        # A custom image the user uploaded outranks even an explicit
+        # regenerate: it goes only through Remove Custom Thumbnail.
+        return not is_custom_thumbnail(folder_path)
 
     from helpers import find_folder_thumbnail
 
     return find_folder_thumbnail(folder_path) is None
+
+
+# Custom folder thumbnails: an image the user uploads, written as folder.png
+# with this PNG text chunk. The marker travels with the file through folder
+# moves and renames, and deleting the image removes the custom status with it.
+CUSTOM_MARKER_KEY = "clu-custom-thumbnail"
+# Twice CANVAS_SIZE: same 2:3 card, sharp on high-density screens.
+CUSTOM_SIZE = (400, 600)
+CUSTOM_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+CUSTOM_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
+
+
+def is_custom_thumbnail(folder_path):
+    """Whether the folder's art is an image the user uploaded."""
+    from helpers import find_folder_thumbnail
+
+    thumb = find_folder_thumbnail(folder_path)
+    if not thumb or not thumb.lower().endswith(".png"):
+        return False
+    try:
+        with Image.open(thumb) as img:
+            return img.info.get(CUSTOM_MARKER_KEY) == "1"
+    except Exception:
+        return False
+
+
+def build_custom_thumbnail(image_bytes):
+    """Turn uploaded bytes into the 2:3 card image. Raises ValueError if the
+    bytes are not a usable JPEG/PNG/WebP/GIF."""
+    from io import BytesIO
+
+    if len(image_bytes) > CUSTOM_MAX_UPLOAD_BYTES:
+        raise ValueError("Image is larger than 25 MB")
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        if img.format not in CUSTOM_FORMATS:
+            raise ValueError("Use a JPG, PNG, WebP or GIF image")
+        img.load()
+    except ValueError:
+        raise
+    except Exception as e:  # truncated file, decompression bomb, not an image
+        raise ValueError("That file is not a readable image") from e
+    # Phone photos store their rotation in EXIF; apply it or they land sideways.
+    img = ImageOps.exif_transpose(img).convert("RGBA")
+    return ImageOps.fit(img, CUSTOM_SIZE, Image.LANCZOS)
+
+
+def save_custom_thumbnail(folder_path, image_bytes):
+    """Replace the folder's art with an uploaded image. Returns the written path.
+
+    The new file is written next to the old art and swapped in, so a failed
+    write leaves the old art in place.
+    """
+    from PIL import PngImagePlugin
+    from helpers import FOLDER_THUMBNAIL_EXTENSIONS, match_parent_permissions
+
+    card = build_custom_thumbnail(image_bytes)
+    info = PngImagePlugin.PngInfo()
+    info.add_text(CUSTOM_MARKER_KEY, "1")
+
+    output_path = os.path.join(folder_path, "folder.png")
+    # Not starting with "folder." so it never counts as folder art mid-write.
+    tmp_path = os.path.join(folder_path, ".clu-folder-upload.png")
+    card.save(tmp_path, "PNG", pnginfo=info)
+    try:
+        # Other folder.* images would keep winning find_folder_thumbnail.
+        for ext in FOLDER_THUMBNAIL_EXTENSIONS:
+            old = os.path.join(folder_path, f"folder{ext}")
+            if ext != ".png" and os.path.exists(old):
+                os.remove(old)
+        os.replace(tmp_path, output_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    match_parent_permissions(output_path)
+    return output_path
+
+
+def remove_custom_thumbnail(folder_path):
+    """Delete an uploaded image. Returns False if the folder has none."""
+    if not is_custom_thumbnail(folder_path):
+        return False
+    os.remove(os.path.join(folder_path, "folder.png"))
+    return True
 
 
 def _get_executor():
