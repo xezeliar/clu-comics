@@ -1191,9 +1191,12 @@ def series_view(slug):
                 os.path.join(mapped_path, SERIES_JSON_FILENAME)
             )
 
+        from core.series_status import year_ended_label
+
         return render_template(
             "series.html",
             series=series_info,
+            year_ended_label=year_ended_label(series_info, all_issues),
             series_dict=series_dict,
             issues=all_issues,
             first_issue_image=first_issue_image,
