@@ -11,7 +11,7 @@ services:
                 max-file: '3'     # Keep only 3 rotated files
         restart: always
         ports:
-            - '5577:5577'
+            - '5578:5577'
         volumes:
             - '/var/run/docker.sock:/tmp/docker.sock:ro' # do not change this line
             ## update the line below to map to your library.

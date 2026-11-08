@@ -26,3 +26,6 @@ up: build
 
 up-push: up
 	docker push $(REF)
+
+down:
+	docker compose down
