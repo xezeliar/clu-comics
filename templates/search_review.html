@@ -13,12 +13,14 @@
   <li class="nav-item"><button class="nav-link active" data-outcome="waiting" type="button">Waiting for OK <span class="badge text-bg-danger d-none" id="sr-waiting-count"></span></button></li>
   <li class="nav-item"><button class="nav-link" data-outcome="" type="button">Recent searches</button></li>
   <li class="nav-item"><button class="nav-link" data-outcome="nothing_found" type="button">Nothing found</button></li>
+  <li class="nav-item"><button class="nav-link" data-outcome="search_error" type="button">Search failed</button></li>
 </ul>
 
 <div id="sr-list"></div>
 
 <div id="sr-empty-waiting" class="d-none">{{ empty_state('Nothing waiting', 'Borderline picks appear here when Review before download is on.', 'bi-check2-circle') }}</div>
 <div id="sr-empty-all" class="d-none">{{ empty_state('No searches recorded yet', 'Each searched issue shows up here after the next sweep.', 'bi-search') }}</div>
+<div id="sr-empty-search_error" class="d-none">{{ empty_state('No failed searches', 'Searches that GetComics refused (for example a rate limit) appear here and are retried on the next sweep.', 'bi-check2-circle') }}</div>
 <div id="sr-empty-nothing_found" class="d-none">{{ empty_state('Nothing missing a match', 'Issues where no candidate was accepted appear here.', 'bi-emoji-smile') }}</div>
 {% endblock %}
 
@@ -71,7 +73,7 @@
       li.appendChild(el('span', 'text-muted small', k.reason || ''));
       list.appendChild(li);
     });
-    if (!a.candidates.length) list.appendChild(el('li', 'list-group-item text-muted', 'No candidates were returned.'));
+    if (!a.candidates.length) list.appendChild(el('li', 'list-group-item text-muted', a.outcome === 'search_error' ? 'The search failed (GetComics refused the request, usually a rate limit). It will be retried on the next sweep.' : 'No candidates were returned.'));
     c.appendChild(list);
 
     var foot = el('div', 'card-footer d-flex gap-2');
@@ -98,7 +100,7 @@
       badge.textContent = d.waiting;
       badge.classList.toggle('d-none', !d.waiting);
       listEl.textContent = '';
-      ['waiting', 'all', 'nothing_found'].forEach(function (k) {
+      ['waiting', 'all', 'nothing_found', 'search_error'].forEach(function (k) {
         document.getElementById('sr-empty-' + k).classList.add('d-none');
       });
       if (!d.attempts.length) {

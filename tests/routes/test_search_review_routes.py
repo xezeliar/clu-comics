@@ -92,3 +92,11 @@ def test_clerk_only(app):
         assert required_role_for_request() == "clerk"
     with app.test_request_context("/api/search-review"):
         assert required_role_for_request() == "clerk"
+
+
+def test_search_error_outcome_is_listed_and_filterable(client):
+    _attempt("search_error", 3)
+    _attempt("nothing_found", 4)
+    data = client.get("/api/search-review?outcome=search_error").get_json()
+    assert [a["issue_number"] for a in data["attempts"]] == ["3"]
+    assert client.get("/search-review").status_code == 200

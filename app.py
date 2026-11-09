@@ -1710,7 +1710,13 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                     series_year=series_year,  # Pass volume_year to help find correct series edition
                     search_variants=search_variants,
                     series_aliases=series_aliases,
-                ) or []
+                )
+                # An empty answer is only "nothing found" if GetComics really
+                # answered; a request that failed (429 after retries) says
+                # nothing about the issue. Read the flag before `or []`
+                # replaces the object that carries it.
+                search_failed = bool(getattr(results, "failed", False))
+                results = results or []
 
                 if not results:
                     if dry_run:
@@ -2174,7 +2180,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 if gc_miss:
                     _record(item, gc_miss[0], detail=gc_miss[1])
                     if attempt_outcome is None:
-                        attempt_outcome = "nothing_found"
+                        attempt_outcome = (
+                            "search_error" if search_failed and not results
+                            else "nothing_found"
+                        )
 
                 if attempt_outcome and not dry_run:
                     # Chosen first, then best scores; five is enough to see why.
