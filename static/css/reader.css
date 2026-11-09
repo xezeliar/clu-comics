@@ -1,9 +1,10 @@
 /* Comic Reader Modal Styles */
 .comic-reader-modal {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
+    /* inset + 100%, not 100vw: on iOS 100vw is the *layout* width and drifts
+       from the visible one after a pinch, which is the sideways shift. */
+    inset: 0;
+    width: 100%;
     height: 100vh;
     /* dvh tracks the mobile browser's collapsing toolbar, which 100vh ignores --
        without it the footer sits under the toolbar, worst after a rotation. */
@@ -13,8 +14,9 @@
     align-items: center;
     justify-content: center;
     /* Prevent pull-to-refresh and bounce on mobile */
-    overscroll-behavior: contain;
+    overscroll-behavior: none;
     touch-action: pan-x pan-y;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .comic-reader-overlay {
@@ -626,6 +628,15 @@
     overflow-y: scroll;
     overflow-anchor: none;
     overscroll-behavior: contain;
+    /* One finger scrolls, two are the reader's own pinch (reader.js); the
+       browser's pinch-zoom is off so it cannot shift the layout. */
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+    /* Own compositing layer: scrolling a tall strip stays on the GPU. */
+    will-change: scroll-position;
+    transform: translateZ(0);
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
     outline: none;
@@ -639,6 +650,8 @@
 
 .comic-scroll-page {
     position: relative;
+    /* A page that loads lays out only itself, not the whole strip. */
+    contain: layout paint;
     width: 100%;
     /* Until a page's image is measured, assume the shape of the first one that
        was (reader.js sets --scroll-page-ratio), else a typical comic page. */
