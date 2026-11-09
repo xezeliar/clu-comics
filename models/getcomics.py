@@ -2267,6 +2267,13 @@ def score_comic(result_title: str, search: SearchCriteria) -> ComicScore:
     # Phase 4: Collected edition penalty (-30)
     score += _score_collected_edition(title_lower, series_lower, sub_series_type, variant_accepted)
 
+    # A title that never names the wanted issue cannot be a direct match for #2
+    # and up: a bare "X-Men" scored 45 for every issue. #0/#1 stay open for
+    # one-shots, which GetComics often titles without a number.
+    if (not issue_matched and not range_contains_target
+            and issue_num not in ('0', '1') and score >= ACCEPT_THRESHOLD):
+        score = ACCEPT_THRESHOLD - 1
+
     # Range fallback cap
     if range_contains_target and score >= FALLBACK_MIN:
         score = min(score, ACCEPT_THRESHOLD - 1)
@@ -3346,6 +3353,19 @@ def build_sitemap_index(max_sitemaps: int | None = None, force_refresh: bool = F
     return total_indexed
 
 
+_SITE_SUFFIX_RE = re.compile(r'\s*[-|\u2013\u2014\x96\x97\u0097]?\s*GetComics\b.*$', re.IGNORECASE)
+
+
+def strip_getcomics_site_suffix(text: str) -> str:
+    """Drop the trailing "– GetComics" site name from a page title.
+
+    Only the site suffix goes. A " – " inside the title separates a series from
+    its story arc ("New Mutants – Truth Or Death #1 – 3"); cutting there left the
+    bare series name, which scored as a match for every issue of that series.
+    """
+    return _SITE_SUFFIX_RE.sub('', text or '').strip()
+
+
 def scrape_and_score_candidate(
     url: str,
     series_name: str,
@@ -3391,13 +3411,7 @@ def scrape_and_score_candidate(
 
         def _extract_title(text: str) -> str:
             """Normalize title text for scoring."""
-            for sep in [" - ", " \u2013 ", " \u2014 ", " \x97 ", " \u0097 "]:
-                if sep in text:
-                    text = text.split(sep)[0].strip()
-                    break
-            else:
-                if "GetComics" in text:
-                    text = text.split("GetComics")[0].strip().rstrip("-").rstrip("\u2013").rstrip("\u2014").rstrip()
+            text = strip_getcomics_site_suffix(text)
             return text.replace('\u2013', '-').replace('\u2014', '-').replace('\x97', '-').replace('\u0097', '-')
 
         def _extract_links(container) -> dict:
@@ -4352,20 +4366,7 @@ def _scrape_url_to_index(url: str, url_slug: str = "", series_norm: str = "", la
             # NOT when " - " is part of an issue range like "Top 10 #1 - 12".
             # We detect this by checking: if the character before " - " is a digit,
             # it's likely an issue range separator, not a title suffix.
-            suffix_split = False
-            for sep in [" - ", " \u2013 ", " \u2014 ", " \x97 "]:
-                idx = title_text.find(sep)
-                if idx > 0 and idx < len(title_text) - len(sep):
-                    char_before = title_text[idx - 1]
-                    if char_before.isdigit():
-                        continue  # Skip this separator — it's an issue range dash
-                if sep in title_text:
-                    title_text = title_text.split(sep)[0].strip()
-                    suffix_split = True
-                    break
-            if not suffix_split:
-                if "GetComics" in title_text:
-                    title_text = title_text.split("GetComics")[0].strip().rstrip("-").rstrip()
+            title_text = strip_getcomics_site_suffix(title_text)
 
             parsed = parse_result_title(title_text)
             # The scrape indexer does NOT derive search aliases from page titles.
