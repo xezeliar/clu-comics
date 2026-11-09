@@ -26,7 +26,7 @@
 
     function libraryPath() {
         const select = el('seriesSetupLibrary');
-        const path = select ? select.value : (window._cluSeriesSetupDefaultLibrary || '/data');
+        const path = select ? select.value : (window._cluSeriesSetupDefaultLibrary || '');
         return (path || '').replace(/\/+$/, '');
     }
 
