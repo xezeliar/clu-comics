@@ -782,6 +782,35 @@ def _init_db_locked():
             )
         """)
 
+        # Search review: why each GetComics candidate was accepted or rejected,
+        # and picks held for approval. Pruned to the newest attempts on write.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS search_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                series_id INTEGER,
+                series_name TEXT,
+                issue_number TEXT,
+                trigger TEXT,
+                outcome TEXT
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS search_candidates (
+                attempt_id INTEGER NOT NULL,
+                title TEXT,
+                link TEXT,
+                score INTEGER,
+                decision TEXT,
+                reason TEXT,
+                chosen INTEGER DEFAULT 0
+            )
+        """)
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_search_candidates_attempt "
+            "ON search_candidates(attempt_id)"
+        )
+
         # Create browse_cache table (cache pre-computed browse results)
         c.execute("""
             CREATE TABLE IF NOT EXISTS browse_cache (
@@ -12577,6 +12606,163 @@ def clear_wanted_queue_stamp(series_id, issue_number):
             conn.close()
     except Exception as e:
         app_logger.error(f"Failed to clear wanted_queue_log: {e}")
+        return False
+
+
+SEARCH_ATTEMPTS_KEEP = 500
+SEARCH_OUTCOMES = ("queued", "waiting", "nothing_found", "skipped")
+
+
+def record_search_attempt(series_id, series_name, issue_number, trigger, outcome,
+                          candidates):
+    """Store one searched issue and its top candidates; returns the attempt id.
+
+    ``candidates`` is a list of dicts (title, link, score, decision, reason,
+    chosen). Never raises: a failed review record must not abort a download.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            cur = conn.execute(
+                "INSERT INTO search_attempts "
+                "(series_id, series_name, issue_number, trigger, outcome) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (series_id, series_name, str(issue_number), trigger, outcome),
+            )
+            attempt_id = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO search_candidates "
+                "(attempt_id, title, link, score, decision, reason, chosen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (attempt_id, c.get("title"), c.get("link"), c.get("score"),
+                     c.get("decision"), c.get("reason"), 1 if c.get("chosen") else 0)
+                    for c in candidates
+                ],
+            )
+            conn.execute(
+                "DELETE FROM search_attempts WHERE id <= "
+                "(SELECT COALESCE(MAX(id), 0) FROM search_attempts) - ?",
+                (SEARCH_ATTEMPTS_KEEP,),
+            )
+            conn.execute(
+                "DELETE FROM search_candidates WHERE attempt_id NOT IN "
+                "(SELECT id FROM search_attempts)"
+            )
+            conn.commit()
+            return attempt_id
+    except Exception as e:
+        app_logger.error(f"Failed to record search attempt: {e}")
+        return None
+
+
+def list_search_attempts(outcome=None, limit=100):
+    """Newest-first attempts, each with its ``candidates``. None on read failure."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            sql = ("SELECT id, created_at, series_id, series_name, issue_number, "
+                   "trigger, outcome FROM search_attempts")
+            args = []
+            if outcome:
+                sql += " WHERE outcome = ?"
+                args.append(outcome)
+            sql += " ORDER BY id DESC LIMIT ?"
+            args.append(int(limit))
+            keys = ("id", "created_at", "series_id", "series_name",
+                    "issue_number", "trigger", "outcome")
+            attempts = [dict(zip(keys, r)) for r in conn.execute(sql, args).fetchall()]
+            for a in attempts:
+                rows = conn.execute(
+                    "SELECT rowid, title, link, score, decision, reason, chosen "
+                    "FROM search_candidates WHERE attempt_id = ? "
+                    "ORDER BY score DESC, rowid",
+                    (a["id"],),
+                ).fetchall()
+                a["candidates"] = [
+                    {"id": r[0], "title": r[1], "link": r[2], "score": r[3],
+                     "decision": r[4], "reason": r[5], "chosen": bool(r[6])}
+                    for r in rows
+                ]
+            return attempts
+    except Exception as e:
+        app_logger.error(f"Failed to list search attempts: {e}")
+        return None
+
+
+def get_search_attempt(attempt_id):
+    """One attempt with candidates, or None."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            row = conn.execute(
+                "SELECT id FROM search_attempts WHERE id = ?", (int(attempt_id),)
+            ).fetchone()
+        if not row:
+            return None
+        found = [a for a in (list_search_attempts(limit=SEARCH_ATTEMPTS_KEEP) or [])
+                 if a["id"] == int(attempt_id)]
+        return found[0] if found else None
+    except Exception as e:
+        app_logger.error(f"Failed to read search attempt: {e}")
+        return None
+
+
+def clear_search_queue_stamps(series_id, series_name, issue_number):
+    """Let the next sweep search this issue again; returns rows cleared."""
+    cleared = 1 if series_id is not None and clear_wanted_queue_stamp(
+        series_id, issue_number) else 0
+    try:
+        with db_conn() as conn:
+            if conn:
+                cur = conn.execute(
+                    "UPDATE reading_list_entries SET last_queued_at = NULL "
+                    "WHERE LOWER(series) = LOWER(?) AND issue_number = ?",
+                    (series_name or "", str(issue_number)),
+                )
+                conn.commit()
+                cleared += cur.rowcount
+    except Exception as e:
+        app_logger.error(f"Failed to clear reading-list queue stamp: {e}")
+    return cleared
+
+
+def count_waiting_search_attempts():
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return 0
+            return conn.execute(
+                "SELECT COUNT(*) FROM search_attempts WHERE outcome = 'waiting'"
+            ).fetchone()[0]
+    except Exception:
+        return 0
+
+
+def set_search_attempt_outcome(attempt_id, outcome, only_from=None):
+    """Move an attempt to ``outcome``; ``only_from`` guards against double-clicks.
+
+    Returns True when a row changed.
+    """
+    if outcome not in SEARCH_OUTCOMES:
+        return False
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            sql = "UPDATE search_attempts SET outcome = ? WHERE id = ?"
+            args = [outcome, int(attempt_id)]
+            if only_from:
+                sql += " AND outcome = ?"
+                args.append(only_from)
+            cur = conn.execute(sql, args)
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as e:
+        app_logger.error(f"Failed to update search attempt: {e}")
         return False
 
 
