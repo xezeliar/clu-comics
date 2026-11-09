@@ -949,3 +949,184 @@ class TestFindFilesByMetronIds:
         from core.database import find_files_by_metron_ids
 
         assert find_files_by_metron_ids([]) == {}
+
+
+def _can_write_now(db_path):
+    """True when a fresh connection can take the write lock without waiting.
+
+    A writer that swallows an exception without closing its connection leaves
+    the implicit transaction open, and the abandoned connection lives on in a
+    reference cycle until the cyclic GC runs -- holding the WAL write lock the
+    whole time. Every other writer then burns the 30s busy_timeout (#723).
+    """
+    import sqlite3
+
+    probe = sqlite3.connect(db_path, timeout=0.5)
+    try:
+        probe.execute("BEGIN IMMEDIATE")
+        probe.rollback()
+        return True
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        probe.close()
+
+
+class TestFileIndexWritersReleaseTheLock:
+    """#723: a rename onto an indexed path must neither fail nor hold the lock."""
+
+    def test_rename_onto_an_indexed_path_replaces_the_stale_row(
+        self, db_connection, db_path
+    ):
+        import gc
+        from core.database import (
+            add_file_index_entry,
+            get_file_index_entry_by_path,
+            update_file_index_entry,
+        )
+
+        parent = "/data/DC/Supergirl/Volume 1996"
+        src = f"{parent}/Supergirl 2 Issue 000 (2000) (1).cbz"
+        dst = f"{parent}/Supergirl 2 Issue (2000) Issue 000 (2000).cbz"
+        add_file_index_entry(name="a", path=src, entry_type="file", size=2, parent=parent)
+        add_file_index_entry(name="b", path=dst, entry_type="file", size=1, parent=parent)
+
+        gc.disable()  # the leak is only visible until a cyclic collection
+        try:
+            ok = update_file_index_entry(
+                src, name=dst.rsplit("/", 1)[1], new_path=dst, parent=parent
+            )
+            assert _can_write_now(db_path)
+        finally:
+            gc.enable()
+
+        assert ok is True
+        assert get_file_index_entry_by_path(src) is None
+        sizes = db_connection.execute(
+            "SELECT size FROM file_index WHERE path = ?", (dst,)
+        ).fetchall()
+        assert [r[0] for r in sizes] == [2]  # the source row survives, once
+
+    def test_rename_onto_an_indexed_path_with_no_source_row_keeps_the_destination(
+        self, db_connection
+    ):
+        from core.database import add_file_index_entry, update_file_index_entry
+
+        dst = "/data/X/Comic 002.cbz"
+        add_file_index_entry(name="b", path=dst, entry_type="file", size=7, parent="/data/X")
+
+        update_file_index_entry("/data/X/never-indexed.cbz", new_path=dst)
+
+        sizes = db_connection.execute(
+            "SELECT size FROM file_index WHERE path = ?", (dst,)
+        ).fetchall()
+        assert [r[0] for r in sizes] == [7]
+
+    @pytest.mark.parametrize("call", ["add", "update", "delete", "thumb"])
+    def test_a_failed_write_releases_the_lock(self, db_connection, db_path, call):
+        import gc
+        import sqlite3
+        from unittest.mock import patch
+        import core.database as database
+
+        real_execute = database._GuardedCursor.execute
+
+        def failing_execute(self, sql, *args, **kwargs):
+            # Take the write lock first, the way a constraint failure does,
+            # then fail.
+            if "file_index" in sql and not sql.lstrip().upper().startswith("SELECT"):
+                real_execute(self, "UPDATE file_index SET size = size WHERE 0")
+                raise sqlite3.IntegrityError("UNIQUE constraint failed: file_index.path")
+            return real_execute(self, sql, *args, **kwargs)
+
+        calls = {
+            "add": lambda: database.add_file_index_entry(
+                name="a", path="/data/a.cbz", entry_type="file", parent="/data"
+            ),
+            "update": lambda: database.update_file_index_entry("/data/a.cbz", size=3),
+            "delete": lambda: database.delete_file_index_entry("/data/a.cbz"),
+            "thumb": lambda: database.set_directory_has_thumbnail("/data"),
+        }
+        gc.disable()
+        try:
+            with patch.object(database._GuardedCursor, "execute", failing_execute):
+                assert calls[call]() is False
+            assert _can_write_now(db_path)
+        finally:
+            gc.enable()
+
+
+class TestFileIndexRebuildWritersReleaseTheLock:
+    """#722: the full and incremental index writers, same failure shape as #723."""
+
+    def test_full_save_survives_a_path_walked_twice(self, db_connection, db_path):
+        """Nested or overlapping library roots yield a path twice. A plain
+        INSERT raised UNIQUE after the DELETE had committed, wiping the index
+        and leaking the write lock."""
+        import gc
+        from core.database import save_file_index_to_db
+
+        def entry(path, size):
+            return {"name": path.rsplit("/", 1)[1], "path": path, "type": "file",
+                    "size": size, "parent": path.rsplit("/", 1)[0]}
+
+        gc.disable()
+        try:
+            ok = save_file_index_to_db([
+                entry("/data/A/One 001.cbz", 1),
+                entry("/data/A/Two 001.cbz", 2),
+                entry("/data/A/One 001.cbz", 9),
+            ])
+            assert _can_write_now(db_path)
+        finally:
+            gc.enable()
+
+        assert ok is True
+        rows = db_connection.execute(
+            "SELECT path, size FROM file_index ORDER BY path"
+        ).fetchall()
+        assert [tuple(r) for r in rows] == [
+            ("/data/A/One 001.cbz", 1),  # first occurrence wins
+            ("/data/A/Two 001.cbz", 2),
+        ]
+
+    @pytest.mark.parametrize("call", ["save", "sync"])
+    def test_a_failed_write_releases_the_lock(self, db_connection, db_path, call):
+        import gc
+        import sqlite3
+        from unittest.mock import patch
+        import core.database as database
+
+        real_execute = database._GuardedCursor.execute
+        real_executemany = database._GuardedCursor.executemany
+
+        def _fail_after_locking(self, sql):
+            real_execute(self, "UPDATE file_index SET size = size WHERE 0")
+            raise sqlite3.IntegrityError("UNIQUE constraint failed: file_index.path")
+
+        def failing_execute(self, sql, *args, **kwargs):
+            if sql.lstrip().upper().startswith("INSERT INTO FILE_INDEX"):
+                _fail_after_locking(self, sql)
+            return real_execute(self, sql, *args, **kwargs)
+
+        def failing_executemany(self, sql, *args, **kwargs):
+            if sql.lstrip().upper().startswith("INSERT INTO FILE_INDEX"):
+                _fail_after_locking(self, sql)
+            return real_executemany(self, sql, *args, **kwargs)
+
+        entries = [{"name": "a.cbz", "path": "/data/a.cbz", "type": "file",
+                    "size": 1, "parent": "/data"}]
+        calls = {
+            "save": lambda: database.save_file_index_to_db(entries),
+            "sync": lambda: database.sync_file_index_incremental(entries),
+        }
+        failed = {"save": False, "sync": {"added": 0, "removed": 0,
+                                          "unchanged": 0, "new_paths": []}}
+        gc.disable()
+        try:
+            with patch.object(database._GuardedCursor, "execute", failing_execute), \
+                 patch.object(database._GuardedCursor, "executemany", failing_executemany):
+                assert calls[call]() == failed[call]
+            assert _can_write_now(db_path)
+        finally:
+            gc.enable()
