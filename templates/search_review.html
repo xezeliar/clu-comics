@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
+
+{% block title %}CLU: Search review{% endblock %}
+
+{% block content %}
+{% call(slot) page_header('Search review', 'bi-search',
+                          subtitle='Why GetComics candidates were accepted or rejected, and picks held for your OK.') %}
+{% endcall %}
+
+<ul class="nav nav-tabs mb-3" id="sr-tabs">
+  <li class="nav-item"><button class="nav-link active" data-outcome="waiting" type="button">Waiting for OK <span class="badge text-bg-danger d-none" id="sr-waiting-count"></span></button></li>
+  <li class="nav-item"><button class="nav-link" data-outcome="" type="button">Recent searches</button></li>
+  <li class="nav-item"><button class="nav-link" data-outcome="nothing_found" type="button">Nothing found</button></li>
+</ul>
+
+<div id="sr-list"></div>
+
+<div id="sr-empty-waiting" class="d-none">{{ empty_state('Nothing waiting', 'Borderline picks appear here when Review before download is on.', 'bi-check2-circle') }}</div>
+<div id="sr-empty-all" class="d-none">{{ empty_state('No searches recorded yet', 'Each searched issue shows up here after the next sweep.', 'bi-search') }}</div>
+<div id="sr-empty-nothing_found" class="d-none">{{ empty_state('Nothing missing a match', 'Issues where no candidate was accepted appear here.', 'bi-emoji-smile') }}</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+  var listEl = document.getElementById('sr-list');
+  var current = 'waiting';
+  var urls = {
+    list: "{{ url_for('search_review.api_list') }}",
+    base: "{{ url_for('search_review.api_list') }}/"
+  };
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function post(id, action) {
+    return fetch(urls.base + id + '/' + action, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+    }).then(function (r) { return r.json(); });
+  }
+
+  function act(id, action, okMessage) {
+    post(id, action).then(function (d) {
+      if (d.success) { CLU.toast(okMessage, 'success'); load(); }
+      else { CLU.toast(d.error || 'Request failed', 'danger'); }
+    }).catch(function () { CLU.toast('Request failed', 'danger'); });
+  }
+
+  function card(a) {
+    var c = el('div', 'card mb-3');
+    var head = el('div', 'card-header d-flex flex-wrap align-items-center gap-2');
+    head.appendChild(el('strong', '', a.series_name + ' #' + a.issue_number));
+    head.appendChild(el('span', 'badge text-bg-secondary', a.outcome.replace('_', ' ')));
+    head.appendChild(el('span', 'text-muted small ms-auto', a.trigger + ' - ' + a.created_at));
+    c.appendChild(head);
+
+    var list = el('ul', 'list-group list-group-flush');
+    a.candidates.forEach(function (k) {
+      var li = el('li', 'list-group-item d-flex flex-wrap align-items-center gap-2');
+      if (k.chosen) li.appendChild(el('i', 'bi bi-check-circle-fill text-success'));
+      var title = el('span', 'flex-grow-1', k.title || '(untitled)');
+      li.appendChild(title);
+      li.appendChild(el('span', 'badge text-bg-' + (k.decision === 'ACCEPT' ? 'success' : k.decision === 'FALLBACK' ? 'warning' : 'secondary'), k.decision + ' ' + k.score));
+      li.appendChild(el('span', 'text-muted small', k.reason || ''));
+      list.appendChild(li);
+    });
+    if (!a.candidates.length) list.appendChild(el('li', 'list-group-item text-muted', 'No candidates were returned.'));
+    c.appendChild(list);
+
+    var foot = el('div', 'card-footer d-flex gap-2');
+    if (a.outcome === 'waiting') {
+      var ok = el('button', 'btn btn-sm btn-primary', 'Approve');
+      ok.addEventListener('click', function () { act(a.id, 'approve', 'Queued for download'); });
+      var skip = el('button', 'btn btn-sm btn-outline-secondary', 'Skip');
+      skip.addEventListener('click', function () { act(a.id, 'skip', 'Skipped'); });
+      foot.appendChild(ok); foot.appendChild(skip);
+    } else if (a.outcome === 'nothing_found') {
+      var again = el('button', 'btn btn-sm btn-outline-secondary', 'Search again');
+      again.addEventListener('click', function () { act(a.id, 'research', 'The next sweep will search this issue again'); });
+      foot.appendChild(again);
+    }
+    if (foot.children.length) c.appendChild(foot);
+    return c;
+  }
+
+  function load() {
+    var q = current ? '?outcome=' + current : '';
+    fetch(urls.list + q).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.success) { CLU.toast(d.error || 'Could not load', 'danger'); return; }
+      var badge = document.getElementById('sr-waiting-count');
+      badge.textContent = d.waiting;
+      badge.classList.toggle('d-none', !d.waiting);
+      listEl.textContent = '';
+      ['waiting', 'all', 'nothing_found'].forEach(function (k) {
+        document.getElementById('sr-empty-' + k).classList.add('d-none');
+      });
+      if (!d.attempts.length) {
+        document.getElementById('sr-empty-' + (current || 'all')).classList.remove('d-none');
+        return;
+      }
+      d.attempts.forEach(function (a) { listEl.appendChild(card(a)); });
+    }).catch(function () { CLU.toast('Could not load', 'danger'); });
+  }
+
+  document.querySelectorAll('#sr-tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#sr-tabs button').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      current = b.getAttribute('data-outcome');
+      load();
+    });
+  });
+  load();
+})();
+</script>
+{% endblock %}

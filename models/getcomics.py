@@ -1426,6 +1426,45 @@ def get_result_parts(result: dict) -> list[dict]:
 ACCEPT_THRESHOLD = 40   # score >= this → ACCEPT
 FALLBACK_MIN     = 0    # range fallback requires score >= this
 
+# Placeholder, to tune: how far above ACCEPT_THRESHOLD a score must be to count
+# as a clear match. Picks inside the margin are "borderline" and are held for
+# approval when Review before download is on.
+BORDERLINE_MARGIN = 15
+
+
+def is_borderline(decision: str, score: int) -> bool:
+    """True for a pick worth a human look: a range pack, or a thin ACCEPT."""
+    return decision == "FALLBACK" or score < ACCEPT_THRESHOLD + BORDERLINE_MARGIN
+
+
+def explain_decision(score_obj, decision: str, issue_number) -> str:
+    """One plain-English line for why a candidate was accepted or rejected.
+
+    ``score_obj`` is a :class:`ComicScore`; it is only read through ``getattr``
+    so a partial object degrades to a generic reason instead of raising.
+    """
+    g = lambda name, default=None: getattr(score_obj, name, default)
+    n = f"#{issue_number}"
+    if decision == "ACCEPT":
+        if g("issue_matched"):
+            return f"series matches and issue {n} is named"
+        return "series matches and the score is high enough"
+    if decision == "FALLBACK":
+        return f"range pack containing {n}, no better single issue found"
+    if g("range_contains_target"):
+        return "range pack, better single issue found"
+    if not g("series_match"):
+        return "different series"
+    if g("sub_series_type") == "arc":
+        return "arc page, not this series"
+    if g("sub_series_type") == "variant":
+        return "variant or collected edition, not the regular issue"
+    if g("remaining_is_different_series"):
+        return "a different series with a similar name"
+    if not g("issue_matched"):
+        return f"never names issue {n}"
+    return "score too low"
+
 
 def _normalize_separators(s):
     """Normalize colons/en-dashes/em-dashes to ' - ' for series matching.
@@ -2034,6 +2073,7 @@ def score_getcomics_result(
     publisher_name: str = None,
     series_aliases: list = None,
     return_issue_matched: bool = False,
+    return_detail: bool = False,
 ) -> tuple:
     """
     Score a GetComics search result against a wanted issue.
@@ -2118,6 +2158,7 @@ def score_getcomics_result(
             names.append(alias)
 
     best = None
+    best_obj = None
     for name in names:
         search = search_criteria(
             series_name=name,
@@ -2133,6 +2174,9 @@ def score_getcomics_result(
                      comic_score.series_match, comic_score.issue_matched)
         if best is None or candidate[0] > best[0]:
             best = candidate
+            best_obj = comic_score
+    if return_detail:
+        return best_obj  # the winning ComicScore, for explain_decision
     if return_issue_matched:
         return best
     return best[:3]

@@ -194,6 +194,7 @@ def app(db_connection, tmp_path):
     from routes.mylar_import import mylar_import_bp
     from routes.setup import setup_bp
     from routes.download_runs import download_runs_bp
+    from routes.search_review import search_review_bp
 
     test_app.register_blueprint(auth_bp)
     test_app.register_blueprint(favorites_bp)
@@ -219,6 +220,7 @@ def app(db_connection, tmp_path):
     test_app.register_blueprint(mylar_import_bp)
     test_app.register_blueprint(setup_bp)
     test_app.register_blueprint(download_runs_bp)
+    test_app.register_blueprint(search_review_bp)
 
     # Stub routes that app.py defines but aren't in any blueprint.
     # Templates reference these via url_for().

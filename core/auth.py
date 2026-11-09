@@ -363,6 +363,7 @@ _READER_READ_POST_PREFIXES = (
 _CLERK_PREFIXES = (
     "/api/getcomics",
     "/api/download-clients",
+    "/api/search-review",      # candidate review (Search review page)
     "/api/download-runs",      # automatic download run reports (Status page)
     "/api/indexers",
     "/api/usenet",
@@ -388,6 +389,7 @@ _CLERK_PAGE_PATHS = frozenset({
     "/pull-list",        # My Pull List
     "/releases",         # Weekly Releases
     "/wanted",           # Wanted Issues
+    "/search-review",    # Search review
     "/status",           # Download Status
     "/weekly-packs",     # Weekly Packs
     "/series-search",    # Series Search

@@ -94,6 +94,9 @@ SETTINGS_SCHEMA = {
     "CROSSOVER_KEYWORDS": _s("crossover_keywords", _S, "meets,vs,versus,x-over,crossover", "downloads"),
     # How many automatic download runs (per kind) the Status page keeps a
     # report for. Never in an ini; see core/download_runs.py.
+    # Hold borderline GetComics picks (range packs, thin scores) for approval on
+    # the Search review page instead of queuing them.
+    "REVIEW_BEFORE_DOWNLOAD": _s("review_before_download", _B, False, "downloads"),
     "DOWNLOAD_RUN_HISTORY_KEEP": _s("download_run_history_keep", _I, 30, "downloads"),
     "ONESHOT_FOLDERS": _s("oneshot_folders", _S, "oneshots,one-shots,specials", "file_processing"),
     # library health scan (core/library_health.py). Opt-in: it reads every comic.

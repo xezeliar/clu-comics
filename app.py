@@ -392,6 +392,9 @@ app.register_blueprint(setup_bp)
 from routes.download_runs import download_runs_bp
 
 app.register_blueprint(download_runs_bp)
+from routes.search_review import search_review_bp
+
+app.register_blueprint(search_review_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()
@@ -1304,7 +1307,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             get_series_alias_list,
             select_download_url,
             PROVIDER_LABELS,
+            explain_decision,
+            is_borderline,
         )
+        from core.database import record_search_attempt
         from api import download_queue, download_progress
         from datetime import date
 
@@ -1375,6 +1381,15 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         # Whether a pack (more than the one missing issue) may be downloaded
         # in its place -- the "Download Packs" setting, off by default.
         packs_allowed = is_download_packs_enabled()
+
+        # Search review: hold borderline picks for approval. Never on a scoped
+        # run -- that button is an explicit request and downloads at once, but
+        # its candidates are still recorded.
+        review_on = get_bool("REVIEW_BEFORE_DOWNLOAD") and only_series_id is None
+        attempt_trigger = (
+            "series" if only_series_id is not None
+            else ("wanted" if trigger == "manual" else "nightly")
+        )
 
         # Get all mapped series
         mapped_series = get_all_mapped_series()
@@ -1682,6 +1697,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 # Track queue count so we can tell whether GetComics queued
                 # anything for this issue (used by the fallback sources below).
                 gc_count_before = download_count
+                # Search review: how this issue's search ended, recorded once
+                # at the bottom with its top candidates.
+                attempt_outcome = None
+                attempt_chosen_link = None
 
                 results = search_getcomics_for_issue(
                     series_name=series_name,
@@ -1729,13 +1748,17 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
 
                 for result in results:
                     # When searching with variants, accept those variants without penalty
-                    score, is_range, series_match = score_getcomics_result(
+                    cs = score_getcomics_result(
                         result["title"], series_name, issue_num, issue_year,
                         accept_variants=search_variants,
                         series_volume=series_volume,
                         volume_year=series_year,
                         publisher_name=publisher_name,
                         series_aliases=series_aliases,
+                        return_detail=True,
+                    )
+                    score, is_range, series_match = (
+                        cs.score, cs.range_contains_target, cs.series_match
                     )
                     decision = accept_result(
                         score, is_range, series_match,
@@ -1747,6 +1770,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                         "download_url": result.get("download_url", ""),
                         "score": score,
                         "decision": decision,
+                        "reason": explain_decision(cs, decision, issue_num),
                         "range_contains_target": is_range,
                         "series_match": series_match,
                     })
@@ -1777,13 +1801,17 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                     seen_links = {s["link"] for s in scored_results}
                     refined_single_found = False
                     for r in refined_raw:
-                        r_score, r_is_range, r_series_match = score_getcomics_result(
+                        r_cs = score_getcomics_result(
                             r["title"], series_name, issue_num, issue_year,
                             accept_variants=search_variants,
                             series_volume=series_volume,
                             volume_year=series_year,
                             publisher_name=publisher_name,
                             series_aliases=series_aliases,
+                            return_detail=True,
+                        )
+                        r_score, r_is_range, r_series_match = (
+                            r_cs.score, r_cs.range_contains_target, r_cs.series_match
                         )
                         r_decision = accept_result(
                             r_score, r_is_range, r_series_match,
@@ -1796,6 +1824,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                                 "download_url": r.get("download_url", ""),
                                 "score": r_score,
                                 "decision": r_decision,
+                                "reason": explain_decision(r_cs, r_decision, issue_num),
                                 "range_contains_target": r_is_range,
                                 "series_match": r_series_match,
                                 "refined": True,
@@ -1835,6 +1864,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                     pack_skipped = not packs_allowed and any(
                         is_pack_download(part, tier) for part in parts
                     )
+                    attempt_chosen_link = best_result.get("link")
 
                     # Use config-driven provider priority
                     priority_str = get_setting("DOWNLOAD_PROVIDER_PRIORITY")
@@ -1856,6 +1886,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             download_runs.OUTCOME_PACK_SKIPPED,
                             f"{best_result.get('title', '')} (Download Packs is off)",
                         )
+                        attempt_outcome = "skipped"
                         if dry_run:
                             simulation_results.append({
                                 "series": series_name,
@@ -1958,7 +1989,24 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             "all_results": scored_results,
                             "status": "match_found",
                         })
+                    elif downloads and review_on and is_borderline(
+                        "ACCEPT" if best_accept else "FALLBACK", best_score
+                    ):
+                        # Borderline: not queued. The stamp keeps tomorrow's
+                        # sweep from stacking a second card for the same issue;
+                        # Search again on the review page clears it.
+                        attempt_outcome = "waiting"
+                        gc_miss = (
+                            download_runs.OUTCOME_NO_MATCH,
+                            f"Waiting for approval: {best_result.get('title', '')}",
+                        )
+                        _mark_queued(item)
+                        app_logger.debug(
+                            f"Held {series_name} #{issue_num} for review: "
+                            f"{best_result['title']} (score={best_score}) {search_context}"
+                        )
                     elif downloads:
+                        attempt_outcome = "queued"
                         for part, primary_provider, download_url, fallback_urls in downloads:
                             # Already queued this exact file for an earlier issue.
                             # Counted as a download and still stamped below: this
@@ -2094,7 +2142,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
 
                 # Fallback sources: GetComics queued nothing for this issue,
                 # so try each lower-priority source before moving on.
-                if not dry_run and download_count == gc_count_before:
+                if (not dry_run and download_count == gc_count_before
+                        and attempt_outcome != "waiting"):
                     for src_name, src_label, src_try in post_sources:
                         u = src_try(
                             series_name, issue_num,
@@ -2118,11 +2167,32 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                                 download_id=u.get("download_id"),
                             )
                             gc_miss = None
+                            attempt_outcome = "queued"
                             _mark_queued(item)
                             break
 
                 if gc_miss:
                     _record(item, gc_miss[0], detail=gc_miss[1])
+                    if attempt_outcome is None:
+                        attempt_outcome = "nothing_found"
+
+                if attempt_outcome and not dry_run:
+                    # Chosen first, then best scores; five is enough to see why.
+                    top = sorted(
+                        scored_results,
+                        key=lambda c: (
+                            c["link"] != attempt_chosen_link, -c["score"]
+                        ),
+                    )[:5]
+                    record_search_attempt(
+                        item.get("series_id"), series_name, issue_num,
+                        attempt_trigger, attempt_outcome,
+                        [
+                            {**c, "chosen": c["link"] == attempt_chosen_link
+                             and attempt_outcome in ("queued", "waiting")}
+                            for c in top
+                        ],
+                    )
             except Exception as issue_err:
                 app_logger.error(
                     f"GetComics auto-download: skipping {series_name} "
@@ -6912,6 +6982,8 @@ def save_download_api_config():
         ):
             if field in data:
                 set_setting(key, sanitize_config_value(str(data[field] or "")))
+        if "reviewBeforeDownload" in data:
+            set_setting("REVIEW_BEFORE_DOWNLOAD", bool(data["reviewBeforeDownload"]))
         from core.config import PREF_DOWNLOAD_PACKS
         set_user_preference(
             PREF_DOWNLOAD_PACKS,
@@ -7196,6 +7268,7 @@ def config_page():
         variantTypes=st["VARIANT_TYPES"],
         oneshotFolders=st["ONESHOT_FOLDERS"],
         downloadPacks=is_download_packs_enabled(),
+        reviewBeforeDownload=st["REVIEW_BEFORE_DOWNLOAD"],
         enableDebugLogging=st["ENABLE_DEBUG_LOGGING"],
         bootstrapTheme=get_user_preference("bootstrap_theme", default="default"),
         pageWidth=st["PAGE_WIDTH"],

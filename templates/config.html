@@ -980,6 +980,22 @@
                             </div>
                         </div>
                     </div>
+                    <div class="row mt-3">
+                        <div class="col-md-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                    id="reviewBeforeDownload" name="reviewBeforeDownload"
+                                    {% if reviewBeforeDownload %}checked{% endif %}>
+                                <label class="form-check-label" for="reviewBeforeDownload">Review before download</label>
+                                <small class="form-text text-muted">
+                                    <br />Hold <strong>borderline</strong> GetComics picks (range packs and low-scoring
+                                    matches) on the Search review page until you approve them. Clear matches still
+                                    download on their own. "Check for Missing Issues" on a series page always
+                                    downloads at once.
+                                </small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- GetComics Wanted Issues Simulation -->
@@ -2628,7 +2644,8 @@
             publicationTypes: document.getElementById('publicationTypes')?.value,
             variantTypes: document.getElementById('variantTypes')?.value,
             oneshotFolders: document.getElementById('oneshotFolders')?.value,
-            downloadPacks: document.getElementById('downloadPacks')?.checked ?? false
+            downloadPacks: document.getElementById('downloadPacks')?.checked ?? false,
+            reviewBeforeDownload: document.getElementById('reviewBeforeDownload')?.checked ?? false
         };
 
         await runTabSave('saveDownloadApiBtn', [
