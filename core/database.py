@@ -12606,7 +12606,7 @@ def clear_wanted_queue_stamp(series_id, issue_number):
 
 
 SEARCH_ATTEMPTS_KEEP = 500
-SEARCH_OUTCOMES = ("queued", "waiting", "nothing_found", "skipped")
+SEARCH_OUTCOMES = ("queued", "waiting", "nothing_found", "search_error", "skipped")
 
 
 def record_search_attempt(series_id, series_name, issue_number, trigger, outcome,

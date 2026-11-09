@@ -701,19 +701,73 @@ def _make_scraper():
 scraper = _make_scraper()
 
 
+class SearchResults(list):
+    """A list of search results that also says whether the search itself failed.
+
+    ``failed`` is True when a request errored (a 429 that outlasted its retries,
+    a timeout, a 5xx). An empty list with ``failed`` False means GetComics
+    answered and had nothing; with it True, nothing was learned. Subclasses
+    ``list`` so every existing caller keeps working unchanged.
+    """
+
+    failed = False
+
+
+# A 429 means GetComics is throttling the whole client, so the right answer is
+# to wait and ask again rather than report "no results". Waits (seconds) before
+# retry 1, 2, 3 when the server sends no Retry-After; a Retry-After is honoured
+# up to MAX_RETRY_AFTER so one hostile header cannot park a worker.
+RATE_LIMIT_BACKOFF = (5, 15, 45)
+MAX_RETRY_AFTER = 60
+
+
+def _retry_after_seconds(resp, default):
+    """Seconds to wait after a 429: the Retry-After header if usable, else default."""
+    try:
+        value = float(resp.headers.get("Retry-After", ""))
+    except (TypeError, ValueError, AttributeError):
+        return default
+    return min(max(value, 0), MAX_RETRY_AFTER)
+
+
+def _get_search_page(url, params):
+    """GET one search page, retrying a 429 after a wait.
+
+    Returns the response; raises on any other failure, or on a 429 that
+    survives every retry (via ``raise_for_status``).
+    """
+    resp = scraper.get(url, params=params, timeout=30)
+    for wait in RATE_LIMIT_BACKOFF:
+        if getattr(resp, "status_code", None) != 429:
+            break
+        delay = _retry_after_seconds(resp, wait)
+        logger.warning(
+            f"GetComics rate limit (429) for {params.get('s')!r}; "
+            f"retrying in {delay:g}s"
+        )
+        time.sleep(delay)
+        resp = scraper.get(url, params=params, timeout=30)
+    resp.raise_for_status()
+    return resp
+
+
 def search_getcomics(query: str, max_pages: int = 3) -> list:
     """
     Search getcomics.org and return list of results.
     Uses cloudscraper to bypass Cloudflare protection.
+
+    A 429 is retried with a wait (see ``RATE_LIMIT_BACKOFF``). If the search
+    still fails, the returned ``SearchResults`` has ``failed = True`` so a
+    caller can tell "GetComics had nothing" from "the search did not work".
 
     Args:
         query: Search query string
         max_pages: Maximum number of pages to search (default 3)
 
     Returns:
-        List of dicts with keys: title, link, image
+        SearchResults (a list) of dicts with keys: title, link, image
     """
-    results = []
+    results = SearchResults()
     base_url = "https://getcomics.org"
 
     for page in range(1, max_pages + 1):
@@ -722,8 +776,7 @@ def search_getcomics(query: str, max_pages: int = 3) -> list:
             params = {"s": query}
 
             logger.info(f"Searching getcomics.org page {page}: {query}")
-            resp = scraper.get(url, params=params, timeout=30)
-            resp.raise_for_status()
+            resp = _get_search_page(url, params)
 
             soup = BeautifulSoup(resp.text, 'html.parser')
 
@@ -759,6 +812,7 @@ def search_getcomics(query: str, max_pages: int = 3) -> list:
 
         except Exception as e:
             logger.error(f"Error fetching/parsing page {page}: {e}")
+            results.failed = True
             break
 
     logger.info(f"Total results found: {len(results)}")
@@ -5626,12 +5680,15 @@ def search_getcomics_for_issue(
     all_results = []
     results_lock = threading.Lock()
     search_semaphore = threading.Semaphore(3)
+    search_failed = threading.Event()
 
     def _run_query(query):
         with search_semaphore:
             app_logger.info(f"🔍 Searching GetComics: {query} {search_context}")
             time.sleep(rate_limit)
             query_results = search_getcomics(query, max_pages=1)
+            if getattr(query_results, "failed", False):
+                search_failed.set()
             if query_results:
                 with results_lock:
                     seen_links = {r["link"] for r in all_results}
@@ -5661,6 +5718,8 @@ def search_getcomics_for_issue(
                 app_logger.info(f"🔍 Variant search: {variant_query}")
                 time.sleep(rate_limit)
                 variant_results = search_getcomics(variant_query, max_pages=1)
+                if getattr(variant_results, "failed", False):
+                    search_failed.set()
                 if variant_results:
                     with results_lock:
                         seen_links = {r["link"] for r in results}
@@ -5693,4 +5752,9 @@ def search_getcomics_for_issue(
         index_thread = threading.Thread(target=_background_index, daemon=True)
         index_thread.start()
 
-    return results
+    # Tell the caller whether an empty answer means "nothing there" or "a
+    # request failed" (a 429 that outlasted its retries): the sweep records
+    # the second as a search error, not as a missing issue.
+    out = SearchResults(results)
+    out.failed = search_failed.is_set()
+    return out
