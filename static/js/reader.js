@@ -86,6 +86,8 @@ let scrollState = null;
 let rebuildingReaderView = false;
 const SCROLL_WIDTH_STEPS = [40, 55, 70, 85, 100, 125, 150];  // column width, %
 const SCROLL_DEFAULT_WIDTH = 100;
+const SCROLL_PINCH_MIN = 40;   // pinch limits, column width %
+const SCROLL_PINCH_MAX = 300;
 // Pages are fetched from this far outside the viewport, and released once they
 // are this many viewport heights away, so a 100-page comic never has more than
 // a handful of decoded images alive.
@@ -557,6 +559,7 @@ function openComicReader(filePath) {
     // Show modal
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
+    blockNativePageZoom();
 
     // Immersive mode: hide chrome by default on mobile/tablet
     if (isMobileOrTablet()) {
@@ -1653,6 +1656,10 @@ function teardownScrollReader() {
     if (s.scroller) {
         s.scroller.removeEventListener('scroll', s.onScroll);
         s.scroller.removeEventListener('click', s.onClick);
+        s.scroller.removeEventListener('touchstart', s.onTouchStart);
+        s.scroller.removeEventListener('touchmove', s.onTouchMove);
+        s.scroller.removeEventListener('touchend', s.onTouchEnd);
+        s.scroller.removeEventListener('touchcancel', s.onTouchEnd);
         s.scroller.remove();
     }
 }
@@ -1739,11 +1746,13 @@ function initializeScrollReader(pageCount, startPage = 0) {
     // A click on the page hides/shows the chrome, as a tap does when paged. Not
     // after a text selection or a drag.
     s.onClick = () => {
+        if (s.suppressClickUntil && Date.now() < s.suppressClickUntil) return;
         const sel = window.getSelection && window.getSelection();
         if (sel && String(sel).length) return;
         toggleReaderChrome();
     };
     scroller.addEventListener('click', s.onClick);
+    attachScrollPinch(s);
 
     // Land on the start page. Navigation, not reading.
     s.index = Math.max(0, Math.min(startPage, pageCount - 1));
@@ -1919,6 +1928,79 @@ function scrollReaderBy(fraction) {
     s.scroller.scrollBy({ top: s.scroller.clientHeight * fraction, behavior: 'auto' });
 }
 
+// --- Native page zoom (iOS) ---------------------------------------------------
+// Safari on iPhone pinch-zooms the PAGE underneath the reader as well as the
+// reader's own zoom, and after zooming back out the layout is left shifted
+// sideways (the page behind shows as a white strip). The reader does its own
+// zooming (Swiper when paged, the column width when scrolling), so the browser's
+// is switched off while the reader is open. `gesturestart` is the one event
+// Safari lets a page cancel to stop its own pinch; it is not a touch event, so
+// Swiper's pinch is unaffected.
+function _cancelNativeGesture(e) { e.preventDefault(); }
+
+function blockNativePageZoom() {
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(type => {
+        document.addEventListener(type, _cancelNativeGesture, { passive: false });
+    });
+}
+
+function allowNativePageZoom() {
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(type => {
+        document.removeEventListener(type, _cancelNativeGesture);
+    });
+    // Whatever drift a gesture left behind must not outlive the reader.
+    window.scrollTo(0, 0);
+}
+
+// --- Pinch to zoom in scroll mode --------------------------------------------
+// The strip had no pinch of its own, so a pinch reached the browser. Here two
+// fingers resize the column (the same thing the zoom buttons do, continuously),
+// one finger scrolls as before, and the reader keeps its place while it grows.
+function attachScrollPinch(s) {
+    let startDist = 0;
+    let startWidth = s.widthPct;
+    let pending = null;
+    let raf = 0;
+
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+    const apply = () => {
+        raf = 0;
+        if (scrollState !== s || pending === null) return;
+        const next = pending;
+        pending = null;
+        s.widthPct = next;
+        withScrollAnchor(s, () => { s.column.style.width = next + '%'; });
+    };
+
+    s.onTouchStart = e => {
+        if (e.touches.length === 2) {
+            startDist = dist(e.touches);
+            startWidth = s.widthPct;
+            s.pinching = true;
+        }
+    };
+    s.onTouchMove = e => {
+        if (!s.pinching || e.touches.length !== 2 || !startDist) return;
+        e.preventDefault();  // no native scroll or zoom while two fingers are down
+        const ratio = dist(e.touches) / startDist;
+        pending = Math.max(SCROLL_PINCH_MIN, Math.min(SCROLL_PINCH_MAX, startWidth * ratio));
+        if (!raf) raf = requestAnimationFrame(apply);
+    };
+    s.onTouchEnd = e => {
+        if (e.touches.length < 2) {
+            s.pinching = false;
+            startDist = 0;
+            // A pinch that ends in a tap-like lift must not toggle the chrome.
+            s.suppressClickUntil = Date.now() + 350;
+        }
+    };
+    s.scroller.addEventListener('touchstart', s.onTouchStart, { passive: true });
+    s.scroller.addEventListener('touchmove', s.onTouchMove, { passive: false });
+    s.scroller.addEventListener('touchend', s.onTouchEnd, { passive: true });
+    s.scroller.addEventListener('touchcancel', s.onTouchEnd, { passive: true });
+}
+
 /** Step the column width: the scroll-mode equivalent of the zoom buttons. */
 function stepScrollWidth(direction) {
     const s = scrollState;
@@ -2005,6 +2087,7 @@ function closeComicReader() {
     const modal = document.getElementById('comicReaderModal');
     modal.style.display = 'none';
     document.body.style.overflow = ''; // Restore scrolling
+    allowNativePageZoom();
 
     // Reset immersive reader chrome state
     const container = document.querySelector('.comic-reader-container');

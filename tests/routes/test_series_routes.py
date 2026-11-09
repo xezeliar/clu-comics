@@ -841,6 +841,34 @@ class TestSeriesBulkMonitored:
         mock_set.assert_called_once_with([], True, lock=True)
 
 
+class TestSeriesBulkUnsubscribe:
+
+    @patch("core.database.remove_series_mappings_bulk", return_value=3)
+    def test_bulk_unsubscribe(self, mock_rm, client):
+        resp = client.post(
+            "/api/series/bulk-unsubscribe", json={"series_ids": [1, 2, 3]}
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["success"] is True
+        assert body["updated"] == 3
+        mock_rm.assert_called_once_with([1, 2, 3])
+
+    @patch("core.database.remove_series_mappings_bulk", return_value=0)
+    def test_bulk_unsubscribe_requires_ids(self, mock_rm, client):
+        resp = client.post("/api/series/bulk-unsubscribe", json={"series_ids": []})
+        assert resp.status_code == 400
+        mock_rm.assert_not_called()
+
+    def test_bulk_unsubscribe_url_follows_the_script_root(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        html = client_with_data.get(
+            "/pull-list", environ_overrides={"SCRIPT_NAME": "/clu"}
+        ).get_data(as_text=True)
+        assert '"/clu/api/series/bulk-unsubscribe"' in html
+        assert 'id="bulkUnsubscribeBtn"' in html
+
+
 class TestSeriesPageSearchYear:
     """Same on the series page: the row and its search button carry the
     issue's publication year so both GetComics and Usenet can narrow."""

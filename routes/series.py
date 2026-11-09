@@ -1623,6 +1623,27 @@ def bulk_toggle_series_monitored():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@series_bp.route("/api/series/bulk-unsubscribe", methods=["POST"])
+def bulk_unsubscribe_series():
+    """Unsubscribe many series at once (Pull List multi-select).
+
+    Clears each series' mapped folder so it leaves the Pull List. Comics and
+    folders on disk are never touched.
+    """
+    from core.database import remove_series_mappings_bulk
+
+    try:
+        data = request.get_json() or {}
+        series_ids = data.get("series_ids", [])
+        if not isinstance(series_ids, list) or not series_ids:
+            return jsonify({"success": False, "error": "No series selected"}), 400
+        updated = remove_series_mappings_bulk(series_ids)
+        return jsonify({"success": True, "updated": updated})
+    except Exception as e:
+        app_logger.error(f"Error bulk-unsubscribing series: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @series_bp.route("/api/series/<int:series_id>/check-collection", methods=["GET"])
 def check_series_collection(series_id):
     """

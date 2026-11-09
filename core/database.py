@@ -13825,6 +13825,46 @@ def remove_series_mapping(series_id):
         return False
 
 
+def remove_series_mappings_bulk(series_ids):
+    """Unsubscribe many series at once: clear ``mapped_path`` on each.
+
+    Series data and the comics on disk are left alone; the series simply
+    leaves the Pull List. Returns the number of rows updated.
+    """
+    ids = []
+    for sid in series_ids:
+        try:
+            ids.append(int(sid))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return 0
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return 0
+            c = conn.cursor()
+            updated = 0
+            # Chunked: SQLite caps the number of bound variables.
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                c.execute(
+                    f"UPDATE series SET mapped_path = NULL, "
+                    f"updated_at = CURRENT_TIMESTAMP "
+                    f"WHERE id IN ({placeholders}) "
+                    f"AND mapped_path IS NOT NULL AND mapped_path != ''",
+                    chunk,
+                )
+                updated += c.rowcount
+            conn.commit()
+        app_logger.info(f"Unsubscribed {updated} series (bulk)")
+        return updated
+    except Exception as e:
+        app_logger.error(f"Failed to bulk-remove series mappings: {e}")
+        return 0
+
+
 # =============================================================================
 # Issues CRUD Operations (Metron Issue Caching)
 # =============================================================================

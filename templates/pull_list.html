@@ -131,6 +131,9 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkUnmonitorBtn">
                 <i class="bi bi-slash-circle me-1"></i>Set Not Monitored
             </button>
+            <button type="button" class="btn btn-sm btn-outline-danger" id="bulkUnsubscribeBtn">
+                <i class="bi bi-bookmark-x me-1"></i>Unsubscribe
+            </button>
             <button type="button" class="btn btn-sm btn-link text-muted" id="bulkClearBtn">Clear</button>
         </div>
     </div>
@@ -199,6 +202,26 @@
     }) }}
 
     {% endif %}
+</div>
+
+<!-- Bulk Unsubscribe confirmation -->
+<div class="modal fade" id="unsubscribeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold"><i class="bi bi-bookmark-x me-2"></i>Unsubscribe</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Remove <strong id="unsubscribeCount">0</strong> series from your Pull List?</p>
+                <p class="text-muted small mb-0">Your comics and folders are not touched. You can subscribe again from the series page.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="unsubscribeConfirmBtn">Unsubscribe</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Import Pull List Modal -->
@@ -922,6 +945,47 @@
         const bulkUnmonitorBtn = document.getElementById('bulkUnmonitorBtn');
         if (bulkUnmonitorBtn) {
             bulkUnmonitorBtn.addEventListener('click', () => bulkSetMonitored(false, bulkUnmonitorBtn));
+        }
+
+        // Bulk Unsubscribe: confirm in a modal, then clear the mapped folder of
+        // every selected series (files stay) and reload the page.
+        const bulkUnsubscribeBtn = document.getElementById('bulkUnsubscribeBtn');
+        const unsubscribeModalEl = document.getElementById('unsubscribeModal');
+        const unsubscribeConfirmBtn = document.getElementById('unsubscribeConfirmBtn');
+        if (bulkUnsubscribeBtn && unsubscribeModalEl && unsubscribeConfirmBtn) {
+            const unsubscribeModal = new bootstrap.Modal(unsubscribeModalEl);
+            bulkUnsubscribeBtn.addEventListener('click', () => {
+                if (!selected.size) return;
+                document.getElementById('unsubscribeCount').textContent = selected.size;
+                unsubscribeModal.show();
+            });
+            unsubscribeConfirmBtn.addEventListener('click', () => {
+                const ids = Array.from(selected);
+                if (!ids.length) { unsubscribeModal.hide(); return; }
+                const original = unsubscribeConfirmBtn.innerHTML;
+                unsubscribeConfirmBtn.disabled = true;
+                unsubscribeConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                fetch({{ url_for('series.bulk_unsubscribe_series')|tojson }}, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ series_ids: ids }),
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.success) throw new Error(data.error || 'Unsubscribe failed');
+                        unsubscribeModal.hide();
+                        selected.clear();
+                        lastCheckedRow = null;
+                        if (window.CLU && CLU.toast) CLU.toast(`Unsubscribed ${data.updated} series`, 'success');
+                        return pager.load();
+                    })
+                    .catch(err => notifyError('Failed to unsubscribe', err))
+                    .finally(() => {
+                        unsubscribeConfirmBtn.disabled = false;
+                        unsubscribeConfirmBtn.innerHTML = original;
+                        updateBulkUI();
+                    });
+            });
         }
 
         // ── Column visibility: a class on the table per hidden column, saved
