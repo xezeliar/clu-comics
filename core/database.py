@@ -10980,7 +10980,8 @@ def get_on_the_stack_items(limit=10, user_id=None):
     (or given) user's read history.
 
     For each Metron-mapped series where:
-    - series_subscription is enabled (or NULL + status='Ongoing')
+    - series_subscription is not switched off (NULL counts as on: what the user
+      reads decides, never Metron's series status)
     - At least one issue has been read
     - The next issue (by number) exists in the library but hasn't been read
 
@@ -11012,10 +11013,7 @@ def get_on_the_stack_items(limit=10, user_id=None):
             LEFT JOIN issues_read ir ON cs.file_path = ir.issue_path AND ir.user_id = ?
             WHERE s.mapped_path IS NOT NULL
               AND cs.found = 1
-              AND (
-                s.series_subscription = 1
-                OR (s.series_subscription IS NULL AND s.status = 'Ongoing')
-              )
+              AND COALESCE(s.series_subscription, 1) = 1
             ORDER BY s.id, CAST(cs.issue_number AS REAL)
         """, (uid,))
 
@@ -11211,23 +11209,21 @@ def set_series_subscription(series_id, enabled):
 
 
 def get_series_subscription(series_id):
-    """Get subscription status. Returns True/False, using status fallback for NULL."""
+    """Get subscription status. Returns True/False; NULL (never set) is True."""
     try:
         conn = get_db_connection()
         if not conn:
             return False
         c = conn.cursor()
         c.execute(
-            "SELECT series_subscription, status FROM series WHERE id = ?",
+            "SELECT series_subscription FROM series WHERE id = ?",
             (series_id,)
         )
         row = c.fetchone()
         conn.close()
         if not row:
             return False
-        if row["series_subscription"] is not None:
-            return bool(row["series_subscription"])
-        return row["status"] == "Ongoing"
+        return row["series_subscription"] is None or bool(row["series_subscription"])
     except Exception as e:
         app_logger.error(f"Failed to get series subscription: {e}")
         return False

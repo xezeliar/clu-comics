@@ -118,12 +118,20 @@ class TestGetOnTheStackItems:
         assert "Absolute Batman" in series_names
         assert "Superman" in series_names
 
-    def test_null_subscription_ended_excluded(self, stack_db):
-        """Series with subscription=NULL and status=Ended -> excluded."""
+    def test_null_subscription_ended_included(self, stack_db):
+        """Metron status is irrelevant: a read series with NULL subscription shows."""
         from core.database import get_on_the_stack_items
         items = get_on_the_stack_items(limit=10)
         dc_items = [i for i in items if i["series_name"] == "Dark Crisis"]
-        assert len(dc_items) == 0
+        assert len(dc_items) == 1
+        assert dc_items[0]["issue_number"] == "2"
+
+    def test_explicit_off_beats_reading(self, stack_db):
+        """subscription=0 hides an Ended series that has been read."""
+        from core.database import get_on_the_stack_items, set_series_subscription
+        set_series_subscription(300, False)
+        items = get_on_the_stack_items(limit=10)
+        assert not [i for i in items if i["series_name"] == "Dark Crisis"]
 
     def test_shows_lowest_unread_after_read(self, stack_db):
         """Read 1,2,3 -- unread 4,5 -> returns only 4."""
@@ -389,11 +397,11 @@ class TestSeriesSubscription:
         # Series 100 is Ongoing with NULL subscription
         assert get_series_subscription(100) is True
 
-    def test_null_subscription_ended_defaults_false(self, stack_db):
-        """NULL subscription on Ended series defaults to False."""
+    def test_null_subscription_ended_defaults_true(self, stack_db):
+        """NULL subscription is on whatever the Metron status."""
         from core.database import get_series_subscription
         # Series 300 is Ended with NULL subscription
-        assert get_series_subscription(300) is False
+        assert get_series_subscription(300) is True
 
     def test_nonexistent_series_returns_false(self, stack_db):
         """Nonexistent series returns False."""
