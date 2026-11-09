@@ -502,45 +502,93 @@ def _image_bytes(fmt="JPEG", size=(300, 300), color="blue"):
 
 
 class TestCustomThumbnail:
-    """An uploaded folder image: marked, kept by regenerate, removable."""
+    """An uploaded folder image: stored in the cache, kept by regenerate, removable."""
 
-    def test_save_writes_marked_2x3_png(self, tmp_path):
-        path = folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
+    @pytest.fixture
+    def folder(self, db_connection, tmp_path):
+        path = tmp_path / "data" / "Batman"
+        path.mkdir(parents=True)
+        return str(path)
 
-        assert path == str(tmp_path / "folder.png")
-        with Image.open(path) as img:
+    def _legacy_upload(self, folder):
+        from PIL import PngImagePlugin
+        info = PngImagePlugin.PngInfo()
+        info.add_text(folder_thumbnails.CUSTOM_MARKER_KEY, "1")
+        Image.new("RGB", (400, 600)).save(os.path.join(folder, "folder.png"), pnginfo=info)
+
+    def test_save_stores_2x3_png_in_cache_not_library(self, folder):
+        from core import folder_art
+
+        rec = folder_thumbnails.save_custom_thumbnail(folder, _image_bytes())
+
+        assert rec["source"] == "uploaded" and rec["location"] == "cache"
+        with Image.open(rec["path"]) as img:
             assert img.size == folder_thumbnails.CUSTOM_SIZE
-        assert folder_thumbnails.is_custom_thumbnail(str(tmp_path)) is True
-        # The temp file never survives.
-        assert sorted(os.listdir(tmp_path)) == ["folder.png"]
+        assert folder_art.find_art(folder)["path"] == rec["path"]
+        assert folder_thumbnails.is_custom_thumbnail(folder) is True
+        assert os.listdir(folder) == []
 
-    def test_save_replaces_other_folder_art(self, tmp_path):
-        (tmp_path / "folder.jpg").write_bytes(b"old art")
-        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes("PNG"))
-        assert sorted(os.listdir(tmp_path)) == ["folder.png"]
+    def test_upload_wins_over_generated_cache_art(self, folder):
+        from core import folder_art
+        folder_art.put_art(folder, "folder", Image.new("RGB", (200, 300)), ".png", "generated")
 
-    def test_generated_art_is_not_custom(self, tmp_path):
-        Image.new("RGB", (200, 300)).save(tmp_path / "folder.png")
-        assert folder_thumbnails.is_custom_thumbnail(str(tmp_path)) is False
+        rec = folder_thumbnails.save_custom_thumbnail(folder, _image_bytes())
 
-    def test_regenerate_may_not_overwrite_custom(self, tmp_path):
-        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
-        assert folder_thumbnails.may_write(str(tmp_path), overwrite=True) is False
-        assert folder_thumbnails.may_write(str(tmp_path), overwrite=False) is False
+        assert folder_art.find_art(folder)["file"] == rec["file"]
+
+    def test_generated_and_picked_art_are_not_custom(self, folder):
+        from core import folder_art
+        Image.new("RGB", (200, 300)).save(os.path.join(folder, "folder.png"))
+        assert folder_thumbnails.is_custom_thumbnail(folder) is False
+        folder_art.put_art(folder, "folder", Image.new("RGB", (200, 300)), ".png", "custom")
+        assert folder_thumbnails.is_custom_thumbnail(folder) is False
+
+    def test_regenerate_may_not_overwrite_custom(self, folder):
+        folder_thumbnails.save_custom_thumbnail(folder, _image_bytes())
+        assert folder_thumbnails.may_write(folder, overwrite=True) is False
+        assert folder_thumbnails.may_write(folder, overwrite=False) is False
+
+    def test_picked_cover_replaces_legacy_upload(self, folder):
+        from core import folder_art
+        self._legacy_upload(folder)
+        assert folder_thumbnails.is_custom_thumbnail(folder) is True
+        folder_art.put_art(folder, "folder", Image.new("RGB", (200, 300)), ".png", "custom")
+        assert folder_thumbnails.is_custom_thumbnail(folder) is False
+
+    def test_legacy_upload_stays_custom_after_import(self, folder):
+        from core import folder_art
+        self._legacy_upload(folder)
+        folder_art.import_disk_art(folder, "folder", os.path.join(folder, "folder.png"))
+        assert folder_thumbnails.is_custom_thumbnail(folder) is True
 
     @pytest.mark.parametrize("data", [b"not an image", b""])
-    def test_rejects_non_images(self, tmp_path, data):
+    def test_rejects_non_images(self, folder, data):
+        from core import folder_art
         with pytest.raises(ValueError):
-            folder_thumbnails.save_custom_thumbnail(str(tmp_path), data)
-        assert os.listdir(tmp_path) == []
+            folder_thumbnails.save_custom_thumbnail(folder, data)
+        assert folder_art.find_art(folder) is None
 
-    def test_rejects_oversized_upload(self, tmp_path):
+    def test_rejects_oversized_upload(self):
         data = b"x" * (folder_thumbnails.CUSTOM_MAX_UPLOAD_BYTES + 1)
         with pytest.raises(ValueError):
             folder_thumbnails.build_custom_thumbnail(data)
 
-    def test_remove(self, tmp_path):
-        folder_thumbnails.save_custom_thumbnail(str(tmp_path), _image_bytes())
-        assert folder_thumbnails.remove_custom_thumbnail(str(tmp_path)) is True
-        assert os.listdir(tmp_path) == []
-        assert folder_thumbnails.remove_custom_thumbnail(str(tmp_path)) is False
+    def test_cache_write_failure_raises_oserror(self, folder):
+        with patch("core.folder_art.put_art", return_value=None):
+            with pytest.raises(OSError):
+                folder_thumbnails.save_custom_thumbnail(folder, _image_bytes())
+
+    def test_remove(self, folder):
+        from core import folder_art
+        folder_thumbnails.save_custom_thumbnail(folder, _image_bytes())
+        assert folder_thumbnails.remove_custom_thumbnail(folder) is True
+        assert folder_art.find_art(folder) is None
+        assert folder_thumbnails.remove_custom_thumbnail(folder) is False
+
+    def test_remove_legacy_upload(self, folder):
+        from core import folder_art
+        self._legacy_upload(folder)
+        folder_art.import_disk_art(folder, "folder", os.path.join(folder, "folder.png"))
+        assert folder_thumbnails.remove_custom_thumbnail(folder) is True
+        assert os.listdir(folder) == []
+        assert folder_art.find_art(folder) is None

@@ -177,6 +177,12 @@ The store's own rules (`tests/unit/test_folder_art.py`):
   folder. `clu-cbz-edit.js` posts extracted *pages* to the same route and must
   not send it: a page called `folder.png` is a page.
 - Shards sit at depth 2 under `/cache`, inside the bounded chown walk below.
+- **Upload Custom Thumbnail** (fork feature, `/api/folder-thumbnail/custom[/remove]`)
+  stores through `put_art` as `source='uploaded'`, and `is_custom_thumbnail`
+  makes `may_write` refuse even `overwrite=True` for it. An upload from before
+  #720 is a `folder.png` carrying the `clu-custom-thumbnail` PNG text chunk; it
+  still counts (on disk or once imported) until other cached art replaces it,
+  and Remove deletes that one file because CLU wrote it.
 
 Rules that are easy to break:
 

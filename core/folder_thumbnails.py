@@ -553,28 +553,43 @@ def may_write(folder_path, overwrite):
     return not folder_art.has_art(folder_path, "folder")
 
 
-# Custom folder thumbnails: an image the user uploads, written as folder.png
-# with this PNG text chunk. The marker travels with the file through folder
-# moves and renames, and deleting the image removes the custom status with it.
+# Custom folder thumbnails: an image the user uploads, stored in the folder-art
+# cache as source='uploaded'. Uploads from before #720 are a folder.png in the
+# library folder carrying this PNG text chunk; they are still recognised.
 CUSTOM_MARKER_KEY = "clu-custom-thumbnail"
+CUSTOM_SOURCE = "uploaded"
 # Twice CANVAS_SIZE: same 2:3 card, sharp on high-density screens.
 CUSTOM_SIZE = (400, 600)
 CUSTOM_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 CUSTOM_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 
 
+def _legacy_custom_png(folder_path):
+    """The pre-cache upload: a marked folder.png in the library folder, or None."""
+    from core import folder_art
+
+    disk = folder_art.find_disk_art(folder_path, "folder")
+    if not disk or not disk.lower().endswith(".png"):
+        return None
+    try:
+        with Image.open(disk) as img:
+            return disk if img.info.get(CUSTOM_MARKER_KEY) == "1" else None
+    except Exception:
+        return None
+
+
 def is_custom_thumbnail(folder_path):
     """Whether the folder's art is an image the user uploaded."""
-    from helpers import find_folder_thumbnail
+    from core import folder_art
 
-    thumb = find_folder_thumbnail(folder_path)
-    if not thumb or not thumb.lower().endswith(".png"):
-        return False
-    try:
-        with Image.open(thumb) as img:
-            return img.info.get(CUSTOM_MARKER_KEY) == "1"
-    except Exception:
-        return False
+    rec = folder_art.get_art(folder_path, "folder")
+    if rec and rec["source"] == CUSTOM_SOURCE:
+        return True
+    # A legacy upload is served from disk, or imported into the cache on its
+    # first view; any other cached art (generated, a picked cover) replaced it.
+    if rec is None or rec["source"] == "imported":
+        return _legacy_custom_png(folder_path) is not None
+    return False
 
 
 def build_custom_thumbnail(image_bytes):
@@ -599,41 +614,32 @@ def build_custom_thumbnail(image_bytes):
 
 
 def save_custom_thumbnail(folder_path, image_bytes):
-    """Replace the folder's art with an uploaded image. Returns the written path.
+    """Replace the folder's art with an uploaded image. Returns the cache record.
 
-    The new file is written next to the old art and swapped in, so a failed
-    write leaves the old art in place.
+    Raises ValueError for an unusable image and OSError when the cache volume
+    could not be written (put_art keeps the old art in that case).
     """
-    from PIL import PngImagePlugin
-    from helpers import FOLDER_THUMBNAIL_EXTENSIONS, match_parent_permissions
+    from core import folder_art
 
     card = build_custom_thumbnail(image_bytes)
-    info = PngImagePlugin.PngInfo()
-    info.add_text(CUSTOM_MARKER_KEY, "1")
-
-    output_path = os.path.join(folder_path, "folder.png")
-    # Not starting with "folder." so it never counts as folder art mid-write.
-    tmp_path = os.path.join(folder_path, ".clu-folder-upload.png")
-    card.save(tmp_path, "PNG", pnginfo=info)
-    try:
-        # Other folder.* images would keep winning find_folder_thumbnail.
-        for ext in FOLDER_THUMBNAIL_EXTENSIONS:
-            old = os.path.join(folder_path, f"folder{ext}")
-            if ext != ".png" and os.path.exists(old):
-                os.remove(old)
-        os.replace(tmp_path, output_path)
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-    match_parent_permissions(output_path)
-    return output_path
+    rec = folder_art.put_art(folder_path, "folder", card, ".png", CUSTOM_SOURCE)
+    if not rec:
+        raise OSError("Could not write to the cache volume")
+    return rec
 
 
 def remove_custom_thumbnail(folder_path):
     """Delete an uploaded image. Returns False if the folder has none."""
+    from core import folder_art
+
     if not is_custom_thumbnail(folder_path):
         return False
-    os.remove(os.path.join(folder_path, "folder.png"))
+    folder_art.delete_art(folder_path, "folder")
+    # CLU wrote a legacy upload itself (it carries our marker); left on disk it
+    # would be found and re-imported as the folder's art.
+    legacy = _legacy_custom_png(folder_path)
+    if legacy:
+        os.remove(legacy)
     return True
 
 

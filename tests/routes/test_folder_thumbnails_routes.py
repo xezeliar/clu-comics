@@ -379,6 +379,11 @@ def _jpeg():
     return out.getvalue()
 
 
+def folder_thumbnails_is_custom(folder):
+    from core import folder_thumbnails
+    return folder_thumbnails.is_custom_thumbnail(folder)
+
+
 class TestCustomFolderThumbnail:
 
     def _upload(self, client, folder, data):
@@ -408,7 +413,7 @@ class TestCustomFolderThumbnail:
         response = self._upload(client, folder, b"not an image")
 
         assert response.status_code == 400
-        assert not os.path.exists(os.path.join(folder, "folder.png"))
+        assert not folder_thumbnails_is_custom(folder)
 
     def test_upload_refuses_folder_outside_libraries(self, client, data_dir_library, tmp_path):
         outside = tmp_path / "elsewhere"
@@ -417,7 +422,7 @@ class TestCustomFolderThumbnail:
         response = self._upload(client, str(outside), _jpeg())
 
         assert response.status_code == 400
-        assert not (outside / "folder.png").exists()
+        assert not folder_thumbnails_is_custom(str(outside))
 
     def test_remove_regenerates(self, client, data_dir_library):
         from core import folder_thumbnails
