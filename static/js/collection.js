@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadFavoritePublishers();
         loadWantToRead();
         loadContinueReadingSwiper();
+        loadNewThisWeekSwiper();
         loadOnTheStackSwiper();
         loadRecentlyAddedSwiper();
     }
@@ -45,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window._readerOnMarkedRead = function (path) {
         readIssuesSet.add(path);
         updateReadIcon(path, true);
+        CLU.progress.markRead(path);
     };
 });
 
@@ -2293,6 +2295,8 @@ function renderGrid(items) {
 
     // Initialize Bootstrap tooltips for truncated names
     initNameTooltips(grid);
+
+    CLU.progress.apply(grid);
 }
 
 // ===========================
@@ -4354,15 +4358,7 @@ async function loadFavoritePublishers() {
         );
 
         if (!favData.success || !favData.publishers.length) {
-            // Show empty state
-            swiper.innerHTML = `
-                <div class="swiper-slide">
-                    <div class="dashboard-card text-center p-4">
-                        <i class="bi bi-bookmark-heart text-muted" style="font-size: 3rem;"></i>
-                        <p class="text-muted mt-2">No favorites yet</p>
-                    </div>
-                </div>
-            `;
+            hideEmptyShelf(swiper);
             return;
         }
 
@@ -4601,15 +4597,12 @@ async function loadWantToRead() {
 
         if (!data.success || !data.items.length) {
             // Show empty state only when neither source has anything
-            swiper.innerHTML = listSlides || `
-                <div class="swiper-slide">
-                    <div class="dashboard-card text-center p-4">
-                        <i class="bi bi-bookmark-plus text-muted" style="font-size: 3rem;"></i>
-                        <p class="text-muted mt-2">No items to read yet</p>
-                    </div>
-                </div>
-            `;
-            if (listSlides) initNameTooltips(swiper);
+            if (!listSlides) {
+                hideEmptyShelf(swiper);
+                return;
+            }
+            swiper.innerHTML = listSlides;
+            initNameTooltips(swiper);
             return;
         }
 
@@ -4694,15 +4687,7 @@ async function loadRecentlyAddedSwiper() {
         const data = await response.json();
 
         if (!data.success || !data.files || !data.files.length) {
-            // Show empty state
-            swiper.innerHTML = `
-                <div class="swiper-slide">
-                    <div class="dashboard-card text-center p-4">
-                        <i class="bi bi-clock-history text-muted" style="font-size: 3rem;"></i>
-                        <p class="text-muted mt-2">No recently added files</p>
-                    </div>
-                </div>
-            `;
+            hideEmptyShelf(swiper);
             return;
         }
 
@@ -4743,9 +4728,55 @@ async function loadRecentlyAddedSwiper() {
 
         initSwiperThumbnails(swiper);
         initNameTooltips(swiper);
+        CLU.progress.apply(swiper);
 
     } catch (error) {
         console.error('Error loading recently added files:', error);
+    }
+}
+
+/** Hide a home shelf with nothing in it (the layout editor still lists it). */
+function hideEmptyShelf(swiperEl) {
+    const section = swiperEl.closest('.dashboard-section');
+    if (section) section.style.display = 'none';
+}
+
+/**
+ * New This Week: unread comics added in the last 7 days.
+ */
+async function loadNewThisWeekSwiper() {
+    const swiper = document.querySelector('#newThisWeekSwiper .swiper-wrapper');
+    if (!swiper) return;
+
+    try {
+        const response = await fetch('/api/new-this-week?limit=20');
+        const data = await response.json();
+        if (!data.success || !data.files || !data.files.length) {
+            hideEmptyShelf(swiper);
+            return;
+        }
+
+        swiper.innerHTML = data.files.map(file => {
+            const path = file.file_path;
+            const name = file.file_name;
+            return `
+            <div class="swiper-slide">
+                <div class="dashboard-card has-thumbnail" data-path="${path}" onclick="openReaderForFile('${path.replace(/'/g, "\\'")}')">
+                    <div class="dashboard-card-img-container">
+                        <img src="/static/images/loading.svg" data-thumbnail="/api/thumbnail?path=${encodeURIComponent(path)}" alt="${name}" class="thumbnail">
+                    </div>
+                    <div class="dashboard-card-body">
+                        <div class="text-truncate item-name" title="${name}">${name}</div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        initSwiperThumbnails(swiper);
+        initNameTooltips(swiper);
+        CLU.progress.apply(swiper);
+    } catch (error) {
+        console.error('Error loading new this week:', error);
     }
 }
 
@@ -4758,15 +4789,7 @@ async function loadContinueReadingSwiper() {
         const data = await response.json();
 
         if (!data.success || !data.items || !data.items.length) {
-            // Show empty state
-            swiper.innerHTML = `
-                <div class="swiper-slide">
-                    <div class="dashboard-card text-center p-4">
-                        <i class="bi bi-book-half text-muted" style="font-size: 3rem;"></i>
-                        <p class="text-muted mt-2">No comics in progress</p>
-                    </div>
-                </div>
-            `;
+            hideEmptyShelf(swiper);
             return;
         }
 
@@ -4833,14 +4856,7 @@ async function loadOnTheStackSwiper() {
         const data = await response.json();
 
         if (!data.success || !data.items || !data.items.length) {
-            swiper.innerHTML = `
-                <div class="swiper-slide">
-                    <div class="dashboard-card text-center p-4">
-                        <i class="bi bi-layers text-muted" style="font-size: 3rem;"></i>
-                        <p class="text-muted mt-2">No new issues to read</p>
-                    </div>
-                </div>
-            `;
+            hideEmptyShelf(swiper);
             return;
         }
 
@@ -4884,6 +4900,7 @@ async function loadOnTheStackSwiper() {
 
         initSwiperThumbnails(swiper);
         initNameTooltips(swiper);
+        CLU.progress.apply(swiper);
 
     } catch (error) {
         console.error('Error loading on the stack items:', error);

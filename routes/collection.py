@@ -72,6 +72,7 @@ DASHBOARD_SECTION_DEFS = {
         'title': 'Favorite Collections',
         'icon': 'bi-bookmark-heart-fill text-danger',
         'swiper_id': 'favoritesSwiper',
+        'section_html_id': 'favoritesSection',
         'view_all_type': 'button',
         'view_all_text': 'View All',
     },
@@ -80,6 +81,7 @@ DASHBOARD_SECTION_DEFS = {
         'title': 'Want to Read',
         'icon': 'bi-bookmark-star-fill text-warning',
         'swiper_id': 'wantToReadSwiper',
+        'section_html_id': 'wantToReadSection',
         'view_all_type': 'link',
         'view_all_href': '/to-read',
         'view_all_text': 'View All',
@@ -93,6 +95,16 @@ DASHBOARD_SECTION_DEFS = {
         'view_all_type': 'button',
         'view_all_onclick': 'loadContinueReading()',
         'view_all_text': 'View All',
+    },
+    'new_this_week': {
+        'id': 'new_this_week',
+        'title': 'New This Week',
+        'icon': 'bi-stars text-info',
+        'swiper_id': 'newThisWeekSwiper',
+        'section_html_id': 'newThisWeekSection',
+        'view_all_type': 'button',
+        'view_all_onclick': 'loadRecentlyAdded()',
+        'view_all_text': 'See all',
     },
     'on_the_stack': {
         'id': 'on_the_stack',
@@ -118,6 +130,7 @@ DASHBOARD_SECTION_DEFS = {
         'title': 'Recently Added',
         'icon': 'bi-clock-history text-primary',
         'swiper_id': 'recentAddedSwiper',
+        'section_html_id': 'recentAddedSection',
         'view_all_type': 'button',
         'view_all_onclick': 'loadRecentlyAdded()',
         'view_all_text': 'View All',
@@ -129,7 +142,7 @@ DASHBOARD_SECTION_DEFS = {
     },
 }
 
-DEFAULT_DASHBOARD_ORDER = ['favorites', 'want_to_read', 'continue_reading', 'on_the_stack', 'discover', 'recently_added', 'library']
+DEFAULT_DASHBOARD_ORDER = ['favorites', 'want_to_read', 'continue_reading', 'new_this_week', 'on_the_stack', 'discover', 'recently_added', 'library']
 
 VALID_DASHBOARD_IDS = frozenset(DASHBOARD_SECTION_DEFS)
 
@@ -569,6 +582,47 @@ def api_issues_read_paths():
     issues = get_issues_read()
     paths = [issue['issue_path'] for issue in issues]
     return jsonify({"paths": paths})
+
+
+@collection_bp.route('/api/reading-progress')
+def api_reading_progress():
+    """Percent read for every comic the user has partly read: {path: percent}.
+
+    Finished comics are not here (they are in /api/issues-read-paths); the cover
+    mark is "finished" if in that set, else a bar if here, else the unread dot.
+    """
+    from core.database import get_all_reading_positions
+    progress = {}
+    for pos in get_all_reading_positions():
+        total = pos.get('total_pages') or 0
+        if total > 0 and 0 < pos['page_number'] < total - 1:
+            progress[pos['comic_path']] = round(pos['page_number'] / total * 100)
+    return jsonify({"progress": progress})
+
+
+@collection_bp.route('/api/folder-read-progress', methods=['POST'])
+def api_folder_read_progress():
+    """Read/owned issue counts for series folders: {path: {read, total}}."""
+    from core.database import get_folder_read_progress
+    paths = (request.get_json(silent=True) or {}).get('paths')
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        return jsonify({"error": "paths must be a list of strings"}), 400
+    paths = filter_paths_for_user(current_user(), paths[:200], allow_traverse=True)
+    return jsonify({"progress": get_folder_read_progress(paths)})
+
+
+@collection_bp.route('/api/new-this-week')
+def api_new_this_week():
+    """Unread comics added to the library in the last 7 days, newest first."""
+    from core.database import get_issues_read
+    limit = min(request.args.get('limit', 10, type=int), 100)
+    cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    read = {i['issue_path'] for i in get_issues_read()}
+    files = filter_paths_for_user(
+        current_user(), get_recent_files(limit=100), key='file_path')
+    files = [f for f in files
+             if f['added_at'] >= cutoff and f['file_path'] not in read][:limit]
+    return jsonify({"success": True, "files": files, "total_count": len(files)})
 
 
 @collection_bp.route('/api/scan-directory', methods=['POST'])

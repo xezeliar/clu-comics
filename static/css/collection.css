@@ -1175,3 +1175,21 @@ body.collection-select-mode .grid-item.file {
 #dashboard-sections.clu-narrowing .dashboard-section:not(#library-section) {
     display: none !important;
 }
+
+/* Cover progress marks (static/js/clu-progress.js): bar = partly read or
+   series read/owned, dot = unread, tick = finished. */
+.clu-prog { position: absolute; z-index: 9; pointer-events: none; }
+.clu-prog-bar {
+    left: 0; right: 0; bottom: 0; height: 4px;
+    background: rgb(0 0 0 / 55%);
+}
+.clu-prog-bar > i { display: block; height: 100%; background: var(--bs-primary); }
+.clu-prog-dot {
+    top: 6px; left: 6px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--bs-primary); box-shadow: 0 0 0 2px rgb(0 0 0 / 40%);
+}
+.clu-prog-tick {
+    right: 6px; bottom: 10px; width: 20px; height: 20px; border-radius: 50%;
+    background: #198754; color: #fff; font-size: 0.8rem;
+    display: flex; align-items: center; justify-content: center;
+}

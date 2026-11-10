@@ -7012,6 +7012,43 @@ def get_issues_read(user_id=None):
         return []
 
 
+def get_folder_read_progress(paths, user_id=None):
+    """Issues read / issues owned under each folder, for series cover bars.
+
+    Returns ``{path: {"read": int, "total": int}}``. Prefix match is a range
+    scan (``path > 'dir/' AND path < 'dir0'``), so it uses the path index and
+    cannot be fooled by ``%``/``_`` in a folder name the way LIKE can.
+    """
+    out = {}
+    if not paths:
+        return out
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return {p: {"read": 0, "total": 0} for p in paths}
+            uid = _resolve_user_id(user_id)
+            c = conn.cursor()
+            for p in paths:
+                lo = p.rstrip("/") + "/"
+                hi = lo[:-1] + "0"  # '0' is the character after '/'
+                c.execute(
+                    "SELECT COUNT(*) FROM file_index "
+                    "WHERE type = 'file' AND path > ? AND path < ?",
+                    (lo, hi),
+                )
+                total = c.fetchone()[0]
+                c.execute(
+                    "SELECT COUNT(*) FROM issues_read "
+                    "WHERE user_id = ? AND issue_path > ? AND issue_path < ?",
+                    (uid, lo, hi),
+                )
+                out[p] = {"read": min(c.fetchone()[0], total), "total": total}
+        return out
+    except Exception as e:
+        app_logger.error(f"Failed to get folder read progress: {e}")
+        return {p: {"read": 0, "total": 0} for p in paths}
+
+
 def get_reading_totals(user_id=None):
     """
     Get total pages read and total time spent for the current (or given) user.
