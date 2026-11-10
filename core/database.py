@@ -550,6 +550,19 @@ def _init_db_locked():
             " ON file_metadata_tags(kind, value COLLATE NOCASE)"
         )
 
+        # followed_creators: opt-in "follow a creator" (core/creators.py).
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS followed_creators (
+                name TEXT PRIMARY KEY COLLATE NOCASE,
+                role TEXT NOT NULL DEFAULT 'writer',
+                publisher TEXT,
+                scope TEXT NOT NULL DEFAULT 'both',
+                followed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                added_count INTEGER NOT NULL DEFAULT 0,
+                last_added TEXT
+            )
+        """)
+
         # Create rebuild_schedule table (store file index rebuild schedule)
         c.execute("""
             CREATE TABLE IF NOT EXISTS rebuild_schedule (

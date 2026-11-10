@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
+
+{% block title %}{{ title }} - Comic Library{% endblock %}
+
+{% block content %}
+<div class="people-page">
+    {{ page_header(title, icon, subtitle='Built from the ComicInfo tags in your library',
+                   stats=[{'value': people|length, 'label': 'shown', 'keep_zero': True}]) }}
+
+    <form class="mb-3" method="get">
+        <input type="search" class="form-control" name="q" value="{{ q }}"
+               placeholder="Search {{ title | lower }}" aria-label="Search {{ title | lower }}">
+    </form>
+
+    {% if people %}
+    <div class="list-group">
+        {% for person in people %}
+        <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+           href="{{ url_for('creators.' ~ ('creator_page' if kind == 'creators' else 'character_page'), name=person.name) }}">
+            <span>{{ person.name }}</span>
+            <span class="badge bg-secondary">{{ person.n }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+        {{ empty_state('Nothing found', 'No ' ~ (title | lower) ~ ' in the library tags yet.', icon) }}
+    {% endif %}
+</div>
+{% endblock %}

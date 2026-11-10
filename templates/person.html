@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
+
+{% set is_creator = kind == 'creators' %}
+{% set kind_label = 'Creator' if is_creator else 'Character' %}
+{% block title %}{{ p.name }} - {{ kind_label }} - Comic Library{% endblock %}
+
+{% block extra_css %}
+<style>
+    .person-series-card { display: flex; gap: 0.75rem; align-items: center; }
+    .person-series-card img { width: 48px; aspect-ratio: 2/3; object-fit: cover; border-radius: 4px; }
+    .person-series-card .progress { height: 6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="person-page">
+    {% call(slot) page_header(p.name, 'bi-pencil' if is_creator else 'bi-people',
+                              subtitle=(p.series | length) ~ ' series · ' ~ p.issues ~ ' issues owned · ' ~ p.read ~ ' read'
+                                       ~ (' · first seen ' ~ p.first_year if p.first_year else '')
+                                       ~ (' · last read ' ~ p.last_read[:10] if p.last_read else ''),
+                              stats=[]) %}
+        {% if slot == 'crumbs' %}
+            <li class="breadcrumb-item"><a href="{{ url_for('creators.creators_index' if is_creator else 'creators.characters_index') }}">{{ kind_label }}s</a></li>
+        {% elif slot == 'actions' and is_creator %}
+            <button class="btn btn-sm {{ 'btn-outline-secondary' if follow else 'btn-primary' }}" id="followBtn"
+                    data-bs-toggle="modal" data-bs-target="#followModal">
+                <i class="bi {{ 'bi-check2' if follow else 'bi-plus-lg' }}"></i>
+                {{ 'Following' if follow else 'Follow' }}
+            </button>
+        {% endif %}
+    {% endcall %}
+
+    {% if is_creator %}
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        <a class="badge text-decoration-none {{ 'bg-primary' if not role else 'bg-secondary' }}"
+           href="{{ url_for('creators.creator_page', name=p.name) }}">All</a>
+        {% for r in p.roles %}
+        <a class="badge text-decoration-none {{ 'bg-primary' if role == r.kind else 'bg-secondary' }}"
+           href="{{ url_for('creators.creator_page', name=p.name, role=r.kind) }}">{{ r.label }} {{ r.count }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <ul class="nav nav-pills mb-3">
+        {% for key, label in [('series', 'By series'), ('year', 'By year'), ('unread', 'Unread only')] %}
+        <li class="nav-item"><a class="nav-link py-1 {{ 'active' if view == key }}"
+            href="{{ url_for(request.endpoint, name=p.name, view=key, role=role) }}">{{ label }}</a></li>
+        {% endfor %}
+    </ul>
+
+    {% if p.series %}
+    <div class="list-group mb-4">
+        {% for s in p.series %}
+        <a class="list-group-item list-group-item-action" href="{{ s.href }}">
+            <div class="person-series-card">
+                <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
+                     onerror="this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+                <div class="flex-grow-1">
+                    <div class="d-flex justify-content-between">
+                        <strong>{{ s.name }}{% if s.year %} ({{ s.year }}){% endif %}</strong>
+                        <span class="text-body-secondary small">{{ s.issues }} issue{{ 's' if s.issues != 1 }} · {{ s.read }} read</span>
+                    </div>
+                    <div class="text-body-secondary small">{{ s.publisher or '' }}</div>
+                    <div class="progress mt-1">
+                        <div class="progress-bar {{ 'bg-success' if s.read == s.issues }}" role="progressbar"
+                             style="width: {{ (s.read * 100 // s.issues) if s.issues else 0 }}%"></div>
+                    </div>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+        {{ empty_state('Nothing to show', 'Every issue here is read.', 'bi-check2-all') }}
+    {% endif %}
+
+    {% if p.often_with %}
+    <h2 class="h6">{{ 'Works often with' if is_creator else 'Often appears with' }}</h2>
+    <div class="d-flex flex-wrap gap-2">
+        {% for o in p.often_with %}
+        <a class="badge bg-secondary text-decoration-none"
+           href="{{ url_for('creators.creator_page' if is_creator else 'creators.character_page', name=o.name) }}">{{ o.name }} · {{ o.n }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+{% if is_creator %}
+<div class="modal fade" id="followModal" tabindex="-1" aria-labelledby="followModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="followModalLabel">Follow {{ p.name }}</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-body-secondary small">
+                    When the nightly sweep finds a new series by this creator on your Pull List that is not being
+                    monitored, Monitor is switched on so it appears on Wanted. Existing series are left alone.
+                    {% if follow and follow.added_count %}<br>Added so far: {{ follow.added_count }}{% if follow.last_added %} (latest: {{ follow.last_added }}){% endif %}.{% endif %}
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="followRole">As</label>
+                    <select class="form-select" id="followRole">
+                        {% for k, label in roles.items() %}
+                        <option value="{{ k }}" {{ 'selected' if (follow.role if follow else (role or p.roles[0].kind)) == k }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="followPublisher">Publisher (blank for all)</label>
+                    <input class="form-control" id="followPublisher" value="{{ follow.publisher or '' if follow else '' }}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="followScope">Ongoing and limited</label>
+                    <select class="form-select" id="followScope">
+                        {% for sc in scopes %}
+                        <option value="{{ sc }}" {{ 'selected' if follow and follow.scope == sc }}>{{ sc | capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                {% if follow %}<button type="button" class="btn btn-outline-danger me-auto" id="unfollowBtn">Unfollow</button>{% endif %}
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveFollowBtn">{{ 'Save' if follow else 'Follow' }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{% if is_creator %}
+<script>
+(function () {
+    const name = {{ p.name | tojson }};
+    async function send(method, body, okMessage) {
+        const res = await fetch({{ url_for('creators.api_follow') | tojson }}, {
+            method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) { CLU.toast(data.error || 'Request failed', 'error'); return; }
+        CLU.toast(okMessage, 'success');
+        setTimeout(() => location.reload(), 600);
+    }
+    document.getElementById('saveFollowBtn').addEventListener('click', () => send('POST', {
+        name,
+        role: document.getElementById('followRole').value,
+        publisher: document.getElementById('followPublisher').value,
+        scope: document.getElementById('followScope').value
+    }, 'Following ' + name));
+    const un = document.getElementById('unfollowBtn');
+    if (un) un.addEventListener('click', () => send('DELETE', { name }, 'Unfollowed ' + name));
+})();
+</script>
+{% endif %}
+{% endblock %}

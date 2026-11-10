@@ -64,6 +64,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 import core.app_state as app_state
 from routes.favorites import favorites_bp
+from routes.creators import creators_bp
 
 from routes.opds import opds_bp
 from models import gcd
@@ -327,6 +328,7 @@ from routes.auth import auth_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(favorites_bp)
+app.register_blueprint(creators_bp)
 app.register_blueprint(opds_bp)
 from routes.reading_lists import reading_lists_bp, prefetch_github_tree
 
@@ -1235,6 +1237,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         in flight returns that shape with ``skipped`` set.
     """
     from core import download_runs
+
+    if not dry_run and only_series_id is None:
+        from core.creators import apply_follows
+        apply_follows()  # followed creators' new series join Wanted first
 
     # The run report (Status page). A dry run records nothing -- the
     # simulation page is its report -- so it keeps the no-op recorder and no
