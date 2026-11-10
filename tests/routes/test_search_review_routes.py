@@ -117,3 +117,28 @@ def test_search_error_outcome_is_listed_and_filterable(client):
     data = client.get("/api/search-review?outcome=search_error").get_json()
     assert [a["issue_number"] for a in data["attempts"]] == ["3"]
     assert client.get("/search-review").status_code == 200
+
+
+def test_clear_keeps_waiting_picks(client):
+    _attempt("waiting", 1)
+    _attempt("nothing_found", 2)
+    _attempt("search_error", 3)
+    r = client.post("/api/search-review/clear", json={}).get_json()
+    assert r["success"] and r["removed"] == 2
+    left = client.get("/api/search-review").get_json()
+    assert [a["outcome"] for a in left["attempts"]] == ["waiting"]
+
+
+def test_clear_one_outcome_only(client):
+    _attempt("nothing_found", 1)
+    _attempt("search_error", 2)
+    r = client.post("/api/search-review/clear", json={"outcome": "search_error"}).get_json()
+    assert r["removed"] == 1
+    assert [a["outcome"] for a in client.get("/api/search-review").get_json()["attempts"]] == ["nothing_found"]
+
+
+def test_clear_refuses_waiting_and_unknown(client):
+    _attempt("waiting", 1)
+    assert client.post("/api/search-review/clear", json={"outcome": "waiting"}).status_code == 400
+    assert client.post("/api/search-review/clear", json={"outcome": "bogus"}).status_code == 400
+    assert len(client.get("/api/search-review").get_json()["attempts"]) == 1

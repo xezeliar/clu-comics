@@ -1,13 +1,18 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/modal_clear_confirm.html' import clear_modal %}
 
 {% block title %}CLU: Search review{% endblock %}
 
 {% block content %}
 {% call(slot) page_header('Search review', 'bi-search',
                           subtitle='Why GetComics candidates were accepted or rejected, and picks held for your OK.') %}
+  {% if slot == 'more' %}
+    <li><button class="dropdown-item text-danger" type="button" id="sr-clear"><i class="bi bi-trash me-2"></i>Clear history</button></li>
+  {% endif %}
 {% endcall %}
+{{ clear_modal('clearSearchModal', 'Clear search history?', '', 'Clear') }}
 
 <ul class="nav nav-tabs mb-3" id="sr-tabs">
   <li class="nav-item"><button class="nav-link active" data-outcome="waiting" type="button">Waiting for OK <span class="badge text-bg-danger d-none" id="sr-waiting-count"></span></button></li>
@@ -116,6 +121,29 @@
       d.attempts.forEach(function (a) { listEl.appendChild(card(a)); });
     }).catch(function () { CLU.toast('Could not load', 'danger'); });
   }
+
+  var clearEl = document.getElementById('clearSearchModal');
+  var TAB = {'': 'recent searches (Nothing found and Search failed included)', nothing_found: '"Nothing found" entries', search_error: '"Search failed" entries'};
+  document.getElementById('sr-clear').addEventListener('click', function () {
+    if (current === 'waiting') {
+      CLU.toast('Picks waiting for your OK are never cleared. Approve or skip them instead.', 'info');
+      return;
+    }
+    document.getElementById('clearSearchModal-body').textContent =
+      'This removes ' + TAB[current] + '. Picks still waiting for your OK are kept, and no downloads are affected.';
+    bootstrap.Modal.getOrCreateInstance(clearEl).show();
+  });
+  document.getElementById('clearSearchModal-confirm').addEventListener('click', function () {
+    fetch(urls.base + 'clear', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({outcome: current || null})
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      bootstrap.Modal.getOrCreateInstance(clearEl).hide();
+      if (!d.success) { CLU.toast(d.error || 'Could not clear history', 'danger'); return; }
+      CLU.toast('Cleared ' + d.removed + ' entr' + (d.removed === 1 ? 'y' : 'ies'), 'success');
+      load();
+    }).catch(function () { CLU.toast('Could not clear history', 'danger'); });
+  });
 
   document.getElementById('sr-research-all').addEventListener('click', function () {
     fetch(urls.base + 'research-all', {

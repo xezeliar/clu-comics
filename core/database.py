@@ -12911,6 +12911,30 @@ def set_search_attempt_outcome(attempt_id, outcome, only_from=None):
         return False
 
 
+def clear_search_attempts(outcome=None):
+    """Delete finished search history; picks still waiting for approval are never cleared.
+
+    ``outcome`` limits it to one finished outcome. Returns rows removed, or None on failure.
+    """
+    if outcome == "waiting":
+        return None
+    if outcome is not None and outcome not in SEARCH_OUTCOMES:
+        return None
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            if outcome:
+                cur = conn.execute("DELETE FROM search_attempts WHERE outcome = ?", (outcome,))
+            else:
+                cur = conn.execute("DELETE FROM search_attempts WHERE outcome != 'waiting'")
+            conn.commit()
+            return cur.rowcount
+    except Exception as e:
+        app_logger.error(f"Failed to clear search attempts: {e}")
+        return None
+
+
 def update_reading_list_name(list_id, name):
     """
     Update the name of a reading list.
