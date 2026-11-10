@@ -44,7 +44,10 @@
         <p class="text-muted small">This may take a moment on first load.</p>
     </div>
     {% elif total_wanted == 0 and not reading_list_wanted %}
-    {% call empty_state('No wanted issues', 'Every tracked series is complete.', 'bi-check-circle', tone='success') %}
+    {% call empty_state('Nothing wanted', 'Every tracked series is complete, or none are tracked yet.', 'bi-check-circle', tone='success') %}
+        <a href="{{ url_for('config_page') }}#libraries" class="btn btn-outline-secondary">
+            <i class="bi bi-hdd me-1" aria-hidden="true"></i>Link a library
+        </a>
         <a href="{{ url_for('series.releases') }}" class="btn btn-outline-secondary">
             <i class="bi bi-calendar-week me-1" aria-hidden="true"></i>Browse releases
         </a>

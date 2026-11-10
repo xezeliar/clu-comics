@@ -5027,7 +5027,8 @@
                 return;
             }
             if (!data.indexers.length) {
-                container.innerHTML = '<div class="alert alert-info">No indexers configured yet. Click "Add Indexer" to get started.</div>';
+                container.replaceChildren(CLU.emptyState({ icon: 'bi-search', title: 'No indexers yet', message: 'Add a Newznab indexer to search for downloads.', compact: true,
+                    actions: [{ label: 'Add Indexer', icon: 'bi-plus-lg', primary: true, onClick: () => openIndexerModal() }] }));
                 return;
             }
 
@@ -5304,7 +5305,7 @@
             // Filter to only configured/enabled providers, excluding AniList and Bedetheque (coming soon)
             const configuredProviders = provData.providers.filter(p => (p.has_credentials || p.is_valid) && p.type !== 'anilist' && p.type !== 'bedetheque');
             if (configuredProviders.length === 0) {
-                container.innerHTML = '<div class="alert alert-info">No providers enabled yet. Configure credentials for auth-required providers, or click "Enable Provider" for public API providers above.</div>';
+                container.replaceChildren(CLU.emptyState({ icon: 'bi-plug', title: 'No providers enabled yet', message: 'Save credentials for a provider, or enable a public one above.', compact: true }));
                 return;
             }
 

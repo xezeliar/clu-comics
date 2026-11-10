@@ -56,10 +56,13 @@
     {% endcall %}
 
     {% if total_series == 0 %}
-    {% set _msg %}Map series to folders in your collection, or scan the library to auto-map
-        folders that already have <code>series.json</code> or <code>cvinfo</code> files.{% endset %}
-    {% call empty_state('No tracked series', _msg, 'bi-collection') %}
-        <button type="button" class="btn btn-primary" id="scanLibraryBtnEmpty">
+    {% set _msg %}Subscribe to a series, or scan the library to auto-map folders that already
+        have <code>series.json</code> or <code>cvinfo</code> files.{% endset %}
+    {% call empty_state('Pull list is empty', _msg, 'bi-collection') %}
+        <a href="{{ url_for('series.series_search') }}" class="btn btn-primary">
+            <i class="bi bi-search me-1" aria-hidden="true"></i>Search Metron
+        </a>
+        <button type="button" class="btn btn-outline-secondary" id="scanLibraryBtnEmpty">
             <i class="bi bi-magic me-1" aria-hidden="true"></i>Scan Library
         </button>
         <a href="{{ url_for('series.releases') }}" class="btn btn-outline-secondary">

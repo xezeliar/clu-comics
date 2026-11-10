@@ -37,6 +37,7 @@ from core.auth import (
     filter_paths_for_user,
     accessible_folder_prefixes,
     current_user,
+    require_role,
 )
 from core.database import (
     get_directory_children, get_path_counts_batch, get_recent_files,
@@ -409,6 +410,48 @@ def browse_by_metadata(category, name):
 # =============================================================================
 # Browse API
 # =============================================================================
+
+def onboarding_steps():
+    """Setup steps for the home-page checklist, each ticked from real state."""
+    from core.config import get_watch_dir, get_target_dir
+    from core.database import (db_conn, get_libraries,
+                               get_all_provider_credentials_status)
+    from core.settings import get_bool
+    providers = {r["provider_type"] for r in get_all_provider_credentials_status()}
+    with db_conn() as conn:
+        subscribed = bool(conn and conn.execute(
+            "SELECT 1 FROM series WHERE COALESCE(series_subscription, 1) = 1 LIMIT 1"
+        ).fetchone())
+    cfg = url_for('config_page')
+    return [
+        {"id": "library", "title": "Add a library", "done": bool(get_libraries()),
+         "href": cfg + "#libraries"},
+        {"id": "provider", "title": "Save ComicVine or Metron credentials",
+         "done": bool(providers & {"comicvine", "metron"}),
+         "href": cfg + "#metadata-providers"},
+        {"id": "series", "title": "Subscribe to a series on the pull list",
+         "done": subscribed, "href": url_for('series.series_search')},
+        {"id": "monitor", "title": "Set up folder monitoring",
+         "done": bool(get_bool("MONITOR_ENABLED") and get_watch_dir() and get_target_dir()),
+         "href": cfg + "#file-processing"},
+    ]
+
+
+@collection_bp.route('/api/onboarding')
+def api_onboarding():
+    """Checklist state; hidden once dismissed or every step is ticked."""
+    from core.settings import get_bool
+    steps = onboarding_steps()
+    visible = not get_bool("ONBOARDING_DISMISSED") and not all(s["done"] for s in steps)
+    return jsonify({"visible": visible, "steps": steps})
+
+
+@collection_bp.route('/api/onboarding/dismiss', methods=['POST'])
+@require_role("owner")
+def api_onboarding_dismiss():
+    from core.settings import set_setting
+    return jsonify({"success": set_setting("ONBOARDING_DISMISSED", True)})
+
 
 @collection_bp.route('/api/browse')
 def api_browse():
