@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/filters.html' import toolbar, result_count %}
 
 {% set is_creator = kind == 'creators' %}
 {% set kind_label = 'Creator' if is_creator else 'Character' %}
@@ -8,9 +9,24 @@
 
 {% block extra_css %}
 <style>
-    .person-series-card { display: flex; gap: 0.75rem; align-items: center; }
-    .person-series-card img { width: 48px; aspect-ratio: 2/3; object-fit: cover; border-radius: 4px; }
-    .person-series-card .progress { height: 6px; }
+    .person-grid {
+        list-style: none; margin: 0 0 2rem; padding: 0;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem 1rem;
+    }
+    .person-card { display: block; color: inherit; text-decoration: none; }
+    .person-cover {
+        position: relative; aspect-ratio: 2 / 3; border-radius: 8px; overflow: clip;
+        background: var(--bs-tertiary-bg); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .person-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .person-card:hover .person-cover, .person-card:focus-visible .person-cover { transform: translateY(-5px); }
+    .person-card-title { margin-top: 0.5rem; font-size: 0.9rem; font-weight: 500; line-height: 1.3;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person-card-meta { font-size: 0.75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person-section { font-size: 1rem; font-weight: 500; margin: 0 0 0.75rem; }
+    @media (prefers-reduced-motion: reduce) { .person-cover { transition: none; } .person-card:hover .person-cover { transform: none; } }
 </style>
 {% endblock %}
 
@@ -32,56 +48,73 @@
         {% endif %}
     {% endcall %}
 
-    {% if is_creator %}
-    <div class="d-flex flex-wrap gap-2 mb-3">
-        <a class="badge text-decoration-none {{ 'bg-primary' if not role else 'bg-secondary' }}"
-           href="{{ url_for('creators.creator_page', name=p.name) }}">All</a>
-        {% for r in p.roles %}
-        <a class="badge text-decoration-none {{ 'bg-primary' if role == r.kind else 'bg-secondary' }}"
-           href="{{ url_for('creators.creator_page', name=p.name, role=r.kind) }}">{{ r.label }} {{ r.count }}</a>
-        {% endfor %}
-    </div>
-    {% endif %}
-
-    <ul class="nav nav-pills mb-3">
-        {% for key, label in [('series', 'By series'), ('year', 'By year'), ('unread', 'Unread only')] %}
-        <li class="nav-item"><a class="nav-link py-1 {{ 'active' if view == key }}"
-            href="{{ url_for(request.endpoint, name=p.name, view=key, role=role) }}">{{ label }}</a></li>
-        {% endfor %}
-    </ul>
-
-    {% if p.series %}
-    <div class="list-group mb-4">
-        {% for s in p.series %}
-        <a class="list-group-item list-group-item-action" href="{{ s.href }}">
-            <div class="person-series-card">
-                <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
-                     onerror="this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
-                <div class="flex-grow-1">
-                    <div class="d-flex justify-content-between">
-                        <strong>{{ s.name }}{% if s.year %} ({{ s.year }}){% endif %}</strong>
-                        <span class="text-body-secondary small">{{ s.issues }} issue{{ 's' if s.issues != 1 }} · {{ s.read }} read</span>
-                    </div>
-                    <div class="text-body-secondary small">{{ s.publisher or '' }}</div>
-                    <div class="progress mt-1">
-                        <div class="progress-bar {{ 'bg-success' if s.read == s.issues }}" role="progressbar"
-                             style="width: {{ (s.read * 100 // s.issues) if s.issues else 0 }}%"></div>
-                    </div>
+    {% call toolbar(kind_label ~ ' views') %}
+        <div class="clu-toolbar-row">
+            <div class="clu-filter">
+                <span class="clu-filter-label">Show</span>
+                <div class="clu-filter-options clu-filter-scroll" role="group" aria-label="Show">
+                    {% for key, label in [('series', 'By series'), ('year', 'By year'), ('unread', 'Unread only')] %}
+                    <a class="btn btn-sm btn-outline-secondary {{ 'active' if view == key }}"
+                       {% if view == key %}aria-current="page"{% endif %}
+                       href="{{ url_for(request.endpoint, name=p.name, view=key, role=role) }}">{{ label }}</a>
+                    {% endfor %}
                 </div>
             </div>
-        </a>
+            <div class="clu-toolbar-end">
+                {{ result_count('personCount', p.series | length, 'series', 'series') }}
+            </div>
+        </div>
+        {% if is_creator and p.roles %}
+        <div class="clu-toolbar-row">
+            <div class="clu-filter">
+                <span class="clu-filter-label">Role</span>
+                <div class="clu-filter-options clu-filter-scroll" role="group" aria-label="Role">
+                    <a class="btn btn-sm btn-outline-secondary {{ 'active' if not role }}"
+                       {% if not role %}aria-current="page"{% endif %}
+                       href="{{ url_for('creators.creator_page', name=p.name, view=view) }}">All</a>
+                    {% for r in p.roles %}
+                    <a class="btn btn-sm btn-outline-secondary {{ 'active' if role == r.kind }}"
+                       {% if role == r.kind %}aria-current="page"{% endif %}
+                       href="{{ url_for('creators.creator_page', name=p.name, role=r.kind, view=view) }}">{{ r.label }}<span class="clu-filter-count">{{ r.count }}</span></a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endcall %}
+
+    {% if p.series %}
+    <ul class="person-grid">
+        {% for s in p.series %}
+        {% set pct = (s.read * 100 // s.issues) if s.issues else 0 %}
+        <li>
+            <a class="person-card" href="{{ s.href }}">
+                <div class="person-cover">
+                    <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
+                         onerror="this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+                    {% if s.issues and s.read == s.issues %}
+                    <span class="clu-prog clu-prog-tick" title="All read"><i class="bi bi-check2"></i></span>
+                    {% elif s.read %}
+                    <span class="clu-prog clu-prog-bar" role="progressbar" aria-label="Read"
+                          aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"><i style="width: {{ pct }}%"></i></span>
+                    {% endif %}
+                </div>
+                <div class="person-card-title" title="{{ s.name }}">{{ s.name }}{% if s.year %} ({{ s.year }}){% endif %}</div>
+                <div class="person-card-meta">{{ s.issues }} issue{{ 's' if s.issues != 1 }} · {{ s.read }} read{% if s.publisher %} · {{ s.publisher }}{% endif %}</div>
+            </a>
+        </li>
         {% endfor %}
-    </div>
+    </ul>
     {% else %}
-        {{ empty_state('Nothing to show', 'Every issue here is read.', 'bi-check2-all') }}
+        {{ empty_state('Nothing to show', 'Every issue here is read.', 'bi-check2-all', tone='success') }}
     {% endif %}
 
     {% if p.often_with %}
-    <h2 class="h6">{{ 'Works often with' if is_creator else 'Often appears with' }}</h2>
-    <div class="d-flex flex-wrap gap-2">
+    <h2 class="person-section">{{ 'Works often with' if is_creator else 'Often appears with' }}</h2>
+    <div class="clu-filter-options clu-filter-scroll">
         {% for o in p.often_with %}
-        <a class="badge bg-secondary text-decoration-none"
-           href="{{ url_for('creators.creator_page' if is_creator else 'creators.character_page', name=o.name) }}">{{ o.name }} · {{ o.n }}</a>
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('creators.creator_page' if is_creator else 'creators.character_page', name=o.name) }}">{{ o.name }}<span class="clu-filter-count">{{ o.n }}</span></a>
         {% endfor %}
     </div>
     {% endif %}

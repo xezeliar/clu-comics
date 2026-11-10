@@ -41,10 +41,10 @@ class TestCreatorPage:
     def test_page_shows_roles_series_and_coworkers(self, client, library):
         body = client.get("/creators/" + quote("Tom King")).get_data(as_text=True)
         assert "Tom King" in body
-        assert "Writer 3" in body
+        assert 'Writer<span class="clu-filter-count">3</span>' in body
         assert "Batman" in body and "Detective" in body
-        assert "Mitch Gerads · 2" in body
-        assert "Clay Mann · 1" in body
+        assert 'Mitch Gerads<span class="clu-filter-count">2</span>' in body
+        assert 'Clay Mann<span class="clu-filter-count">1</span>' in body
         assert "Someone Else" not in body
 
     def test_lookup_is_case_and_provider_id_insensitive(self, client, library):
@@ -56,7 +56,7 @@ class TestCreatorPage:
 
     def test_role_filter_keeps_other_pills(self, client, library):
         body = client.get("/creators/Mitch%20Gerads?role=penciller").get_data(as_text=True)
-        assert "Penciller 2" in body
+        assert 'Penciller<span class="clu-filter-count">2</span>' in body
         assert client.get("/creators/Tom%20King?role=penciller").status_code == 404
 
     def test_unread_view_hides_finished_series(self, client, library, db_connection):
@@ -81,7 +81,7 @@ class TestCharacterPage:
     def test_page(self, client, library):
         body = client.get("/characters/Batman").get_data(as_text=True)
         assert "2 series · 3 issues owned · 1 read" in body
-        assert "Joker · 1" in body and "Catwoman · 1" in body
+        assert 'Joker<span class="clu-filter-count">1</span>' in body and 'Catwoman<span class="clu-filter-count">1</span>' in body
         assert "first seen 2018" in body
 
     def test_unknown_is_404(self, client, library):

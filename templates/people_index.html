@@ -1,31 +1,115 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
-{% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/empty_state.html' import empty_state, no_matches %}
+{% from 'partials/filters.html' import toolbar, search_input, result_count, letter_bar %}
+
+{% set is_creators = kind == 'creators' %}
+{% set noun = 'creators' if is_creators else 'characters' %}
+{% set one = 'creator' if is_creators else 'character' %}
+{% set detail = 'creators.creator_page' if is_creators else 'creators.character_page' %}
+{% set ns = namespace(letters=[]) %}
+{% for person in people %}
+  {% set c = person.name[:1] | upper %}
+  {% set key = c if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' else '#' %}
+  {% if key not in ns.letters %}{% set ns.letters = ns.letters + [key] %}{% endif %}
+{% endfor %}
+{% set letters = ns.letters %}
 
 {% block title %}{{ title }} - Comic Library{% endblock %}
 
+{% block extra_css %}
+<style>
+    .people-list {
+        list-style: none; margin: 0; padding: 0;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+        column-gap: 1.5rem;
+    }
+    .people-list li[hidden] { display: none; }
+    .people-row {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+        padding: 0.5rem 0.5rem; border-bottom: 1px solid var(--bs-border-color);
+        color: var(--bs-body-color); text-decoration: none; border-radius: var(--bs-border-radius);
+    }
+    .people-row:hover, .people-row:focus-visible { background: var(--bs-tertiary-bg); color: var(--bs-emphasis-color); }
+    .people-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .people-count { flex: none; color: var(--bs-secondary-color); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="people-page">
-    {{ page_header(title, icon, subtitle='Built from the ComicInfo tags in your library',
-                   stats=[{'value': people|length, 'label': 'shown', 'keep_zero': True}]) }}
+    {% call(slot) page_header(title, icon,
+                              subtitle='Built from the credits and characters tagged in your comics.') %}
+        {% if slot == 'help' %}
+            <p>Counts are issues you own that carry the tag. Open {{ 'a creator' if is_creators else 'a character' }}
+               to see their series, what you have read and what is still unread.</p>
+        {% endif %}
+    {% endcall %}
 
-    <form class="mb-3" method="get">
-        <input type="search" class="form-control" name="q" value="{{ q }}"
-               placeholder="Search {{ title | lower }}" aria-label="Search {{ title | lower }}">
-    </form>
+    {% call toolbar('Search and filter ' ~ noun) %}
+        <div class="clu-toolbar-row">
+            {{ search_input('peopleSearch', 'Search ' ~ noun, q) }}
+            <div class="clu-toolbar-end">
+                {{ result_count('peopleCount', people | length, noun, one) }}
+            </div>
+        </div>
+        {% if people | length > 20 %}
+        <div class="clu-toolbar-row">
+            {{ letter_bar('peopleLetters', letters, aria_label='Filter ' ~ noun ~ ' by first letter') }}
+        </div>
+        {% endif %}
+    {% endcall %}
 
     {% if people %}
-    <div class="list-group">
+    <ul class="people-list" id="peopleList">
         {% for person in people %}
-        <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-           href="{{ url_for('creators.' ~ ('creator_page' if kind == 'creators' else 'character_page'), name=person.name) }}">
-            <span>{{ person.name }}</span>
-            <span class="badge bg-secondary">{{ person.n }}</span>
-        </a>
+        <li data-name="{{ person.name }}">
+            <a class="people-row" href="{{ url_for(detail, name=person.name) }}">
+                <span class="people-name" title="{{ person.name }}">{{ person.name }}</span>
+                <span class="people-count">{{ '{:,}'.format(person.n) }} issue{{ 's' if person.n != 1 }}</span>
+            </a>
+        </li>
         {% endfor %}
-    </div>
+    </ul>
+    <div id="peopleNoMatch" hidden></div>
+    {% elif q %}
+        {{ no_matches(noun, q, clear_href=url_for('creators.creators_index' if is_creators else 'creators.characters_index')) }}
     {% else %}
-        {{ empty_state('Nothing found', 'No ' ~ (title | lower) ~ ' in the library tags yet.', icon) }}
+        {{ empty_state('No ' ~ noun ~ ' yet', 'They appear once your comics carry ' ~ ('credit' if is_creators else 'character') ~ ' tags. Run a metadata tag or scan to fill them in.', icon) }}
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+    const search = document.getElementById('peopleSearch');
+    // Search asks the server, which looks past the rows on screen.
+    CLU.bindSearch(search, function (v) {
+        const u = new URL(location.href);
+        if (v) u.searchParams.set('q', v); else u.searchParams.delete('q');
+        location.href = u.toString();
+    });
+    search.addEventListener('keydown', e => { if (e.key === 'Escape') { search.value = ''; search.dispatchEvent(new Event('input')); } });
+
+    const list = document.getElementById('peopleList');
+    const bar = document.getElementById('peopleLetters');
+    if (!list || !bar) return;
+    const items = Array.from(list.children);
+    const count = document.getElementById('peopleCount');
+    const noun = {{ noun | tojson }}, one = {{ one | tojson }};
+    CLU.filterBar(bar, { toggleOff: true, onChange: function (letter) {
+        let shown = 0;
+        items.forEach(li => {
+            const first = li.dataset.name.charAt(0).toUpperCase();
+            const key = /[A-Z]/.test(first) ? first : '#';
+            const on = !letter || key === letter;
+            li.hidden = !on;
+            if (on) shown++;
+        });
+        CLU.setCount(count, { total: items.length, noun: noun, one: one, shown: shown });
+    } });
+})();
+</script>
 {% endblock %}
