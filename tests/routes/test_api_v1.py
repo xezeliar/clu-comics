@@ -4,6 +4,7 @@ import json
 import pytest
 
 from core.database import (
+    add_library,
     add_file_index_entry,
     add_to_read,
     get_api_token,
@@ -36,6 +37,8 @@ def auth_headers(with_token):
 def seeded_file(db_connection, create_cbz):
     """Create a real CBZ on disk and a matching file_index row."""
     cbz_path = create_cbz("Batman 001 (2020).cbz", num_images=4)
+    # The browse queries only count rows under a library root.
+    add_library("Test", os.path.dirname(cbz_path))
 
     conn = get_db_connection()
     c = conn.cursor()
