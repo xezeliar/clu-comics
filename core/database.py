@@ -974,6 +974,10 @@ def _init_db_locked():
             app_logger.info("Migrating reading_list_entries table: adding sort_order column")
             c.execute("ALTER TABLE reading_list_entries ADD COLUMN sort_order INTEGER DEFAULT 0")
             c.execute("UPDATE reading_list_entries SET sort_order = id WHERE sort_order = 0")
+        if "is_highlight" not in rle_columns:
+            # Entries the user picked to lead the list card's cover stack.
+            app_logger.info("Migrating reading_list_entries table: adding is_highlight column")
+            c.execute("ALTER TABLE reading_list_entries ADD COLUMN is_highlight INTEGER DEFAULT 0")
 
         # Migrate: issue_year and metron_id.
         #
@@ -12064,6 +12068,7 @@ def _reading_list_covers(cursor, list_id, thumbnail_path):
         FROM reading_list_entries
         WHERE reading_list_id = ?
         AND COALESCE(manual_override_path, matched_file_path) IS NOT NULL
+        ORDER BY is_highlight DESC, id
         LIMIT 5
     """,
         (list_id,),
@@ -12390,6 +12395,45 @@ def clear_thumbnail_if_matches_entry(list_id, entry_id):
             f"Error checking/clearing thumbnail for list {list_id}: {str(e)}"
         )
         return False
+
+
+MAX_READING_LIST_HIGHLIGHTS = 3
+
+
+def set_entry_highlight(list_id, entry_id, highlight):
+    """Pin (or unpin) an entry's cover to the front of its list card.
+
+    Returns (ok, message). At most MAX_READING_LIST_HIGHLIGHTS mapped entries
+    per list; an entry with no file has no cover, so it is neither counted
+    nor pinnable.
+    """
+    with db_conn() as conn:
+        if not conn:
+            return False, "Database unavailable"
+        c = conn.cursor()
+        if highlight:
+            c.execute(
+                """
+                SELECT COUNT(*) FROM reading_list_entries
+                WHERE reading_list_id = ? AND is_highlight = 1 AND id != ?
+                AND COALESCE(manual_override_path, matched_file_path) IS NOT NULL
+                """,
+                (list_id, entry_id),
+            )
+            if c.fetchone()[0] >= MAX_READING_LIST_HIGHLIGHTS:
+                return False, f"Only {MAX_READING_LIST_HIGHLIGHTS} highlight covers per list"
+        c.execute(
+            """
+            UPDATE reading_list_entries SET is_highlight = ?
+            WHERE id = ? AND reading_list_id = ?
+            AND (? = 0 OR COALESCE(manual_override_path, matched_file_path) IS NOT NULL)
+            """,
+            (1 if highlight else 0, entry_id, list_id, 1 if highlight else 0),
+        )
+        conn.commit()
+        if not c.rowcount:
+            return False, "Entry not found or not mapped to a file"
+    return True, "Highlight updated"
 
 
 def delete_reading_list(list_id):

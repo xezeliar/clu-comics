@@ -505,6 +505,20 @@ class TestSetThumbnail:
         assert resp.get_json()["success"] is False
 
 
+class TestSetHighlight:
+
+    @patch("routes.reading_lists.set_entry_highlight", return_value=(True, "ok"))
+    def test_set_highlight(self, mock_set, client):
+        resp = client.post("/api/reading-lists/1/highlight",
+                           json={"entry_id": 5, "highlight": True})
+        assert resp.get_json()["success"] is True
+        mock_set.assert_called_once_with(1, 5, True)
+
+    def test_missing_entry_id(self, client):
+        resp = client.post("/api/reading-lists/1/highlight", json={})
+        assert resp.get_json()["success"] is False
+
+
 class TestUpdateName:
 
     @patch("routes.reading_lists.update_reading_list_name", return_value=True)

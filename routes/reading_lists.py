@@ -28,6 +28,7 @@ from core.database import (
     search_file_index,
     search_file_index_all_words,
     update_reading_list_thumbnail,
+    set_entry_highlight,
     clear_thumbnail_if_matches_entry,
     update_reading_list_name,
     update_reading_list_description,
@@ -734,6 +735,17 @@ def search_term():
         request.args.get('year') or None,
     )
     return jsonify({'term': term})
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/highlight', methods=['POST'])
+def set_highlight(list_id):
+    """Pin or unpin an entry's cover among the list card's highlight covers."""
+    data = request.json or {}
+    entry_id = data.get('entry_id')
+    if not entry_id:
+        return jsonify({'success': False, 'message': 'Entry ID is required'})
+    ok, message = set_entry_highlight(list_id, entry_id, bool(data.get('highlight')))
+    return jsonify({'success': ok, 'message': message})
+
 
 @reading_lists_bp.route('/api/reading-lists/<int:list_id>/thumbnail', methods=['POST'])
 def set_thumbnail(list_id):

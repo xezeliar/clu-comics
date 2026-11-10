@@ -185,3 +185,32 @@ class TestMatchingIds:
         assert get_reading_list_matching_ids(["event"]) == sorted(
             [lists["Alpha"], lists["Gamma"]]
         )
+
+
+class TestHighlightCovers:
+
+    def _entries(self, n):
+        list_id = create_reading_list("H", user_id=A)
+        ids = [add_reading_list_entry(list_id, {"series": "S", "issue_number": str(i),
+                                                 "matched_file_path": f"/data/S{i}.cbz"})
+               for i in range(n)]
+        return list_id, ids
+
+    def test_highlights_lead_the_covers_and_cap_at_three(self, db_connection):
+        from core.database import set_entry_highlight
+        list_id, ids = self._entries(5)
+        assert set_entry_highlight(list_id, ids[4], True)[0]
+        assert set_entry_highlight(list_id, ids[3], True)[0]
+        assert set_entry_highlight(list_id, ids[2], True)[0]
+        ok, _ = set_entry_highlight(list_id, ids[1], True)
+        assert not ok
+        covers = get_reading_lists_page()["lists"][0]["covers"]
+        assert covers[:3] == ["/data/S2.cbz", "/data/S3.cbz", "/data/S4.cbz"]
+        assert set_entry_highlight(list_id, ids[4], False)[0]
+        assert set_entry_highlight(list_id, ids[1], True)[0]
+
+    def test_unmapped_entry_cannot_be_highlighted(self, db_connection):
+        from core.database import set_entry_highlight
+        list_id = create_reading_list("U", user_id=A)
+        eid = add_reading_list_entry(list_id, {"series": "S", "issue_number": "1"})
+        assert not set_entry_highlight(list_id, eid, True)[0]
