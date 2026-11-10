@@ -12,7 +12,7 @@
  *
  *   type: 'success' | 'error' | 'warning' | 'info'  ('danger' = 'error')
  *   opts: a number (ms on screen; 0 = stays until closed) or
- *         { duration, title }
+ *         { duration, title, action: { label, onClick } }
  *
  * Messages are text, never HTML. Errors and warnings are announced
  * assertively (role=alert); success and info politely (role=status). The same
@@ -111,6 +111,19 @@
     textWrap.appendChild(document.createTextNode(text));
     body.appendChild(icon);
     body.appendChild(textWrap);
+
+    // An action ("Undo"): one button that runs the callback and closes the toast.
+    if (opts.action && typeof opts.action.onClick === 'function') {
+      var act = document.createElement('button');
+      act.type = 'button';
+      act.className = 'btn btn-sm btn-link clu-toast-action align-self-center fw-semibold text-reset';
+      act.textContent = opts.action.label || 'Undo';
+      act.addEventListener('click', function () {
+        bootstrap.Toast.getOrCreateInstance(el).hide();
+        opts.action.onClick();
+      });
+      body.appendChild(act);
+    }
 
     // An icon in currentColor, not .btn-close: the themes pick dark or light
     // text for each text-bg-* fill, and the × should match whichever it got.

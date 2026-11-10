@@ -1745,6 +1745,12 @@ def crop_image_freeform():
 # Delete
 # =============================================================================
 
+def _trash_name(result):
+    """Name the item has in the trash, which is what /api/trash/restore takes
+    (the Undo toast); None when it was deleted outright."""
+    return os.path.basename(result["path"]) if result.get("trashed") else None
+
+
 @files_bp.route('/delete', methods=['POST'])
 def delete():
     from app import update_index_on_delete
@@ -1771,7 +1777,7 @@ def delete():
         if '/.tmp_extract_' not in target.replace('\\', '/'):
             threading.Thread(target=update_index_on_delete, args=(target,), daemon=True).start()
 
-        return jsonify({"success": True, "trashed": result["trashed"]})
+        return jsonify({"success": True, "trashed": result["trashed"], "trash_name": _trash_name(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1811,7 +1817,8 @@ def delete_multiple():
                 dir_paths.append(target)
             trash_result = move_to_trash(target)
             deleted_paths.append(target)
-            results.append({"path": target, "success": True, "trashed": trash_result["trashed"]})
+            results.append({"path": target, "success": True, "trashed": trash_result["trashed"],
+                            "trash_name": _trash_name(trash_result)})
         except Exception as e:
             results.append({"path": target, "success": False, "error": str(e)})
 
@@ -1864,7 +1871,7 @@ def api_delete_file():
         # Update file index incrementally (no cache invalidation needed with DB-first approach)
         update_index_on_delete(target)
 
-        return jsonify({"success": True, "trashed": result["trashed"]})
+        return jsonify({"success": True, "trashed": result["trashed"], "trash_name": _trash_name(result)})
     except Exception as e:
         app_logger.error(f"Error deleting file {target}: {e}")
         return jsonify({"error": str(e)}), 500

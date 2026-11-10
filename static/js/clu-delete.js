@@ -18,7 +18,10 @@
  *
  *     // Bulk delete
  *     onBulkDeleteComplete(paths, results),
- *     onBulkDeleteError(paths, error)
+ *     onBulkDeleteError(paths, error),
+ *
+ *     // After an Undo restored items (default: reload the page)
+ *     onUndoDelete()
  *   }
  *
  * DOM contracts:
@@ -40,6 +43,51 @@
   var _currentDeletePath = '';
   var _currentDeleteName = '';
   var _currentBulkPaths = [];
+
+  // ── Undo ──────────────────────────────────────────────────────────────────
+  // A delete moves the item to the trash, so undoing it is a restore. The
+  // delete routes return `trash_name` (what /api/trash/restore takes); an item
+  // that was deleted outright has none and cannot be offered back.
+
+  function _restoreOne(name) {
+    return fetch('/api/trash/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { return !!d.success; })
+      .catch(function () { return false; });
+  }
+
+  function _undoDelete(names) {
+    // One at a time: each restore rewrites the same trash manifest.
+    var ok = 0;
+    names.reduce(function (chain, name) {
+      return chain.then(function () {
+        return _restoreOne(name).then(function (done) { if (done) ok++; });
+      });
+    }, Promise.resolve()).then(function () {
+      if (typeof updateTrashBadge === 'function') updateTrashBadge();
+      if (ok) CLU.showSuccess('Restored ' + ok + ' item(s)');
+      if (ok < names.length) CLU.showError((names.length - ok) + ' item(s) could not be restored');
+      if (!ok) return;
+      var contract = _getContract();
+      if (typeof contract.onUndoDelete === 'function') contract.onUndoDelete();
+      else window.location.reload();
+    });
+  }
+
+  /** Toast with an Undo button for the given trash names. False if none. */
+  CLU.offerUndoDelete = function (names, what) {
+    names = (names || []).filter(Boolean);
+    if (!names.length) return false;
+    CLU.toast('Moved ' + what + ' to trash', 'success', {
+      duration: 8000,
+      action: { label: 'Undo', onClick: function () { _undoDelete(names); } }
+    });
+    return true;
+  };
 
   // ── showDeleteConfirmation ────────────────────────────────────────────────
 
@@ -116,9 +164,10 @@
       .then(function (result) {
         if (result.success) {
           if (typeof updateTrashBadge === 'function') updateTrashBadge();
+          var offered = CLU.offerUndoDelete([result.trash_name], 'item');
           if (typeof contract.onDeleteComplete === 'function') {
             contract.onDeleteComplete(_currentDeletePath, result);
-          } else {
+          } else if (!offered) {
             CLU.showSuccess('File moved to trash');
           }
         } else {
@@ -192,12 +241,15 @@
 
         if (typeof updateTrashBadge === 'function') updateTrashBadge();
 
+        var successes = data.results.filter(function (r) { return r.success; });
+        var offered = CLU.offerUndoDelete(
+          successes.map(function (r) { return r.trash_name; }),
+          successes.length + ' item(s)');
         if (typeof contract.onBulkDeleteComplete === 'function') {
           contract.onBulkDeleteComplete(paths, data.results);
         } else {
-          var successes = data.results.filter(function (r) { return r.success; });
           var failures = data.results.filter(function (r) { return !r.success; });
-          if (successes.length > 0) {
+          if (successes.length > 0 && !offered) {
             CLU.showSuccess('Deleted ' + successes.length + ' file(s)');
           }
           if (failures.length > 0) {

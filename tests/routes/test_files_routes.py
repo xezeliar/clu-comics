@@ -698,6 +698,17 @@ class TestDeleteMultiple:
         assert all(r["success"] for r in data["results"])
         assert all(r["trashed"] for r in data["results"])
         assert mock_trash.call_count == 2
+        # The Undo toast restores by the name the item has in the trash.
+        assert all(r["trash_name"] == "x" for r in data["results"])
+
+    @patch("routes.files.is_critical_path", return_value=False)
+    @patch("routes.files.move_to_trash", return_value={"trashed": False, "path": "/x/a.cbz"})
+    def test_permanent_delete_has_no_trash_name(self, mock_trash, mock_crit, client, tmp_path):
+        f = tmp_path / "a.cbz"
+        f.write_bytes(b"data")
+        with patch("core.database.delete_file_index_entries"):
+            resp = client.post("/api/delete-multiple", json={"targets": [str(f)]})
+        assert resp.get_json()["results"][0]["trash_name"] is None
 
     def test_empty_targets(self, client):
         resp = client.post("/api/delete-multiple", json={"targets": []})
