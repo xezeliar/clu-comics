@@ -737,6 +737,24 @@ def _init_db_locked():
             "ON download_run_items(download_id)"
         )
 
+        # Activity feed (core/activity.py): one row per operation, UTC ts,
+        # pruned by count and age on insert.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS activity_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                level TEXT NOT NULL DEFAULT 'info',
+                title TEXT NOT NULL,
+                detail TEXT,
+                path TEXT
+            )
+        """)
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_events_kind "
+            "ON activity_events(kind, id)"
+        )
+
         # Create wanted_issues table (cache pre-computed wanted issues)
         c.execute("""
             CREATE TABLE IF NOT EXISTS wanted_issues (

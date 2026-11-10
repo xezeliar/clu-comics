@@ -395,6 +395,11 @@ app.register_blueprint(download_runs_bp)
 from routes.search_review import search_review_bp
 
 app.register_blueprint(search_review_bp)
+from routes.activity import activity_bp
+from routes.download_queue import download_queue_bp
+
+app.register_blueprint(activity_bp)
+app.register_blueprint(download_queue_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()
@@ -1170,6 +1175,11 @@ def process_incoming_wanted_issues():
             EVENT_WANTED_ADDED,
             f"{moved_count} wanted {plural} added",
             format_digest("Added to your library:", moved_issues),
+        )
+        from core.activity import record_event
+        record_event(
+            "move", f"Filed {moved_count} wanted {plural} into the library",
+            detail="\n".join(str(i) for i in moved_issues[:10]),
         )
 
         # Files were just moved out of TARGET into series folders, which can leave

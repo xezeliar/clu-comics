@@ -365,6 +365,8 @@ _CLERK_PREFIXES = (
     "/api/download-clients",
     "/api/search-review",      # candidate review (Search review page)
     "/api/download-runs",      # automatic download run reports (Status page)
+    "/api/activity",           # activity feed
+    "/api/download-queue",     # download queue page
     "/api/indexers",
     "/api/usenet",
     "/api/dcpp",
@@ -391,6 +393,8 @@ _CLERK_PAGE_PATHS = frozenset({
     "/wanted",           # Wanted Issues
     "/search-review",    # Search review
     "/status",           # Download Status
+    "/activity",         # Activity feed
+    "/download-queue",   # Download queue
     "/weekly-packs",     # Weekly Packs
     "/series-search",    # Series Search
     "/publishers",       # Publishers

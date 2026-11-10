@@ -36,6 +36,8 @@ from core.config import load_config, load_flask_config, get_watch_dir, get_targe
 from core.settings import get_bool, get_int, get_list, get_setting
 from core.download_utils import download_notification_body
 from core.download_runs import set_download_outcome
+from core.activity import record_event
+from core.download_queue_ctl import set_paused, wait_if_paused
 from core import compress_status
 from core import flaresolverr
 
@@ -583,6 +585,10 @@ def process_download(task):
                 "Download complete",
                 download_notification_body(dest_filename, file_path, provider_name),
             )
+            record_event(
+                'download', f"Downloaded {dest_filename or os.path.basename(file_path or '') or 'a file'}",
+                detail=provider_name, path=file_path,
+            )
 
             # Update weekly pack status to 'completed' if applicable
             if weekly_pack_info:
@@ -691,6 +697,10 @@ def process_download(task):
             attempts=task.get('retry_count') or 0,
         ),
     )
+    record_event(
+        'error', f"Download failed: {dest_filename or original_url}",
+        detail=str(last_error), level='error',
+    )
 
     # Update weekly pack status to 'failed' if applicable
     if weekly_pack_info:
@@ -708,9 +718,11 @@ def process_download(task):
 
 def worker():
     while True:
+        wait_if_paused()  # "Pause all" on the queue page
         task = download_queue.get()
         if task is None:  # Shutdown signal if needed.
             break
+        wait_if_paused()
         # An unhandled exception here would kill this thread for good — lose all
         # three and every later download hangs at 'queued' forever. process_download
         # touches download_progress[download_id] outside its inner try, so a
@@ -1713,6 +1725,7 @@ def status():
 import signal
 def shutdown_handler(signum, frame):
     monitor_logger.info("Shutting down download workers...")
+    set_paused(False)  # a paused worker would never see the sentinel
     for _ in worker_threads:
         download_queue.put(None)
     for t in worker_threads:

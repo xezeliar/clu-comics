@@ -273,11 +273,18 @@ def notify_download_terminal(status, filename, error=None, source=None):
             notify_async(
                 EVENT_DOWNLOAD_COMPLETE, "Download complete", "\n".join(lines)
             )
+            from core.activity import record_event
+            record_event("download", f"Downloaded {filename or 'a file'}", detail=source)
         elif status == "failed":
             if error:
                 lines.append(f"Error: {error}")
             notify_async(
                 EVENT_DOWNLOAD_FAILED, "Download failed", "\n".join(lines)
+            )
+            from core.activity import record_event
+            record_event(
+                "error", f"Download failed: {filename or 'a file'}",
+                detail=error or source, level="error",
             )
     except Exception as e:
         app_logger.error(f"Failed to notify for {source or 'download'}: {e}")
