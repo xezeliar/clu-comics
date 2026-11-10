@@ -136,3 +136,22 @@ def count_errors(since_hours=24):
             ).fetchone()[0]
     except Exception:
         return 0
+
+
+def clear_events(kind=None):
+    """Delete every event, or only one ``kind``. Returns the number removed, or None on failure."""
+    try:
+        from core.database import db_conn
+
+        with db_conn() as conn:
+            if not conn:
+                return None
+            if kind:
+                cur = conn.execute("DELETE FROM activity_events WHERE kind = ?", (kind,))
+            else:
+                cur = conn.execute("DELETE FROM activity_events")
+            conn.commit()
+            return cur.rowcount
+    except Exception as e:
+        app_logger.error(f"Could not clear activity events: {e}")
+        return None

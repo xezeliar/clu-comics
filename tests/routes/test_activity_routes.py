@@ -97,3 +97,20 @@ def test_new_problem_file_records_once(client, tmp_path):
     record_problem(p, "scan", error_class="Bad", error_message="Corrupt archive")
     events = act.list_events(kind="error")
     assert len(events) == 1 and events[0]["path"] == p
+
+
+def test_clear_all_and_by_kind(client):
+    act.record_event("download", "d")
+    act.record_event("error", "e")
+    act.record_event("move", "m")
+    r = client.delete("/api/activity?kind=error").get_json()
+    assert r["success"] and r["removed"] == 1
+    assert {e["title"] for e in client.get("/api/activity").get_json()["events"]} == {"d", "m"}
+    r = client.delete("/api/activity").get_json()
+    assert r["removed"] == 2
+    assert client.get("/api/activity").get_json()["events"] == []
+
+
+def test_clear_rejects_unknown_kind_and_is_clerk_only(app, client):
+    assert client.delete("/api/activity?kind=nope").status_code == 400
+    assert _role(app, "/api/activity", "DELETE") == "clerk"

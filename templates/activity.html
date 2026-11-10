@@ -1,13 +1,18 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/modal_clear_confirm.html' import clear_modal %}
 
 {% block title %}CLU: Activity{% endblock %}
 
 {% block content %}
 {% call(slot) page_header('Activity', 'bi-activity',
                           subtitle='What CLU did, newest first.') %}
+  {% if slot == 'more' %}
+    <li><button class="dropdown-item text-danger" type="button" id="act-clear"><i class="bi bi-trash me-2"></i>Clear activity</button></li>
+  {% endif %}
 {% endcall %}
+{{ clear_modal('clearActivityModal', 'Clear activity?', '', 'Clear') }}
 
 <ul class="nav nav-pills mb-3" id="act-filters">
   <li class="nav-item"><button class="nav-link active" data-kind="" type="button">All</button></li>
@@ -81,6 +86,24 @@
     load(true);
   });
   moreEl.addEventListener('click', function () { load(false); });
+
+  var clearModalEl = document.getElementById('clearActivityModal');
+  document.getElementById('act-clear').addEventListener('click', function () {
+    var label = kind ? 'the ' + (document.querySelector('#act-filters .active').firstChild.textContent.trim().toLowerCase()) + ' entries' : 'all activity';
+    document.getElementById('clearActivityModal-body').textContent =
+      'This removes ' + label + ' from the feed. Your comics, downloads and settings are not touched.';
+    bootstrap.Modal.getOrCreateInstance(clearModalEl).show();
+  });
+  document.getElementById('clearActivityModal-confirm').addEventListener('click', function () {
+    fetch(apiUrl + (kind ? '?kind=' + kind : ''), {method: 'DELETE'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        bootstrap.Modal.getOrCreateInstance(clearModalEl).hide();
+        if (!d.success) { CLU.toast(d.error || 'Could not clear activity', 'danger'); return; }
+        CLU.toast('Cleared ' + d.removed + ' entr' + (d.removed === 1 ? 'y' : 'ies'), 'success');
+        load(true);
+      }).catch(function () { CLU.toast('Could not clear activity', 'danger'); });
+  });
   load(true);
 })();
 </script>
