@@ -132,6 +132,50 @@ const PAN_HINT_DURATION_MS = 4000;
 let panHintTimeout = null;
 let panHintShownThisSession = false;
 
+// --- Tap zones ---------------------------------------------------------------
+// A tap in the left third goes back, the right third goes forward, the middle
+// toggles the toolbars. Side taps act at once (no double-tap wait), so
+// double-tap-to-zoom only exists in the middle third.
+const TAP_ZONE_FRACTION = 1 / 3;
+
+/** 'back' | 'forward' | 'middle' for a viewport x inside `el`. */
+function readerTapZone(el, clientX) {
+    const rect = el.getBoundingClientRect();
+    const f = rect.width ? (clientX - rect.left) / rect.width : 0.5;
+    if (f < TAP_ZONE_FRACTION) return 'back';
+    if (f > 1 - TAP_ZONE_FRACTION) return 'forward';
+    return 'middle';
+}
+
+// --- Two-page spreads --------------------------------------------------------
+// iPad landscape shows two pages side by side, the cover alone on the right
+// like a book. Slides stay one per page, so every page index in this file keeps
+// meaning what it did; Swiper does the grouping (see the spread options in
+// initializeComicReader). shortcut: a wide double-page scan is shown at half
+// width, not joined; upgrade by probing page sizes server-side.
+const SPREAD_QUERY = '(orientation: landscape) and (min-width: 1000px) and (pointer: coarse)';
+let readerSpread = false;
+
+function wantsSpread() {
+    return readerMode === 'paged' && window.matchMedia(SPREAD_QUERY).matches;
+}
+
+/** First page of the spread holding `page`: 0, then 1, 3, 5... */
+function spreadStart(page) {
+    return page <= 0 ? 0 : (page % 2 === 1 ? page : page - 1);
+}
+
+// --- Pull past the end ---------------------------------------------------------
+// Swipe up (or wheel down) past the last page opens the next issue; swipe down
+// (or wheel up) past the first page opens the previous one. A swipe down
+// anywhere else, once the page is at its top edge, closes the reader.
+const OVERSCROLL_SWIPE_PX = 90;
+const OVERSCROLL_WHEEL_PX = 240;
+const OVERSCROLL_SETTLE_MS = 400;   // rest at the edge first, so momentum can't carry through
+let overscrollTouch = null;
+let overscrollWheel = { sum: 0, last: 0, dir: null };
+let lastPageChangeAt = 0;
+
 /**
  * Encode a file path for URL while preserving slashes
  * @param {string} path - The file path to encode
@@ -633,8 +677,10 @@ function openComicReader(filePath) {
 function initializeComicReader(pageCount, startPage = 0) {
     // Tear down whichever view is up (a mode switch rebuilds in place).
     destroyReaderView();
+    lastPageChangeAt = Date.now();  // a fresh view must settle before a wheel push counts
 
     if (readerMode === 'scroll') {
+        readerSpread = false;
         initializeScrollReader(pageCount, startPage);
         initializePageSelector(pageCount, startPage);
         initializeZoomControls();
@@ -646,6 +692,9 @@ function initializeComicReader(pageCount, startPage = 0) {
 
     // Clear existing slides
     wrapper.innerHTML = '';
+
+    readerSpread = wantsSpread();
+    if (readerSpread) startPage = spreadStart(startPage);
 
     // Create slides for each page
     for (let i = 0; i < pageCount; i++) {
@@ -670,6 +719,14 @@ function initializeComicReader(pageCount, startPage = 0) {
         direction: 'horizontal',
         loop: false,
         initialSlide: startPage,
+        // Spread: two slides per view, grouped in pairs after a lone cover that
+        // is pushed to the right half by an offset of one slide width.
+        ...(readerSpread ? {
+            slidesPerView: 2,
+            slidesPerGroup: 2,
+            slidesPerGroupSkip: 1,
+            slidesOffsetBefore: Math.round(document.getElementById('comicReaderSwiper').clientWidth / 2),
+        } : {}),
         keyboard: {
             enabled: false, // Disable default keyboard to handle zoom with arrow keys
             onlyInViewport: false,
@@ -700,7 +757,12 @@ function initializeComicReader(pageCount, startPage = 0) {
         on: {
             slideChange: function () {
                 const currentIndex = this.activeIndex;
-                pageInfoEl.textContent = `Page ${currentIndex + 1} of ${pageCount}`;
+                lastPageChangeAt = Date.now();
+                // In a spread the right-hand page is on screen too.
+                const lastSeen = readerSpread ? Math.min(currentIndex + 1, pageCount - 1) : currentIndex;
+                pageInfoEl.textContent = readerSpread && lastSeen > currentIndex
+                    ? `Pages ${currentIndex + 1}-${lastSeen + 1} of ${pageCount}`
+                    : `Page ${currentIndex + 1} of ${pageCount}`;
 
                 // Update page selector dropdown
                 const pageSelector = document.getElementById('pageSelector');
@@ -714,8 +776,8 @@ function initializeComicReader(pageCount, startPage = 0) {
                 if (suppressProgressOnNextChange) {
                     suppressProgressOnNextChange = false;
                 } else {
-                    if (currentIndex > highestPageViewed) {
-                        highestPageViewed = currentIndex;
+                    if (lastSeen > highestPageViewed) {
+                        highestPageViewed = lastSeen;
                     }
                     scheduleAutoSave();
                 }
@@ -734,7 +796,7 @@ function initializeComicReader(pageCount, startPage = 0) {
                 pendingFitAlign = 'top';
 
                 // Check if reached last page - show next issue overlay if available
-                if (currentIndex === pageCount - 1) {
+                if (lastSeen === pageCount - 1) {
                     checkAndShowNextIssueOverlay();
                 } else {
                     // Hide overlay if navigating away from last page
@@ -775,6 +837,10 @@ function initializeComicReader(pageCount, startPage = 0) {
                 if (readerZoomedBeyondFit()) return;
                 // Don't toggle chrome when tapping navigation buttons
                 if (event && event.target && event.target.closest('.swiper-button-next, .swiper-button-prev')) return;
+                // Side zones turn the page straight away.
+                const zone = readerTapEventZone(swiper, event);
+                if (zone === 'forward') { readerAdvance(); return; }
+                if (zone === 'back') { readerRetreat(); return; }
                 // Start a 300ms timer; if a double-tap comes, it will cancel this.
                 // Swiper emits `tap` for BOTH taps of a double-tap, so drop the
                 // first tap's timer here; otherwise doubleTap could only cancel
@@ -786,7 +852,8 @@ function initializeComicReader(pageCount, startPage = 0) {
                 }, 300);
             },
             // Double-tap to reset zoom (cancel any pending chrome toggle)
-            doubleTap: function () {
+            doubleTap: function (swiper, event) {
+                if (readerTapEventZone(swiper, event) !== 'middle') return;
                 if (chromeToggleTimeout) {
                     clearTimeout(chromeToggleTimeout);
                     chromeToggleTimeout = null;
@@ -948,6 +1015,7 @@ function applyReaderFit(align) {
     fitBaseScale = 1;
     swiper.params.zoom.maxRatio = ZOOM_STEPS[ZOOM_STEPS.length - 1];
     if (readerFit !== 'width') return;
+    if (readerSpread) return;  // a spread is already wide
 
     const slide = swiper.slides[swiper.activeIndex];
     const img = activePagedImage(swiper);
@@ -996,6 +1064,130 @@ function readerAdvance() {
         }
     }
     comicReaderSwiper.slideNext();
+}
+
+/** Mirror of readerAdvance: read back up a fitted page first, then turn back. */
+function readerRetreat() {
+    if (!comicReaderSwiper || comicReaderSwiper.isBeginning) return;
+    if (!readerZoomedBeyondFit()) {
+        const ctx = getZoomPanContext();
+        if (ctx && ctx.y < ctx.maxY - 1) {
+            applyZoomPan(ctx, ctx.x, ctx.y + ctx.slide.offsetHeight * 0.85);
+            return;
+        }
+    }
+    pendingFitAlign = 'bottom';  // land at the bottom of the earlier page
+    comicReaderSwiper.slidePrev();
+}
+
+/** Tap zone of a Swiper tap/doubleTap event; 'middle' when it can't be told. */
+function readerTapEventZone(swiper, event) {
+    const pt = event && ((event.changedTouches && event.changedTouches[0]) || event);
+    if (!pt || typeof pt.clientX !== 'number' || !swiper || !swiper.el) return 'middle';
+    return readerTapZone(swiper.el, pt.clientX);
+}
+
+/**
+ * Which ends is the view resting against? A page fitted to the width can be
+ * panned, so "top" means its top edge is showing; zoomed beyond fit pans freely
+ * and never counts as an edge. In scroll mode the edges are the strip's own.
+ */
+function readerEdges() {
+    const index = getReaderCurrentIndex();
+    let top = true, bottom = true, first = index <= 0, last = index >= currentComicPageCount - 1;
+    if (scrollState) {
+        const sc = scrollState.scroller;
+        top = sc.scrollTop <= 1;
+        bottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+        first = top;
+        last = bottom;
+    } else if (comicReaderSwiper) {
+        last = comicReaderSwiper.isEnd;
+        const ctx = getZoomPanContext();
+        if (readerZoomedBeyondFit()) {
+            top = bottom = false;
+        } else if (ctx) {
+            top = ctx.y >= ctx.maxY - 1;
+            bottom = ctx.y <= -ctx.maxY + 1;
+        }
+    }
+    return { top, bottom, first, last };
+}
+
+/** Open the sibling `offset` issues away (1 next, -1 previous). False if none. */
+function goToIssue(offset) {
+    const target = currentComicSiblings[currentComicIndex + offset];
+    if (currentComicIndex < 0 || !target) return false;
+    if (offset > 0) {
+        continueToNextIssue();  // also marks this one finished
+        return true;
+    }
+    closeComicReader();  // saves where we were; siblings are rebuilt on open
+    openComicReader(target.path);
+    return true;
+}
+
+/**
+ * A pull past an end of the comic.
+ * @param {'forward'|'back'} dir
+ * @param {boolean} allowClose  A downward pull away from the first page closes.
+ * @param {Object} [edges]      Edges as they were when the pull began.
+ */
+function readerOverscroll(dir, allowClose, edges = readerEdges()) {
+    if (!readerHasView() || !currentComicPath) return;
+    if (dir === 'forward') {
+        if (edges.bottom && edges.last) goToIssue(1);
+        return;
+    }
+    if (!edges.top) return;
+    if (edges.first && goToIssue(-1)) return;
+    if (allowClose) closeComicReader();
+}
+
+/** Wheel / trackpad version: needs a sustained push, after the view has settled. */
+function readerWheelOverscroll(dir, px) {
+    const now = Date.now();
+    if (now - lastPageChangeAt < OVERSCROLL_SETTLE_MS) return;
+    const w = overscrollWheel;
+    if (now - w.last > 300 || w.dir !== dir) w.sum = 0;
+    w.last = now;
+    w.dir = dir;
+    w.sum += Math.abs(px);
+    if (w.sum >= OVERSCROLL_WHEEL_PX) {
+        w.sum = 0;
+        readerOverscroll(dir, false);
+    }
+}
+
+/** Vertical swipes on the reader: next/previous issue, or swipe down to close. */
+function attachReaderSwipes(modal) {
+    modal.addEventListener('touchstart', e => {
+        const resume = document.getElementById('resumeReadingOverlay');
+        const blocked = e.touches.length !== 1 || !readerHasView() ||
+            (resume && resume.style.display === 'flex') ||
+            e.target.closest('button, select, a, input, .comic-reader-header, .comic-reader-footer');
+        overscrollTouch = blocked ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY, edges: readerEdges() };
+    }, { passive: true });
+    modal.addEventListener('touchmove', e => {
+        if (e.touches.length > 1) overscrollTouch = null;  // a pinch
+    }, { passive: true });
+    modal.addEventListener('touchend', e => {
+        const t = overscrollTouch;
+        overscrollTouch = null;
+        if (!t || !e.changedTouches.length) return;
+        const dx = e.changedTouches[0].clientX - t.x;
+        const dy = e.changedTouches[0].clientY - t.y;
+        if (Math.abs(dy) < OVERSCROLL_SWIPE_PX || Math.abs(dy) < Math.abs(dx) * 1.5) return;
+        readerOverscroll(dy < 0 ? 'forward' : 'back', true, t.edges);
+    }, { passive: true });
+    // Scroll mode scrolls natively, so only watch the wheel for a push past an end.
+    modal.addEventListener('wheel', e => {
+        if (!scrollState) return;
+        const edges = readerEdges();
+        if (e.deltaY > 0 && edges.bottom) readerWheelOverscroll('forward', e.deltaY);
+        else if (e.deltaY < 0 && edges.top) readerWheelOverscroll('back', e.deltaY);
+        else lastPageChangeAt = Date.now();  // still moving: the edge hasn't settled
+    }, { passive: true });
 }
 
 /**
@@ -1363,7 +1555,11 @@ function initializeMousewheelHandler() {
                 if (Math.abs(target - ctx.y) < 0.5) {
                     event.preventDefault();
                     const now = Date.now();
-                    if (now - lastWheelTurnAt >= WHEEL_TURN_COOLDOWN_MS) {
+                    if (dy < 0 && comicReaderSwiper.isEnd) {
+                        readerWheelOverscroll('forward', dy);
+                    } else if (dy > 0 && comicReaderSwiper.isBeginning) {
+                        readerWheelOverscroll('back', dy);
+                    } else if (now - lastWheelTurnAt >= WHEEL_TURN_COOLDOWN_MS) {
                         lastWheelTurnAt = now;
                         if (dy < 0) {
                             comicReaderSwiper.slideNext();
@@ -1385,6 +1581,15 @@ function initializeMousewheelHandler() {
 
         // When not zoomed, use mousewheel to navigate pages
         event.preventDefault();
+
+        if (event.deltaY > 0 && comicReaderSwiper.isEnd) {
+            readerWheelOverscroll('forward', event.deltaY);
+            return;
+        }
+        if (event.deltaY < 0 && comicReaderSwiper.isBeginning) {
+            readerWheelOverscroll('back', event.deltaY);
+            return;
+        }
 
         // Debounce to prevent too fast navigation
         clearTimeout(wheelTimeout);
@@ -2053,6 +2258,11 @@ function attachScrollTap(s) {
 }
 
 function handleScrollTap(s, x, y) {
+    const zone = readerTapZone(s.scroller, x);
+    if (zone !== 'middle') {
+        scrollReaderBy(zone === 'back' ? -0.9 : 0.9);
+        return;
+    }
     const now = Date.now();
     if (s.tapTimer && now - s.lastTapAt < SCROLL_DOUBLE_TAP_MS &&
         Math.hypot(x - s.lastTapX, y - s.lastTapY) < 40) {
@@ -2418,6 +2628,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (closeBtn) {
         closeBtn.addEventListener('click', closeComicReader);
     }
+
+    const readerModal = document.getElementById('comicReaderModal');
+    if (readerModal) attachReaderSwipes(readerModal);
+
+    // Rotating an iPad switches between one page and a spread: rebuild on the
+    // page the user is on (navigation, not reading).
+    window.matchMedia(SPREAD_QUERY).addEventListener('change', () => {
+        if (!comicReaderSwiper || readerSpread === wantsSpread()) return;
+        rebuildingReaderView = true;
+        try {
+            initializeComicReader(currentComicPageCount, comicReaderSwiper.activeIndex);
+        } finally {
+            rebuildingReaderView = false;
+        }
+    });
 
     // Close on overlay click
     const overlay = document.querySelector('.comic-reader-overlay');
