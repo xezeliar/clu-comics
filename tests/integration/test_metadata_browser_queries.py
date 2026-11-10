@@ -5,6 +5,12 @@ against a real SQLite database.
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _library_root_is_data(monkeypatch):
+    """The browse queries only count rows under a library root; these rows live under /data."""
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: ["/data"])
+
+
 def _seed(conn, **kwargs):
     defaults = {
         "name": "x.cbz",
@@ -215,3 +221,22 @@ def test_series_representative_path(library):
     from core.database import series_representative_path
     p = series_representative_path("Batman")
     assert p == "/data/DC/Batman/001.cbz"  # earliest issue number
+
+
+def test_rows_outside_every_library_root_are_hidden(library, monkeypatch):
+    """A deleted/moved library leaves file_index rows behind: no ghost tile."""
+    _seed(library, name="Ghost 001.cbz", path="/old/DC/Ghost/001.cbz",
+          parent="/old/DC/Ghost", ci_publisher="DC Ghost", ci_series="Ghost")
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: ["/data"])
+    from core.database import metadata_browse
+    names = {i["name"] for i in metadata_browse("publisher", {})["items"]}
+    assert names == {"DC", "Image"}
+
+
+def test_delete_library_drops_its_index_rows(library):
+    from core.database import add_library, delete_library
+    lib_id = add_library("Old", "/data/DC")
+    delete_library(lib_id)
+    left = [r[0] for r in library.execute("SELECT path FROM file_index").fetchall()]
+    assert left == ["/data/Image/Saga/001.cbz"]
+    assert library.execute("SELECT COUNT(*) FROM file_metadata_tags WHERE file_path LIKE '/data/DC/%'").fetchone()[0] == 0

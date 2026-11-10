@@ -3243,10 +3243,27 @@ def delete_library(library_id):
             return False
 
         c = conn.cursor()
+        row = c.execute("SELECT path FROM libraries WHERE id = ?", (library_id,)).fetchone()
         c.execute("DELETE FROM libraries WHERE id = ?", (library_id,))
+        if row and row[0]:
+            # Its comics are no longer in any library; without this their
+            # file_index rows linger (and showed as ghost publishers).
+            root = row[0]
+            prefix = _like_prefix(root)
+            c.execute(
+                "DELETE FROM file_index WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+                (root, prefix),
+            )
+            c.execute(
+                "DELETE FROM file_metadata_tags WHERE file_path = ? "
+                "OR file_path LIKE ? ESCAPE '\\'",
+                (root, prefix),
+            )
+            clear_path_references(root, conn=conn)
 
         conn.commit()
         conn.close()
+        invalidate_metadata_browser_cache()
 
         app_logger.info(f"Deleted library ID {library_id}")
         return True
@@ -8082,10 +8099,18 @@ def _metadata_prefix_clause(allowed_prefixes):
     """Build a (clause, params) restricting file_index.path to the given absolute
     folder prefixes (per-user folder scope). Matches the folder itself and any
     descendant, in both '/' and '\\' separator styles since file_index may hold
-    either. Returns (None, []) when unrestricted; ("1=0", []) to match nothing.
+    either. ("1=0", []) matches nothing.
+
+    ``None`` (unrestricted user) still means "the current library roots", not
+    "every row": rows left behind by a deleted or moved library sit outside every
+    root and showed up as ghost publishers. Returns (None, []) only when no
+    root is configured.
     """
     if allowed_prefixes is None:
-        return None, []
+        from helpers.library import get_library_roots
+        allowed_prefixes = get_library_roots()
+        if not allowed_prefixes:
+            return None, []
     if not allowed_prefixes:
         return "1=0", []
     ors, params = [], []

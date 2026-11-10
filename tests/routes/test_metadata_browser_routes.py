@@ -4,6 +4,12 @@ Routes: /library page and /api/metadata/browse JSON endpoints (metadata browser)
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _library_root_is_data(monkeypatch):
+    """The browse queries only count rows under a library root; these rows live under /data."""
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: ["/data"])
+
+
 def _seed_file(conn, **kwargs):
     """Insert a file_index row with ci_* columns set."""
     defaults = {

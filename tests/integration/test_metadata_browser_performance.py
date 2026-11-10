@@ -8,6 +8,14 @@ Integration tests for the metadata browser performance layer:
 """
 import time
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _library_root_is_data(monkeypatch):
+    """The browse queries only count rows under a library root; these rows live under /data."""
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: ["/data"])
+
 
 def _count_tags(conn, **filters):
     where = " AND ".join(f"{k} = ?" for k in filters)
