@@ -1053,6 +1053,21 @@ def _init_db_locked():
             "ON reading_list_to_read(user_id)"
         )
 
+        # Smart collections: saved metadata filters evaluated live (see
+        # core/smart_collections.py). Born user-scoped; rules is a JSON list.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS smart_collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                name TEXT NOT NULL,
+                match TEXT NOT NULL DEFAULT 'all',
+                sort TEXT NOT NULL DEFAULT 'newest',
+                rules TEXT NOT NULL DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, name COLLATE NOCASE)
+            )
+        """)
+
         # Create stats_cache table (cache computed statistics)
         c.execute("""
             CREATE TABLE IF NOT EXISTS stats_cache (

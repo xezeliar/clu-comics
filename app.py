@@ -395,6 +395,9 @@ app.register_blueprint(download_runs_bp)
 from routes.search_review import search_review_bp
 
 app.register_blueprint(search_review_bp)
+from routes.smart_collections import smart_collections_bp
+
+app.register_blueprint(smart_collections_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()

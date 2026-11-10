@@ -341,6 +341,7 @@ _READER_WRITE_PREFIXES = (
     "/api/reader-prefs",       # the reader's own layout preference (per user)
     "/api/reading-stats",
     "/api/favorites",          # favorites_bp
+    "/api/smart-collections",  # a user's own saved filters (per user)
     "/api/to-read",
     "/to-read",
     "/api/continue-reading",
@@ -364,6 +365,7 @@ _CLERK_PREFIXES = (
     "/api/getcomics",
     "/api/download-clients",
     "/api/search-review",      # candidate review (Search review page)
+    "/api/gaps",               # gap report (Clerk-only /gaps page)
     "/api/download-runs",      # automatic download run reports (Status page)
     "/api/indexers",
     "/api/usenet",
@@ -390,6 +392,7 @@ _CLERK_PAGE_PATHS = frozenset({
     "/releases",         # Weekly Releases
     "/wanted",           # Wanted Issues
     "/search-review",    # Search review
+    "/gaps",             # Gap report
     "/status",           # Download Status
     "/weekly-packs",     # Weekly Packs
     "/series-search",    # Series Search
