@@ -3,74 +3,90 @@
 Brainstorm of features, UX/UI improvements and cosmetic ideas. Nothing here is
 committed to or started unless marked. ⚡ = small or quick win.
 
-Checked against what already exists: CLU has a PWA, a continuous scroll
-(webtoon) mode, OPDS, and Gruvbox and Catppuccin themes. The reader has no
-right-to-left mode, no two-page spreads and no brightness control yet.
+Already built and removed from this list: reader tap zones, iPad two-page
+spreads, swipe down to close, next-issue overlay, Netflix-style home shelves
+(Continue Reading, New This Week, On The Stack, Recently Added, Favorites),
+cover progress marks, creator and character pages, follow-a-creator, smart
+collections, gap report, Activity feed, download queue page, bulk Unsubscribe,
+Search all failed again, Undo toast, skeleton loaders, pull-to-refresh, larger
+touch targets, phone tab bar, onboarding checklist, clearer empty states,
+ghost-publisher fix, back-to-top button, Gruvbox and Catppuccin themes.
 
-## Top picks (daily reading on iPhone and iPad)
+The reader still has no right-to-left mode, no brightness control and no
+keep-awake.
 
-1. Tap zones in the reader
-2. Next-issue auto-advance
-3. Swipe down to close the reader
-4. OLED black theme
-5. Two-page spreads on iPad landscape
+## Top picks
+
+1. OLED black theme
 
 ## Reader
 
 - ⚡ **Right-to-left (manga) mode**: flip swipe and arrow direction, saved per series.
-- **Two-page spreads on iPad landscape**: pages side by side; the cover stays on
-  its own and wide double-page art is joined.
 - ⚡ **Brightness and warm-light slider** in the reader toolbar, for reading in bed.
-- ⚡ **Tap zones**: left/right third turns pages, middle shows the toolbar, with a
-  setting to choose the layout.
 - **Page strip**: a scrubber of small page thumbnails at the bottom for jumping around.
-- ⚡ **Auto-advance**: at the last page, "Next issue →" opens the next issue in the
-  series or reading list.
 - **Panel-by-panel view** (like Comixology's Guided View), using automatic panel detection.
 - ⚡ **Keep the screen awake while reading** (Wake Lock API).
 - **Preload the next issue** in the background so it opens instantly.
-- ⚡ **Swipe down to close** the reader, like closing a photo on iOS.
 - **Offline reading**: download an issue to the device through the PWA.
 
 ## Library and browsing
 
-- **Fix ghost publishers** and add a **publisher alias** setting ("DC" → "DC Comics").
-  See `docs/todo-ghost-publisher-index.md`.
-- ⚡ **"Recently added" shelf** on the home page.
-- **Netflix-style home page**: rows for Continue Reading, New This Week, On the
-  Stack, Recently Added and Favorites.
-- ⚡ **Progress bar on each cover** showing how much has been read.
+- **Publisher alias setting** ("DC" → "DC Comics").
 - **Series page header**: large banner art, description, creators, and an
   "12 of 18 owned" ring.
-- ⚡ **Sticky A-Z bar** and a "back to top" button on long grids.
+- ⚡ **Sticky A-Z bar** on long grids.
 - **Global search shortcut**: `/` or `Ctrl+K` from any page, searching series,
   issues, creators and settings.
-- **Smart collections**: saved filters such as "unread Image Comics from 2024".
-- **Creator pages**: everything owned by one writer or artist, with a "follow" option.
-- **Character pages** built from the ComicInfo character tags.
 
 ## Pull List, Wanted and downloads
 
-- ✅ **Bulk Unsubscribe**: done on branch `feat/pulllist-unsubscribe-mobile-reader` (not merged).
-- ⚡ **Weekly release calendar view** of what comes out each Wednesday for the pull list.
 - **"New issue arrived" badge** on the series card, cleared once opened.
-- ⚡ **Search review: "Search all failed again"** bulk button.
-- **Download queue page**: progress bars, retry, cancel and drag-to-reorder.
-- **Follow a creator**: auto-add new series by followed writers or artists (opt-in).
-- **Gap report**: "missing issues 4, 7 and 12" on each series, with one-click search.
 
 ## UX polish
 
-- ⚡ **Skeleton loaders** instead of spinners while grids load, so the page doesn't jump.
-- ⚡ **Undo toast** after destructive actions ("Unsubscribed 5 series · Undo").
-- **Bottom tab bar on phones**: Home, Library, Pull List, Reading, Settings.
-- ⚡ **Pull-to-refresh** on mobile list pages.
-- ⚡ **Larger touch targets** on mobile; some toolbar buttons are hard to hit.
-- **Onboarding checklist**: "Add a library ✓, connect Metron ✓, subscribe to a series…".
-- ⚡ **Clearer empty states** with a next step ("No series yet → Search Metron").
-- **Keyboard shortcut help** with `?` on every page.
-- **Activity feed**: one timeline of downloads, moves, tags and errors, instead of
-  digging through logs.
+- ⚡ **Long-press a cover** on touch for a context menu: mark read, subscribe,
+  open folder, search metadata.
+- ⚡ **Swipe actions on list rows** on phones: swipe left to unsubscribe or mark read.
+- **Bottom sheets on phones** instead of centred modals for pickers and filters,
+  with a drag handle and swipe-to-dismiss.
+- ⚡ **Visible focus rings** on every control for keyboard and switch users.
+- ⚡ **Empty search results** suggest the nearest matches and offer a "clear
+  filters" button.
+- **Breadcrumbs** on folder browsing, so a deep path can be climbed in one tap.
+- **Reader progress line**: "Page 12 of 24 · about 6 min left" in the footer.
+- **Double-tap to zoom** on a page in paged mode, and a press-and-hold loupe.
+- **Inline rename**: double-click or long-press a series title to edit it in place.
+- ⚡ **Settings search box** that filters the settings page by label.
+- **"What's new" card** after an upgrade, dismissible, linking to the changelog.
+
+## Motion and animation
+
+Keep every item here behind `prefers-reduced-motion`, with a single
+reduce-motion setting that also covers the reader transitions above.
+
+- **Shared-element open**: the tapped cover grows into the series page header
+  instead of the page cutting over.
+- **Reader open and close from the cover**: the page scales up from the tapped
+  cover and shrinks back to it on close.
+- ⚡ **Staggered grid entrance**: cards fade and rise in with a small delay per
+  row on first load, once per visit only.
+- **Blur-up covers**: a tiny blurred thumbnail sharpens into the full image,
+  so grids never show empty boxes while they load.
+- ⚡ **Fade-in per cover** as each image finishes loading, rather than popping in.
+- **Sliding pill on the phone tab bar**: the active indicator slides and stretches
+  between tabs instead of jumping.
+- ⚡ **Press feedback**: buttons and cover cards scale to about 97% on touch-down
+  and spring back on release.
+- **Spring-eased toasts and sheets**: toasts slide in with a slight overshoot and
+  can be swiped away.
+- **Animated count-up** for the numbers on the Insights page.
+- **Progress ring fill** on a series card animates when a new issue is read.
+- ⚡ **Smooth scroll to a letter** when tapping the A-Z bar, instead of an instant jump.
+- **Collapsible panels** (filters, advanced settings) animate their height
+  rather than snapping open.
+- **Favourite burst**: a small particle pop when a series is favourited or subscribed.
+- **Queue item motion**: items in the download queue slide when reordered, and a
+  finished item fades out with a check.
 
 ## Themes and cosmetics
 
