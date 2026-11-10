@@ -80,6 +80,23 @@ def test_research_clears_stamps(client):
     assert client.post("/api/search-review/999/research").status_code == 404
 
 
+def test_research_all_clears_every_failed_issue(client):
+    _attempt("search_error", 1, series_id=7)
+    _attempt("search_error", 2, series_id=8)
+    _attempt("nothing_found", 3, series_id=9)
+    for sid, issue in ((7, "1"), (8, "2"), (9, "3")):
+        db.mark_wanted_issue_queued(sid, issue)
+    data = client.post("/api/search-review/research-all").get_json()
+    assert data == {"success": True, "issues": 2}
+    assert db.get_wanted_queue_stamps(7) == {} and db.get_wanted_queue_stamps(8) == {}
+    assert db.get_wanted_queue_stamps(9) != {}  # other outcomes untouched
+
+
+def test_research_all_rejects_other_outcomes(client):
+    r = client.post("/api/search-review/research-all", json={"outcome": "waiting"})
+    assert r.status_code == 400
+
+
 def test_prune_keeps_newest(app, monkeypatch):
     monkeypatch.setattr(db, "SEARCH_ATTEMPTS_KEEP", 3)
     ids = [_attempt(n=i) for i in range(5)]

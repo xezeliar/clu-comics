@@ -16,6 +16,10 @@
   <li class="nav-item"><button class="nav-link" data-outcome="search_error" type="button">Search failed</button></li>
 </ul>
 
+<div class="d-flex mb-3 d-none" id="sr-bulk">
+  <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="sr-research-all"><i class="bi bi-arrow-repeat"></i> Search all again</button>
+</div>
+
 <div id="sr-list"></div>
 
 <div id="sr-empty-waiting" class="d-none">{{ empty_state('Nothing waiting', 'Borderline picks appear here when Review before download is on.', 'bi-check2-circle') }}</div>
@@ -100,6 +104,8 @@
       badge.textContent = d.waiting;
       badge.classList.toggle('d-none', !d.waiting);
       listEl.textContent = '';
+      document.getElementById('sr-bulk').classList.toggle('d-none',
+        !((current === 'search_error' || current === 'nothing_found') && d.attempts.length));
       ['waiting', 'all', 'nothing_found', 'search_error'].forEach(function (k) {
         document.getElementById('sr-empty-' + k).classList.add('d-none');
       });
@@ -110,6 +116,16 @@
       d.attempts.forEach(function (a) { listEl.appendChild(card(a)); });
     }).catch(function () { CLU.toast('Could not load', 'danger'); });
   }
+
+  document.getElementById('sr-research-all').addEventListener('click', function () {
+    fetch(urls.base + 'research-all', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({outcome: current})
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.success) { CLU.toast('The next sweep will search ' + d.issues + ' issue(s) again', 'success'); }
+      else { CLU.toast(d.error || 'Request failed', 'danger'); }
+    }).catch(function () { CLU.toast('Request failed', 'danger'); });
+  });
 
   document.querySelectorAll('#sr-tabs button').forEach(function (b) {
     b.addEventListener('click', function () {
