@@ -1,0 +1,27 @@
+{#
+  A small confirmation for "clear this list". Never a native confirm().
+
+    {% from 'partials/modal_clear_confirm.html' import clear_modal %}
+    {{ clear_modal('clearActivityModal', 'Clear activity?', 'This removes the history only.', 'Clear') }}
+
+  Open it with bootstrap.Modal.getOrCreateInstance(el).show() and wire the
+  button with id "<id>-confirm". The body text can be rewritten before showing
+  it through the element with id "<id>-body".
+#}
+{% macro clear_modal(id, title, body, confirm_label='Clear') -%}
+<div class="modal fade" id="{{ id }}" tabindex="-1" aria-labelledby="{{ id }}-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="{{ id }}-title">{{ title }}</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body"><p class="mb-0" id="{{ id }}-body">{{ body }}</p></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="{{ id }}-confirm">{{ confirm_label }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+{%- endmacro %}

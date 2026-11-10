@@ -6,7 +6,7 @@ Clerk-level, enforced centrally: ``/activity`` is in
 
 from flask import Blueprint, jsonify, render_template, request
 
-from core.activity import KINDS, count_errors, list_events
+from core.activity import KINDS, clear_events, count_errors, list_events
 
 activity_bp = Blueprint("activity", __name__)
 
@@ -37,3 +37,15 @@ def api_activity():
     for e in events:
         e["ts_display"] = format_user_time(e["ts"])
     return jsonify({"success": True, "events": events, "errors_24h": count_errors()})
+
+
+@activity_bp.route("/api/activity", methods=["DELETE"])
+def api_clear_activity():
+    """Clear the feed, or one ``kind`` of it. History only: nothing else is touched."""
+    kind = request.args.get("kind") or None
+    if kind and kind not in KINDS:
+        return jsonify({"success": False, "error": f"Unknown kind: {kind}"}), 400
+    removed = clear_events(kind)
+    if removed is None:
+        return jsonify({"success": False, "error": "Could not clear activity"}), 500
+    return jsonify({"success": True, "removed": removed})
