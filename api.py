@@ -37,6 +37,7 @@ from core.settings import get_bool, get_int, get_list, get_setting
 from core.download_utils import download_notification_body
 from core.download_runs import set_download_outcome
 from core import compress_status
+from core import flaresolverr
 
 # Load config and initialize Flask app.
 app = Flask(__name__)
@@ -67,6 +68,7 @@ from core.download_utils import (
     claim_download_path,
     release_download_claim,
     replace_session,
+    close_quietly,
     mark_cancelled as _mark_cancelled,
     set_error_status as _set_error_status,
     auto_retry_delay,
@@ -304,6 +306,7 @@ def resolve_final_url(url: str, *, hdrs=headers, max_hops: int = 6) -> str:
     for _ in range(max_hops):
         is_gc = 'getcomics.org' in current.lower()
         r = None
+        cleared = False
 
         for attempt in (1, 2):
             try:
@@ -311,6 +314,14 @@ def resolve_final_url(url: str, *, hdrs=headers, max_hops: int = 6) -> str:
                     # Use cloudscraper for getcomics.org URLs to bypass Cloudflare
                     r = gc_scraper.get(current, allow_redirects=False, timeout=30)
                     if _is_cloudflare_challenge(r) and attempt == 1:
+                        # Prefer real clearance from the bundled FlareSolverr;
+                        # a fresh scraper is the fallback when it is off or fails.
+                        if flaresolverr.clear_challenge(current, gc_scraper, context="resolve"):
+                            cleared = True
+                            monitor_logger.info(
+                                f"Cloudflare challenge resolving {current} — retrying with FlareSolverr clearance"
+                            )
+                            continue
                         monitor_logger.warning(
                             f"Cloudflare challenge resolving {current} — retrying on a fresh scraper"
                         )
@@ -353,6 +364,8 @@ def resolve_final_url(url: str, *, hdrs=headers, max_hops: int = 6) -> str:
                 current = urljoin(current, m.group(1).decode().strip())
                 continue
         if _is_cloudflare_challenge(r):
+            if cleared:
+                flaresolverr.note_still_challenged(current, "resolve")
             monitor_logger.warning(
                 f"Cloudflare still blocking {current} (HTTP {r.status_code}) — returning unresolved"
             )
@@ -790,6 +803,8 @@ def download_getcomics(url, download_id, hdrs=None, source_url=None):
     # dying with "Temp file not found". Re-taken only if a later mirror's
     # Content-Disposition names a different file.
     claimed_final = claimed_claim = claimed_for = None
+    flaresolverr_tried = False
+    flaresolverr_cleared = False
 
     for attempt in range(retries):
         try:
@@ -810,7 +825,24 @@ def download_getcomics(url, download_id, hdrs=None, source_url=None):
             # Check for hard-forbidden/not-found before raise_for_status so we
             # abort immediately instead of burning all retries on a 403/404.
             if response.status_code in (403, 404):
-                if response.status_code == 403 and _is_cloudflare_challenge(response):
+                challenged = response.status_code == 403 and _is_cloudflare_challenge(response)
+                # One FlareSolverr pass per download: solve, put the clearance
+                # on this session, and retry. Only if another attempt remains --
+                # on the last one, fall through to the manual notice below.
+                if (challenged and not flaresolverr_tried
+                        and attempt < retries - 1):
+                    flaresolverr_tried = True
+                    close_quietly(response)
+                    if flaresolverr.clear_challenge(url, session, context="download"):
+                        flaresolverr_cleared = True
+                        monitor_logger.info(
+                            f"Cloudflare challenge on {urlparse(url).netloc}; "
+                            f"retrying with FlareSolverr clearance"
+                        )
+                        continue
+                if challenged:
+                    if flaresolverr_cleared:
+                        flaresolverr.note_still_challenged(url, "download")
                     host = urlparse(url).netloc
                     # The resolved mirror URL 403s in a browser too; surface the
                     # original getcomics link, which redirects through
