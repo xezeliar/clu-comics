@@ -240,3 +240,23 @@ def test_delete_library_drops_its_index_rows(library):
     left = [r[0] for r in library.execute("SELECT path FROM file_index").fetchall()]
     assert left == ["/data/Image/Saga/001.cbz"]
     assert library.execute("SELECT COUNT(*) FROM file_metadata_tags WHERE file_path LIKE '/data/DC/%'").fetchone()[0] == 0
+
+
+def test_prune_drops_missing_files_outside_the_roots(library, tmp_path, monkeypatch):
+    """Rebuild must delete ghost rows no root covers, but keep real files."""
+    root = tmp_path / "lib"
+    root.mkdir()
+    outside = tmp_path / "downloads" / "processed"
+    outside.mkdir(parents=True)
+    real = outside / "Real 001.cbz"
+    real.write_bytes(b"x")
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: [str(root)])
+    _seed(library, name="Ghost 001.cbz", path=str(outside / "Ghost 001.cbz"),
+          parent=str(outside), ci_publisher="DC", ci_series="Ghost")
+    _seed(library, name="Real 001.cbz", path=str(real), parent=str(outside),
+          ci_publisher="DC", ci_series="Real")
+    from core.database import prune_vanished_index_dirs
+    assert prune_vanished_index_dirs()["rows"] == 1
+    left = {r[0] for r in library.execute(
+        "SELECT path FROM file_index WHERE path LIKE ?", (str(outside) + "%",)).fetchall()}
+    assert left == {str(real)}

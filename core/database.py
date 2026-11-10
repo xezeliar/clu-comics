@@ -4170,6 +4170,46 @@ def _like_prefix(path):
     return f"{escaped}/%"
 
 
+def _prune_vanished_files_outside_roots():
+    """Drop indexed *files* outside every library root whose file is provably gone.
+
+    Rows left by a deleted library or a WATCH/``/downloads`` file that was later
+    moved sit outside every root, so neither the folder prune below nor
+    ``sync_file_index_incremental`` (both scoped to the roots on purpose) ever
+    reaches them, and they kept showing as ghost series and publishers. A file
+    only counts as gone when its parent folder still exists
+    (``is_path_provably_gone``), so an unmounted share is "could not tell".
+    Returns the number of rows removed. Never raises.
+    """
+    from helpers.library import _containing_root, get_library_roots, is_path_provably_gone
+
+    removed = 0
+    try:
+        roots = [os.path.normpath(r) for r in get_library_roots()]
+        with db_conn() as conn:
+            if not conn:
+                return 0
+            gone = [
+                p for (p,) in conn.execute(
+                    "SELECT path FROM file_index WHERE type = 'file'"
+                ).fetchall()
+                if p and _containing_root(p, roots) is None
+                and is_path_provably_gone(p, roots=roots)
+            ]
+            for p in gone:
+                conn.execute("DELETE FROM file_index WHERE path = ?", (p,))
+                conn.execute("DELETE FROM file_metadata_tags WHERE file_path = ?", (p,))
+                clear_path_references(p, conn=conn)
+            conn.commit()
+            removed = len(gone)
+        if removed:
+            invalidate_metadata_browser_cache()
+            app_logger.info(f"Pruned {removed} vanished file(s) outside the library roots")
+    except Exception as e:
+        app_logger.error(f"Failed to prune vanished files outside the library roots: {e}")
+    return removed
+
+
 def prune_vanished_index_dirs():
     """Drop indexed folders that are provably gone, with everything under them.
 
@@ -4192,6 +4232,7 @@ def prune_vanished_index_dirs():
     from helpers.library import get_library_roots, is_root_mounted
 
     out = {"dirs": 0, "rows": 0}
+    out["rows"] += _prune_vanished_files_outside_roots()
     try:
         roots = [
             os.path.normpath(r) for r in get_library_roots() if is_root_mounted(r)
