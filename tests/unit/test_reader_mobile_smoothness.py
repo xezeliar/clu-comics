@@ -85,3 +85,50 @@ class TestCss:
         strip = no_comments(css[css.index(".comic-reader-scroll {"):css.index(".comic-reader-scroll-column")])
         assert "touch-action: pan-x pan-y;" in strip
         assert "pinch-zoom" not in strip
+
+
+class TestScrollModeTap:
+    """iOS WebKit never sends `click` for a tap on a plain element, so the
+    toolbars could not be opened in scroll mode on an iPhone. Taps are read
+    from pointer events instead."""
+
+    def test_tap_is_detected_from_pointer_events(self, js):
+        assert "attachScrollTap(s);" in js
+        b = body(js, "attachScrollTap")
+        for ev in ("pointerdown", "pointerup", "pointercancel"):
+            assert "addEventListener('%s'" % ev in b
+        # A second finger is a pinch, never a tap.
+        assert "e.isPrimary" in b
+
+    def test_a_scroll_is_not_a_tap(self, js):
+        b = body(js, "attachScrollTap")
+        assert "scrollTop - st.top" in b and "SCROLL_TAP_MAX_MOVE" in b
+
+    def test_click_is_left_to_the_mouse(self, js):
+        start = js.index("s.onClick = () => {")
+        handler = js[start:js.index("};", start)]
+        assert "s.lastPointerType !== 'mouse'" in handler
+
+    def test_single_tap_waits_so_double_tap_can_zoom(self, js):
+        b = body(js, "handleScrollTap")
+        assert "SCROLL_DOUBLE_TAP_MS" in b and "toggleScrollZoomAt" in b
+        assert "toggleReaderChrome()" in b
+
+    def test_pointer_listeners_are_torn_down(self, js):
+        b = body(js, "teardownScrollReader")
+        for ev in ("pointerdown", "pointerup", "pointercancel"):
+            assert "removeEventListener('%s'" % ev in b
+        assert "clearTimeout(s.tapTimer)" in b
+
+    def test_only_a_real_pinch_suppresses_the_next_tap(self, js):
+        b = body(js, "attachScrollPinch")
+        assert "if (s.pinching) s.suppressClickUntil" in b
+
+
+class TestPagedDoubleTap:
+    def test_first_tap_timer_is_dropped(self, js):
+        """Swiper emits `tap` for both taps of a double-tap; without this the
+        toolbars flipped on every double-tap zoom."""
+        start = js.index("tap: function (swiper, event)")
+        handler = js[start:js.index("doubleTap: function", start)]
+        assert "if (chromeToggleTimeout) clearTimeout(chromeToggleTimeout);" in handler
