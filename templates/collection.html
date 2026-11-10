@@ -119,6 +119,9 @@
         </div>
     {% endcall %}
 
+    <!-- Setup checklist: filled by loadOnboarding() while it has steps left -->
+    <div id="onboarding-card" class="mb-4"></div>
+
     <!-- Dashboard Sections -->
     <div id="dashboard-sections" class="mb-5">
         {% for section in dashboard_sections %}
@@ -823,7 +826,10 @@
 
             if (response.ok) {
                 if (!Array.isArray(data) || data.length === 0) {
-                    grid.innerHTML = '<div class="col-12 text-center text-muted">No recommendations found. Try reading more comics first!</div>';
+                    const col = document.createElement('div');
+                    col.className = 'col-12';
+                    col.appendChild(CLU.emptyState({ icon: 'bi-stars', title: 'No recommendations yet', message: 'Read a few comics and picks will appear here.', compact: true }));
+                    grid.replaceChildren(col);
                     return;
                 }
 
@@ -836,5 +842,58 @@
             grid.innerHTML = `<div class="col-12 text-center text-danger">Network Error: ${error.message}</div>`;
         }
     }
+
+    // Setup checklist: ticks come from the server (/api/onboarding), which hides
+    // the card once every step is done or it was dismissed.
+    async function loadOnboarding() {
+        const host = document.getElementById('onboarding-card');
+        if (!host) return;
+        try {
+            const data = await (await fetch({{ url_for('collection.api_onboarding') | tojson | safe }})).json();
+            if (!data.visible) return;
+            const card = document.createElement('div');
+            card.className = 'card';
+            const body = document.createElement('div');
+            body.className = 'card-body';
+            const head = document.createElement('div');
+            head.className = 'd-flex justify-content-between align-items-center mb-2';
+            const title = document.createElement('h2');
+            title.className = 'h5 m-0';
+            title.textContent = 'Get set up';
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'btn btn-sm btn-outline-secondary';
+            dismiss.textContent = 'Dismiss';
+            dismiss.addEventListener('click', async () => {
+                try {
+                    const r = await fetch({{ url_for('collection.api_onboarding_dismiss') | tojson | safe }}, { method: 'POST' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    host.replaceChildren();
+                } catch (e) {
+                    CLU.toast('Could not dismiss the checklist', 'danger');
+                }
+            });
+            head.append(title, dismiss);
+            const list = document.createElement('ul');
+            list.className = 'list-unstyled mb-0';
+            data.steps.forEach(step => {
+                const li = document.createElement('li');
+                li.className = 'py-1';
+                const icon = document.createElement('i');
+                icon.className = 'bi me-2 ' + (step.done ? 'bi-check-circle-fill text-success' : 'bi-circle text-muted');
+                icon.setAttribute('aria-hidden', 'true');
+                const a = document.createElement('a');
+                a.href = step.href;
+                a.textContent = step.title;
+                if (step.done) a.className = 'text-muted text-decoration-line-through';
+                li.append(icon, a);
+                list.appendChild(li);
+            });
+            body.append(head, list);
+            card.appendChild(body);
+            host.replaceChildren(card);
+        } catch (e) { /* the card is optional; the page works without it */ }
+    }
+    loadOnboarding();
 </script>
 {% endblock %}

@@ -40,6 +40,8 @@ SETTINGS_SCHEMA = {
     # Whether monitor.py runs and owns WATCH. Was the MONITOR env var, which
     # core.config.seed_monitor_from_env imports once (default off).
     "MONITOR_ENABLED": _s("monitor_enabled", _B, False, "file_processing"),
+    # Home-page setup checklist hidden for good (Dismiss on the card).
+    "ONBOARDING_DISMISSED": _s("onboarding_dismissed", _B, False, "system"),
     "AUTOCONVERT": _s("autoconvert", _B, False, "file_processing"),
     "AUTO_COMPRESS": _s("auto_compress", _B, False, "file_processing"),
     # How hard Compress squeezes a CBZ: full | balanced | small (cbz_ops.compress.LEVELS).

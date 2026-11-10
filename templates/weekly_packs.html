@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
 
 {% block title %}Weekly Packs{% endblock %}
 
@@ -256,7 +257,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">No download history yet</td>
+                            <td colspan="5">{{ empty_state('No downloads yet', 'Packs you download appear here.', 'bi-clock-history', compact=True) }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -466,7 +467,12 @@ function updateHistoryTable(history) {
     if (!tbody) return;
 
     if (history.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No download history yet</td></tr>';
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.appendChild(CLU.emptyState({ icon: 'bi-clock-history', title: 'No downloads yet', message: 'Packs you download appear here.', compact: true }));
+        tr.appendChild(td);
+        tbody.replaceChildren(tr);
         return;
     }
 

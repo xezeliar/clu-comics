@@ -840,7 +840,7 @@
                     btn.addEventListener('click', () => generateWrapped(parseInt(btn.dataset.year)));
                 });
             } else {
-                yearButtonsContainer.innerHTML = '<p class="text-muted">No reading data available yet. Start reading to generate your Wrapped!</p>';
+                yearButtonsContainer.replaceChildren(CLU.emptyState({ icon: 'bi-book', title: 'No reading data yet', message: 'Read a comic to generate your Wrapped.', compact: true }));
             }
         } catch (error) {
             console.error('Error loading years:', error);
