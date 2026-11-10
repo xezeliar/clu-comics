@@ -682,3 +682,18 @@
     inset: 0;
     line-height: normal;
 }
+
+/* Home-screen web app (status bar is black-translucent): the page runs under
+   the status bar and the home indicator, so the bars grow by the safe-area
+   inset. A transparent border is used rather than padding because the
+   breakpoints above each reset `padding`; the bar's background still paints
+   under it, so the status bar sits over a solid bar, not over the comic. */
+.comic-reader-header {
+    border-top: env(safe-area-inset-top, 0px) solid transparent;
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+}
+
+.comic-reader-footer {
+    border-bottom: env(safe-area-inset-bottom, 0px) solid transparent;
+}

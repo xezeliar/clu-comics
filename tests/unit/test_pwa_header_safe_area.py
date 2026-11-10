@@ -13,3 +13,9 @@ def test_translucent_status_bar_is_paired_with_a_navbar_inset():
     assert "black-translucent" in read("templates", "base.html")
     css = read("static", "css", "clu-page.css")
     assert "padding-top: env(safe-area-inset-top" in css
+
+
+def test_reader_bars_clear_the_status_bar_and_home_indicator():
+    css = read("static", "css", "reader.css")
+    assert "border-top: env(safe-area-inset-top" in css
+    assert "border-bottom: env(safe-area-inset-bottom" in css
