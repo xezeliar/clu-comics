@@ -738,3 +738,13 @@ a.clu-stat:focus-visible .clu-stat-value {
 
     body:has(#comicReaderModal[style*="display: flex"]) .clu-tabbar { display: none; }
 }
+
+/* ── Home-screen web app ────────────────────────────────────────────────────
+   The page sets apple-mobile-web-app-status-bar-style=black-translucent, so in
+   standalone mode content starts under the status bar and the notch. Push the
+   navbar down by the inset; it is 0 in a normal browser tab. */
+.navbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+}
