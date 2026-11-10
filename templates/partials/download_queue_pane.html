@@ -1,19 +1,9 @@
-{% extends 'base.html' %}
-{% from 'partials/page_header.html' import page_header %}
-{% from 'partials/empty_state.html' import empty_state %}
-
-{% block title %}CLU: Download queue{% endblock %}
-
-{% block content %}
-{% call(slot) page_header('Download queue', 'bi-cloud-arrow-down',
-                          subtitle='Everything downloading, waiting, or failed. Drag queued items to reorder.') %}
-  {% if slot == 'actions' %}
-    <button class="btn btn-sm btn-outline-secondary" id="dq-pause" type="button">Pause all</button>
-    <button class="btn btn-sm btn-outline-secondary" id="dq-retry-all" type="button">Retry failed</button>
-    <button class="btn btn-sm btn-outline-secondary" id="dq-clear" type="button">Clear history</button>
-  {% endif %}
-{% endcall %}
-
+{#- Download queue: the Queue tab of /status. Needs empty_state imported by the includer. -#}
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <button class="btn btn-sm btn-outline-secondary" id="dq-pause" type="button">Pause all</button>
+  <button class="btn btn-sm btn-outline-secondary" id="dq-retry-all" type="button">Retry failed</button>
+  <button class="btn btn-sm btn-outline-secondary" id="dq-clear" type="button">Clear history</button>
+</div>
 <ul class="nav nav-tabs mb-3" id="dq-tabs">
   <li class="nav-item"><button class="nav-link active" data-tab="active" type="button">Active <span class="badge text-bg-primary" id="dq-n-active">0</span></button></li>
   <li class="nav-item"><button class="nav-link" data-tab="queued" type="button">Queued <span class="badge text-bg-secondary" id="dq-n-queued">0</span></button></li>
@@ -23,10 +13,6 @@
 <div id="dq-paused" class="alert alert-warning d-none">Queue paused. Running downloads finish; nothing new starts.</div>
 <div id="dq-list" class="list-group"></div>
 <div id="dq-empty" class="d-none">{{ empty_state('Nothing here', 'Downloads appear in this tab as they move through the queue.', 'bi-cloud-arrow-down') }}</div>
-{% endblock %}
-
-{% block scripts %}
-{{ super() }}
 <script>
 (function () {
   var listEl = document.getElementById('dq-list');
@@ -152,7 +138,8 @@
   });
 
   refresh();
-  setInterval(refresh, 2000);
+  setInterval(function () {
+    if (document.getElementById('queue-pane').classList.contains('active')) refresh();
+  }, 2000);
 })();
 </script>
-{% endblock %}

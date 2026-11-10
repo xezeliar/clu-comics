@@ -10,7 +10,7 @@ Clerk-level, enforced centrally (``/download-queue`` page path and
 ``/api/download-queue`` prefix in ``core.auth``).
 """
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, redirect, request, url_for
 
 from core import download_queue_ctl as ctl
 
@@ -19,7 +19,8 @@ download_queue_bp = Blueprint("download_queue", __name__)
 
 @download_queue_bp.route("/download-queue")
 def page():
-    return render_template("download_queue.html", current_page="/download-queue")
+    # The queue lives in the Queue tab of the Download Status page.
+    return redirect(url_for("status") + "#queue")
 
 
 @download_queue_bp.route("/api/download-queue", methods=["GET"])

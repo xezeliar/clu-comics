@@ -74,7 +74,13 @@ def test_pause_resume(client, fake_api):
 
 
 def test_page_and_roles(app, client):
-    assert client.get("/download-queue").status_code == 200
+    r = client.get("/download-queue")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/status#queue")
+    # The test app stubs /status, so check the template that carries the tab.
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    with open(os.path.join(root, "templates", "status.html"), encoding="utf-8") as f:
+        assert 'id="queue-pane"' in f.read()
     assert _role(app, "/download-queue", "GET") == "clerk"
     assert _role(app, "/api/download-queue/pause", "POST") == "clerk"
 
