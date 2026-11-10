@@ -775,7 +775,11 @@ function initializeComicReader(pageCount, startPage = 0) {
                 if (readerZoomedBeyondFit()) return;
                 // Don't toggle chrome when tapping navigation buttons
                 if (event && event.target && event.target.closest('.swiper-button-next, .swiper-button-prev')) return;
-                // Start a 300ms timer; if a double-tap comes, it will cancel this
+                // Start a 300ms timer; if a double-tap comes, it will cancel this.
+                // Swiper emits `tap` for BOTH taps of a double-tap, so drop the
+                // first tap's timer here; otherwise doubleTap could only cancel
+                // the second and the toolbars flipped on every double-tap zoom.
+                if (chromeToggleTimeout) clearTimeout(chromeToggleTimeout);
                 chromeToggleTimeout = setTimeout(function () {
                     chromeToggleTimeout = null;
                     toggleReaderChrome();
@@ -1653,6 +1657,7 @@ function teardownScrollReader() {
     if (s.observer) s.observer.disconnect();
     clearTimeout(s.programmaticTimer);
     clearTimeout(s.unloadTimer);
+    clearTimeout(s.tapTimer);
     if (s.scroller) {
         s.scroller.removeEventListener('scroll', s.onScroll);
         s.scroller.removeEventListener('click', s.onClick);
@@ -1660,6 +1665,9 @@ function teardownScrollReader() {
         s.scroller.removeEventListener('touchmove', s.onTouchMove);
         s.scroller.removeEventListener('touchend', s.onTouchEnd);
         s.scroller.removeEventListener('touchcancel', s.onTouchEnd);
+        s.scroller.removeEventListener('pointerdown', s.onPointerDown);
+        s.scroller.removeEventListener('pointerup', s.onPointerUp);
+        s.scroller.removeEventListener('pointercancel', s.onPointerCancel);
         s.scroller.remove();
     }
 }
@@ -1743,9 +1751,12 @@ function initializeScrollReader(pageCount, startPage = 0) {
     };
     scroller.addEventListener('scroll', s.onScroll, { passive: true });
 
-    // A click on the page hides/shows the chrome, as a tap does when paged. Not
-    // after a text selection or a drag.
+    // A mouse click on the page hides/shows the chrome, as a tap does when
+    // paged. Not after a text selection or a drag. Touch is handled by
+    // attachScrollTap below: iOS WebKit never sends `click` for a tap on a
+    // plain element, so on an iPhone this listener alone did nothing.
     s.onClick = () => {
+        if (s.lastPointerType && s.lastPointerType !== 'mouse') return;
         if (s.suppressClickUntil && Date.now() < s.suppressClickUntil) return;
         const sel = window.getSelection && window.getSelection();
         if (sel && String(sel).length) return;
@@ -1753,6 +1764,7 @@ function initializeScrollReader(pageCount, startPage = 0) {
     };
     scroller.addEventListener('click', s.onClick);
     attachScrollPinch(s);
+    attachScrollTap(s);
 
     // Land on the start page. Navigation, not reading.
     s.index = Math.max(0, Math.min(startPage, pageCount - 1));
@@ -1989,16 +2001,87 @@ function attachScrollPinch(s) {
     };
     s.onTouchEnd = e => {
         if (e.touches.length < 2) {
+            // A pinch that ends in a tap-like lift must not toggle the chrome.
+            // Only after a real pinch: on every lift it swallowed the second
+            // tap of a double-tap.
+            if (s.pinching) s.suppressClickUntil = Date.now() + 350;
             s.pinching = false;
             startDist = 0;
-            // A pinch that ends in a tap-like lift must not toggle the chrome.
-            s.suppressClickUntil = Date.now() + 350;
         }
     };
     s.scroller.addEventListener('touchstart', s.onTouchStart, { passive: true });
     s.scroller.addEventListener('touchmove', s.onTouchMove, { passive: false });
     s.scroller.addEventListener('touchend', s.onTouchEnd, { passive: true });
     s.scroller.addEventListener('touchcancel', s.onTouchEnd, { passive: true });
+}
+
+// --- Tap and double-tap in scroll mode ---------------------------------------
+// Detected from pointer events, not `click`: iOS WebKit (Safari, and Chrome on
+// iPhone, which must use WebKit) does not deliver `click` for a tap on a plain
+// element, so the toolbars could not be opened in scroll mode on an iPhone.
+// A tap is one finger, short, and still: a scroll, a fling or a pinch is not.
+// One tap toggles the toolbars (after a short wait, so a double-tap can claim
+// it); a double-tap zooms the column in, or back to fitted.
+const SCROLL_TAP_MAX_MS = 500;
+const SCROLL_TAP_MAX_MOVE = 10;       // px, finger travel and scroll travel
+const SCROLL_DOUBLE_TAP_MS = 300;
+const SCROLL_DOUBLE_TAP_WIDTH = 200;  // column width %, zoomed by a double-tap
+
+function attachScrollTap(s) {
+    s.onPointerDown = e => {
+        s.lastPointerType = e.pointerType;
+        if (e.pointerType === 'mouse') return;
+        if (!e.isPrimary) { s.tapStart = null; return; }  // a second finger: a pinch
+        s.tapStart = { x: e.clientX, y: e.clientY, t: Date.now(),
+                       top: s.scroller.scrollTop, left: s.scroller.scrollLeft };
+    };
+    s.onPointerUp = e => {
+        const st = s.tapStart;
+        s.tapStart = null;
+        if (!st || e.pointerType === 'mouse' || !e.isPrimary) return;
+        if (s.pinching || (s.suppressClickUntil && Date.now() < s.suppressClickUntil)) return;
+        if (Date.now() - st.t > SCROLL_TAP_MAX_MS) return;
+        if (Math.hypot(e.clientX - st.x, e.clientY - st.y) > SCROLL_TAP_MAX_MOVE) return;
+        if (Math.abs(s.scroller.scrollTop - st.top) > SCROLL_TAP_MAX_MOVE ||
+            Math.abs(s.scroller.scrollLeft - st.left) > SCROLL_TAP_MAX_MOVE) return;
+        handleScrollTap(s, e.clientX, e.clientY);
+    };
+    s.onPointerCancel = () => { s.tapStart = null; };  // the browser took it as a scroll
+    s.scroller.addEventListener('pointerdown', s.onPointerDown, { passive: true });
+    s.scroller.addEventListener('pointerup', s.onPointerUp, { passive: true });
+    s.scroller.addEventListener('pointercancel', s.onPointerCancel, { passive: true });
+}
+
+function handleScrollTap(s, x, y) {
+    const now = Date.now();
+    if (s.tapTimer && now - s.lastTapAt < SCROLL_DOUBLE_TAP_MS &&
+        Math.hypot(x - s.lastTapX, y - s.lastTapY) < 40) {
+        clearTimeout(s.tapTimer);
+        s.tapTimer = null;
+        toggleScrollZoomAt(s, x);
+        return;
+    }
+    s.lastTapAt = now;
+    s.lastTapX = x;
+    s.lastTapY = y;
+    clearTimeout(s.tapTimer);
+    s.tapTimer = setTimeout(() => {
+        s.tapTimer = null;
+        if (scrollState === s) toggleReaderChrome();
+    }, SCROLL_DOUBLE_TAP_MS);
+}
+
+/** Double-tap in scroll mode: zoom the column in about the tap, or back to fitted. */
+function toggleScrollZoomAt(s, clientX) {
+    const next = s.widthPct > SCROLL_DEFAULT_WIDTH ? SCROLL_DEFAULT_WIDTH : SCROLL_DOUBLE_TAP_WIDTH;
+    const rect = s.scroller.getBoundingClientRect();
+    const offsetX = clientX - rect.left;
+    const colWidth = s.column.offsetWidth || 1;
+    const fraction = (s.scroller.scrollLeft + offsetX) / colWidth;
+    s.widthPct = next;
+    withScrollAnchor(s, () => { s.column.style.width = next + '%'; });
+    // Keep the tapped point under the finger horizontally.
+    s.scroller.scrollLeft = Math.max(0, fraction * s.column.offsetWidth - offsetX);
 }
 
 /** Step the column width: the scroll-mode equivalent of the zoom buttons. */
