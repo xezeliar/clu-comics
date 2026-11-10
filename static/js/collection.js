@@ -6193,3 +6193,7 @@ function refreshCurrentView(preservePage = false, forceRefresh = false) {
  * Contract setup wrapper for CLU streaming module
  */
 
+
+// Pull-to-refresh (clu-pull-refresh.js): reload the folder in place, past the
+// server cache, instead of reloading the whole page.
+window._cluRefresh = () => refreshCurrentView(true, true);

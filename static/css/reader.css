@@ -122,6 +122,14 @@
     border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* Fingers need 44px; the 32px desktop size is too small to hit reliably. */
+@media (pointer: coarse) {
+    .comic-reader-footer .zoom-btn {
+        min-width: 44px;
+        height: 44px;
+    }
+}
+
 .comic-reader-footer .zoom-btn:hover {
     background-color: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.5);
