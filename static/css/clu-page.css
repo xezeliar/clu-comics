@@ -753,3 +753,52 @@ a.clu-stat:focus-visible .clu-stat-value {
     .form-check-input { width: 1.4em; height: 1.4em; }
     .form-switch .form-check-input { width: 2.6em; }
 }
+
+/* Bottom tab bar: phones only. The reader overlay (z-index 9999) covers it,
+   and :has() hides it outright so it never shows through. */
+.clu-tabbar { display: none; }
+
+@media (max-width: 767.98px) {
+    .clu-tabbar {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1030;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        background: var(--bs-tertiary-bg);
+        border-top: 1px solid var(--bs-border-color);
+    }
+
+    .clu-tabbar a {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 0;
+        font-size: 0.65rem;
+        color: var(--bs-secondary-color);
+        text-decoration: none;
+    }
+
+    .clu-tabbar a i { font-size: 1.25rem; line-height: 1.2; }
+    .clu-tabbar a.active { color: var(--bs-primary); }
+
+    body:has(.clu-tabbar) {
+        padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    }
+
+    body:has(#comicReaderModal[style*="display: flex"]) .clu-tabbar { display: none; }
+}
+
+/* ── Home-screen web app ────────────────────────────────────────────────────
+   The page sets apple-mobile-web-app-status-bar-style=black-translucent, so in
+   standalone mode content starts under the status bar and the notch. Push the
+   navbar down by the inset; it is 0 in a normal browser tab. */
+.navbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+}

@@ -1,0 +1,19 @@
+{# Bottom tab bar, phones only (<768px, see clu-page.css). Hidden while the
+   reader overlay is open. The top navbar stays for desktop. Tabs follow the
+   same role gating as header.html. #}
+{% set _tb_role = (g.current_user.role if g.get('current_user') else 'owner') %}
+{% set _tb_tabs = [
+  (url_for('index'), 'bi-house', 'Home', true),
+  (url_for('collection.metadata_browser_page'), 'bi-collection', 'Library', true),
+  (url_for('series.pull_list'), 'bi-list-check', 'Pull List', metron_available and _tb_role in ['clerk', 'owner']),
+  (url_for('reading_lists.index'), 'bi-journal-bookmark', 'Reading', true),
+  (url_for('config_page'), 'bi-gear', 'Settings', _tb_role == 'owner'),
+] %}
+<nav class="clu-tabbar" aria-label="Main">
+  {% for href, icon, label, show in _tb_tabs if show %}
+  {% set on = (request.path == '/' or request.path.startswith('/collection')) if href == url_for('index') else request.path.startswith(href) %}
+  <a href="{{ href }}" class="{% if on %}active{% endif %}"{% if on %} aria-current="page"{% endif %}>
+    <i class="bi {{ icon }}"></i><span>{{ label }}</span>
+  </a>
+  {% endfor %}
+</nav>
