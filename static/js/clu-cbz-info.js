@@ -493,7 +493,8 @@
       var names = CLU.splitCreditList(value);
       var html = names.map(function (n) {
         if (!field.browse) return CLU.escapeHtml(n);
-        return '<a href="/browse/' + field.browse + '/' +
+        var page = { writer: 'creators', penciller: 'creators', characters: 'characters' }[field.browse];
+        return '<a href="/' + (page || 'browse/' + field.browse) + '/' +
           encodeURIComponent(n) + '">' + CLU.escapeHtml(n) + '</a>';
       }).join(', ');
       // Nothing left once IDs were stripped: show the raw text so the field

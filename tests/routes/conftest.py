@@ -172,6 +172,7 @@ def app(db_connection, tmp_path):
     # Register blueprints --------------------------------------------------
     from routes.auth import auth_bp
     from routes.favorites import favorites_bp
+    from routes.creators import creators_bp
     from routes.reading_lists import reading_lists_bp
     from routes.opds import opds_bp
     from routes.collection import collection_bp
@@ -198,6 +199,7 @@ def app(db_connection, tmp_path):
 
     test_app.register_blueprint(auth_bp)
     test_app.register_blueprint(favorites_bp)
+    test_app.register_blueprint(creators_bp)
     test_app.register_blueprint(reading_lists_bp)
     test_app.register_blueprint(opds_bp)
     test_app.register_blueprint(collection_bp)
