@@ -21,6 +21,6 @@ CLU_USER_AGENT = f"CLU/{__version__}"
 # release, so the update check in app.py keeps announcing it. It is applied
 # after CLU_USER_AGENT on purpose -- providers keep seeing plain "CLU/7.1".
 # Raise the number when publishing a new build of the fork.
-FORK_LABEL = "xez.1"
+FORK_LABEL = "xez.2026.11.10"
 UPSTREAM_VERSION = __version__
 __version__ = f"{UPSTREAM_VERSION}+{FORK_LABEL}"
