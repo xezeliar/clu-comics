@@ -1193,6 +1193,9 @@ def start_bulk_job(
                     options={'provider': provider, 'replace': replace},
                 )
             complete_bulk_job(job_id, 'completed')
+            from core.activity import record_event
+            record_event('tag', f"Metadata written for {total_files} files",
+                         detail=f"{total_folders} folder(s)")
             app_state.update_operation(op_id, current=total_files, detail='Done')
             app_state.complete_operation(op_id, error=False)
         except Exception as e:

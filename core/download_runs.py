@@ -153,8 +153,9 @@ NULL_RECORDER = _NullRecorder()
 class RunRecorder:
     """Collects one run's counters and items and writes them in batches."""
 
-    def __init__(self, run_id):
+    def __init__(self, run_id, kind=None):
         self.run_id = run_id
+        self.kind = kind
         self.counts = {}
         self._pending = []
         self._item_total = 0
@@ -232,6 +233,20 @@ class RunRecorder:
             return
         self._finished = True
         self._flush(status=status, error=error)
+        self._record_activity(status, error)
+
+    def _record_activity(self, status, error):
+        """One feed row per run (never per item)."""
+        from core.activity import record_event
+
+        label = "Weekly pack run" if self.kind == KIND_WEEKLY_PACKS else "Download sweep"
+        queued = self.counts.get(f"outcome_{OUTCOME_QUEUED}", 0)
+        searched = sum(v for k, v in self.counts.items() if k.startswith("outcome_"))
+        if status == STATUS_OK:
+            record_event("sweep", f"{label} searched {searched} issues",
+                         detail=f"{queued} queued")
+        else:
+            record_event("error", f"{label} did not finish", detail=error, level="error")
 
 
 def start_run(kind, trigger=TRIGGER_SCHEDULED, scope=None):
@@ -249,7 +264,7 @@ def start_run(kind, trigger=TRIGGER_SCHEDULED, scope=None):
                 (kind, trigger, _clip(scope, 200), _now(), STATUS_RUNNING),
             )
             conn.commit()
-            return RunRecorder(cur.lastrowid)
+            return RunRecorder(cur.lastrowid, kind)
     except Exception as e:
         app_logger.debug(f"Could not open a download run record: {e}")
         return NULL_RECORDER

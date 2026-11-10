@@ -119,6 +119,24 @@
               </a>
             </li>
             <li>
+              <a href="{{ url_for('release_calendar.page') }}"
+                class="dropdown-item {% if current_page == url_for('release_calendar.page') %}active{% endif %}">
+                <i class="bi bi-calendar3 me-2"></i>Release calendar
+              </a>
+            </li>
+            <li>
+              <a href="{{ url_for('download_queue.page') }}"
+                class="dropdown-item {% if current_page == url_for('download_queue.page') %}active{% endif %}">
+                <i class="bi bi-cloud-arrow-down me-2"></i>Download queue
+              </a>
+            </li>
+            <li>
+              <a href="{{ url_for('activity.activity_page') }}"
+                class="dropdown-item {% if current_page == url_for('activity.activity_page') %}active{% endif %}">
+                <i class="bi bi-activity me-2"></i>Activity
+              </a>
+            </li>
+            <li>
               <a href="{{ url_for('series.wanted') }}"
                 class="dropdown-item {% if current_page == url_for('series.wanted') %}active{% endif %}">
                 <i class="bi bi-star me-2"></i>Wanted

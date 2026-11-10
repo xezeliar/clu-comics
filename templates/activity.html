@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
+
+{% block title %}CLU: Activity{% endblock %}
+
+{% block content %}
+{% call(slot) page_header('Activity', 'bi-activity',
+                          subtitle='What CLU did, newest first.') %}
+{% endcall %}
+
+<ul class="nav nav-pills mb-3" id="act-filters">
+  <li class="nav-item"><button class="nav-link active" data-kind="" type="button">All</button></li>
+  <li class="nav-item"><button class="nav-link" data-kind="download" type="button">Downloads</button></li>
+  <li class="nav-item"><button class="nav-link" data-kind="move" type="button">Moves</button></li>
+  <li class="nav-item"><button class="nav-link" data-kind="tag" type="button">Tags</button></li>
+  <li class="nav-item"><button class="nav-link" data-kind="sweep" type="button">Sweeps</button></li>
+  <li class="nav-item"><button class="nav-link" data-kind="error" type="button">Errors <span class="badge text-bg-danger d-none" id="act-error-count"></span></button></li>
+</ul>
+
+<div id="act-list" class="list-group"></div>
+<div id="act-empty" class="d-none">{{ empty_state('No activity yet', 'Downloads, moves, tag writes, sweeps and errors appear here as they happen.', 'bi-activity') }}</div>
+<button class="btn btn-outline-secondary mt-3 d-none" id="act-more" type="button">Load more</button>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+  var listEl = document.getElementById('act-list');
+  var emptyEl = document.getElementById('act-empty');
+  var moreEl = document.getElementById('act-more');
+  var apiUrl = "{{ url_for('activity.api_activity') }}";
+  var healthUrl = "{{ url_for('problem_files.page') }}";
+  var kind = '', oldest = null, PAGE = 50;
+  var ICON = {download: 'bi-cloud-arrow-down text-success', move: 'bi-folder-symlink text-primary',
+              tag: 'bi-tags text-warning', sweep: 'bi-search text-info', error: 'bi-exclamation-triangle text-danger'};
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function row(ev) {
+    var li = el('div', 'list-group-item d-flex gap-3');
+    li.appendChild(el('i', 'bi ' + (ICON[ev.kind] || 'bi-dot') + ' fs-5'));
+    var body = el('div', 'flex-grow-1');
+    body.appendChild(el('div', 'fw-semibold', ev.title));
+    if (ev.detail) body.appendChild(el('div', 'text-body-secondary small', ev.detail));
+    if (ev.kind === 'error' && ev.path) {
+      var a = el('a', 'small', 'Open in Library Health');
+      a.href = healthUrl;
+      body.appendChild(a);
+    }
+    li.appendChild(body);
+    li.appendChild(el('div', 'text-body-secondary small text-nowrap', ev.ts_display || ev.ts));
+    return li;
+  }
+
+  function load(reset) {
+    if (reset) { listEl.textContent = ''; oldest = null; }
+    var url = apiUrl + '?limit=' + PAGE + (kind ? '&kind=' + kind : '') + (oldest ? '&before=' + oldest : '');
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.success) { CLU.toast(d.error || 'Could not load activity', 'danger'); return; }
+      d.events.forEach(function (ev) { listEl.appendChild(row(ev)); oldest = ev.id; });
+      emptyEl.classList.toggle('d-none', listEl.children.length > 0);
+      moreEl.classList.toggle('d-none', d.events.length < PAGE);
+      var b = document.getElementById('act-error-count');
+      b.textContent = d.errors_24h; b.classList.toggle('d-none', !d.errors_24h);
+    }).catch(function () { CLU.toast('Could not load activity', 'danger'); });
+  }
+
+  document.getElementById('act-filters').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-kind]');
+    if (!btn) return;
+    this.querySelectorAll('.nav-link').forEach(function (n) { n.classList.remove('active'); });
+    btn.classList.add('active');
+    kind = btn.dataset.kind;
+    load(true);
+  });
+  moreEl.addEventListener('click', function () { load(false); });
+  load(true);
+})();
+</script>
+{% endblock %}

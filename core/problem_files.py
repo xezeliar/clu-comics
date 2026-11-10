@@ -140,6 +140,7 @@ def record_problem(path, source, exc=None, error_class=None, error_message=None)
             return False
         try:
             mtime = _file_mtime(path)
+            is_new = False
             existing = conn.execute(
                 "SELECT occurrences FROM problem_files WHERE path = ? AND source = ?",
                 (path, source),
@@ -169,6 +170,7 @@ def record_problem(path, source, exc=None, error_class=None, error_message=None)
                     """,
                     (path, source, error_class, error_message, mtime),
                 )
+                is_new = True
             else:
                 # The newest failure is the accurate one, so class and message
                 # are overwritten. Dismissal survives unless the file itself has
@@ -191,6 +193,13 @@ def record_problem(path, source, exc=None, error_class=None, error_message=None)
                     (error_class, error_message, mtime, mtime, path, source),
                 )
             conn.commit()
+            if is_new:  # a repeat failure is not a new event
+                from core.activity import record_event
+
+                record_event(
+                    "error", f"Could not process {os.path.basename(path)}",
+                    detail=error_message, path=path, level="error",
+                )
             return True
         finally:
             conn.close()
