@@ -17,6 +17,7 @@ from core.app_logging import app_logger
 from core.database import (
     SEARCH_OUTCOMES,
     clear_search_queue_stamps,
+    clear_search_attempts,
     count_waiting_search_attempts,
     get_search_attempt,
     list_search_attempts,
@@ -162,3 +163,15 @@ def api_research_all():
     for series_id, name, number in issues:
         clear_search_queue_stamps(series_id, name, number)
     return jsonify({"success": True, "issues": len(issues)})
+
+
+@search_review_bp.route("/api/search-review/clear", methods=["POST"])
+def api_clear():
+    """Clear search history (``outcome`` limits it to one). Waiting picks are kept."""
+    outcome = (request.get_json(silent=True) or {}).get("outcome") or None
+    if outcome == "waiting" or (outcome and outcome not in SEARCH_OUTCOMES):
+        return jsonify({"success": False, "error": "Unknown outcome"}), 400
+    removed = clear_search_attempts(outcome)
+    if removed is None:
+        return jsonify({"success": False, "error": "Could not clear history"}), 500
+    return jsonify({"success": True, "removed": removed})
