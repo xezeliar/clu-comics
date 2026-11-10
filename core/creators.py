@@ -147,6 +147,43 @@ def person_page(kinds, name, prefixes=None, user_id=None, view="series",
     }
 
 
+def person_issues(kinds, name, folder, prefixes=None, user_id=None):
+    """The issues in one series folder that carry this person's tag.
+
+    The series cards on a creator/character page expand to this list, so the
+    reader can see *which* issues the person is on rather than being sent to
+    the whole folder. Same name lookup and per-user folder scope as
+    ``person_page``; ``folder`` must match ``file_index.parent`` exactly, so a
+    caller cannot read outside what the page itself listed.
+    """
+    kinds = tuple(kinds)
+    uid = _resolve_user_id(user_id)
+    scope_sql, scope_params = _scope(prefixes)
+    base = _person_from(kinds).replace(
+        "WHERE",
+        "LEFT JOIN issues_read r ON r.issue_path = fi.path AND r.user_id = ? WHERE", 1)
+    with db_conn() as conn:
+        if not conn:
+            return None
+        rows = conn.execute(
+            "SELECT DISTINCT fi.path AS path, fi.name AS name, fi.ci_series AS series,"
+            " fi.ci_number AS number, fi.ci_title AS title, fi.ci_year AS year,"
+            " (r.issue_path IS NOT NULL) AS read"
+            + base + " AND fi.parent = ?" + scope_sql,
+            [uid, *kinds, name, folder, *scope_params]).fetchall()
+    issues = [dict(r) for r in rows]
+    issues.sort(key=lambda i: (_issue_sort_key(i["number"]), (i["name"] or "").casefold()))
+    return issues
+
+
+def _issue_sort_key(number):
+    """Numeric issue order; non-numbers (annuals, specials) sort after the numbered ones."""
+    try:
+        return (0, float(str(number).strip()))
+    except (TypeError, ValueError):
+        return (1, 0.0)
+
+
 def list_people(kinds, q="", prefixes=None, limit=300):
     """Names with issue counts, most credited first; ``q`` filters by substring."""
     kinds = tuple(kinds)

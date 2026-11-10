@@ -114,3 +114,32 @@ class TestFollowApi:
 
     def test_delete_without_name_is_400(self, client, library):
         assert client.delete("/api/creators/follow").status_code == 400
+
+
+class TestExpandSeriesIssues:
+    def test_lists_only_the_issues_the_person_is_on(self, client, library):
+        d = client.get("/api/creators/Tom%20King/issues?folder=" + quote("/data/DC/Batman")).get_json()
+        assert d["success"]
+        assert [i["number"] for i in d["issues"]] == ["1", "2"]
+        assert [i["read"] for i in d["issues"]] == [1, 0]
+        assert d["folder_href"]
+
+    def test_character_issues_are_filtered_by_the_tag(self, client, library):
+        d = client.get("/api/characters/Joker/issues?folder=" + quote("/data/DC/Batman")).get_json()
+        assert [i["number"] for i in d["issues"]] == ["1"]
+
+    def test_role_narrows_to_that_credit(self, client, library):
+        url = "/api/creators/Mitch%20Gerads/issues?role=writer&folder=" + quote("/data/DC/Batman")
+        assert client.get(url).get_json()["issues"] == []
+
+    def test_other_folder_or_unknown_person_is_empty(self, client, library):
+        assert client.get("/api/creators/Tom%20King/issues?folder=" + quote("/data/X")).get_json()["issues"] == []
+        assert client.get("/api/creators/Nobody/issues?folder=" + quote("/data/DC/Batman")).get_json()["issues"] == []
+
+    def test_folder_is_required(self, client, library):
+        assert client.get("/api/creators/Tom%20King/issues").status_code == 400
+
+    def test_cards_expand_instead_of_linking(self, client, library):
+        body = client.get("/creators/Tom%20King").get_data(as_text=True)
+        assert 'class="person-card"' in body and 'aria-expanded="false"' in body
+        assert 'id="comicReaderModal"' in body

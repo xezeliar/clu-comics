@@ -1,0 +1,68 @@
+<div id="comicReaderModal" class="comic-reader-modal" style="display: none;">
+    <div class="comic-reader-overlay"></div>
+    <div class="comic-reader-container">
+        <div class="comic-reader-header">
+            <div class="comic-reader-title" id="comicReaderTitle">Loading...</div>
+            <div class="comic-reader-progress">
+                <div class="comic-reader-progress-bar">
+                    <div class="comic-reader-progress-fill"></div>
+                </div>
+                <span class="comic-reader-progress-text">0%</span>
+            </div>
+            <div class="comic-reader-controls">
+                <span class="comic-reader-page-info" id="comicReaderPageInfo">Page 1 of 1</span>
+                <button aria-label="Save Position" class="btn btn-sm btn-outline-light" id="comicReaderBookmark" title="Save Position">
+                    <i class="bi bi-bookmark text-primary"></i>
+                </button>
+                <button aria-label="Close" class="btn btn-sm btn-outline-light" id="comicReaderClose" title="Close">
+                    <i class="bi bi-x-lg text-light"></i>
+                </button>
+            </div>
+        </div>
+        <div class="swiper comic-reader-swiper" id="comicReaderSwiper">
+            <div class="swiper-wrapper" id="comicReaderWrapper"></div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+        <div id="nextIssueOverlay" class="next-issue-overlay" style="display: none;">
+            <div class="next-issue-panel">
+                <h4>Continue Reading?</h4>
+                <div class="next-issue-thumbnail-container">
+                    <img id="nextIssueThumbnail" src="" alt="Next Issue">
+                </div>
+                <p id="nextIssueName" class="next-issue-name">Next Issue Name</p>
+                <div class="next-issue-buttons">
+                    <button id="nextIssueContinue" class="btn btn-primary">
+                        <i class="bi bi-arrow-right-circle me-1"></i>Continue
+                    </button>
+                    <button id="nextIssueClose" class="btn btn-outline-light text-light">Close</button>
+                </div>
+            </div>
+        </div>
+        <div id="resumeReadingOverlay" class="resume-reading-overlay" style="display: none;">
+            <div class="resume-reading-panel">
+                <h4><i class="bi bi-bookmark-check me-2"></i>Resume Reading?</h4>
+                <p id="resumeReadingInfo" class="resume-reading-info">Continue from page 5 of 32?</p>
+                <div class="resume-reading-buttons">
+                    <button id="resumeReadingYes" class="btn btn-primary">
+                        <i class="bi bi-play-fill me-1"></i>Resume
+                    </button>
+                    <button id="resumeReadingNo" class="btn btn-outline-light">Start Over</button>
+                </div>
+            </div>
+        </div>
+        <div class="comic-reader-footer">
+            <div class="comic-reader-footer-controls">
+                <button aria-label="Zoom Out (Arrow Down)" class="btn btn-sm btn-outline-light zoom-btn" id="zoomOutBtn" title="Zoom Out (Arrow Down)">
+                    <i class="bi bi-zoom-out text-light"></i>
+                </button>
+                <button aria-label="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre" class="btn btn-sm btn-outline-light zoom-btn" id="zoomInBtn" title="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre">
+                    <i class="bi bi-zoom-in text-light"></i>
+                </button>
+                <select class="form-select form-select-sm page-selector" id="pageSelector">
+                    <option value="0">Page 1</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>

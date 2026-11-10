@@ -8,12 +8,31 @@
 {% block title %}{{ p.name }} - {{ kind_label }} - Comic Library{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}">
 <style>
     .person-grid {
         list-style: none; margin: 0 0 2rem; padding: 0;
         display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem 1rem;
     }
-    .person-card { display: block; color: inherit; text-decoration: none; }
+    .person-card { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left;
+        color: inherit; text-decoration: none; cursor: pointer; }
+    .person-card:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 4px; border-radius: 8px; }
+    .person-card[aria-expanded="true"] .person-cover { outline: 2px solid var(--clu-select, var(--bs-primary)); outline-offset: 2px; }
+    .person-chevron { position: absolute; z-index: 9; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%;
+        background: rgb(0 0 0 / 60%); color: #fff; display: flex; align-items: center; justify-content: center;
+        font-size: 0.75rem; transition: transform 0.2s; }
+    .person-card[aria-expanded="true"] .person-chevron { transform: rotate(180deg); }
+    .person-panel { grid-column: 1 / -1; background: var(--bs-tertiary-bg); border-radius: var(--bs-border-radius-lg); padding: 0.75rem 1rem; }
+    .person-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 0.5rem; }
+    .person-panel-head strong { font-weight: 500; }
+    .person-issue { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 0.375rem 0.25rem; border: 0;
+        background: none; color: var(--bs-body-color); text-align: left; border-bottom: 1px solid var(--bs-border-color); }
+    .person-issue:last-child { border-bottom: 0; }
+    .person-issue:hover, .person-issue:focus-visible { background: rgba(var(--bs-primary-rgb), 0.15); }
+    .person-issue img { width: 40px; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; background: var(--bs-body-bg); flex: none; }
+    .person-issue-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person-issue-state { flex: none; color: var(--bs-secondary-color); font-size: 0.75rem; }
     .person-cover {
         position: relative; aspect-ratio: 2 / 3; border-radius: 8px; overflow: clip;
         background: var(--bs-tertiary-bg); box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
@@ -88,8 +107,10 @@
         {% for s in p.series %}
         {% set pct = (s.read * 100 // s.issues) if s.issues else 0 %}
         <li>
-            <a class="person-card" href="{{ s.href }}">
+            <button type="button" class="person-card" aria-expanded="false"
+                    data-folder="{{ s.parent }}" data-href="{{ s.href }}" data-title="{{ s.name }}{% if s.year %} ({{ s.year }}){% endif %}">
                 <div class="person-cover">
+                    <span class="person-chevron" aria-hidden="true"><i class="bi bi-chevron-down"></i></span>
                     <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
                          onerror="this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
                     {% if s.issues and s.read == s.issues %}
@@ -101,7 +122,7 @@
                 </div>
                 <div class="person-card-title" title="{{ s.name }}">{{ s.name }}{% if s.year %} ({{ s.year }}){% endif %}</div>
                 <div class="person-card-meta">{{ s.issues }} issue{{ 's' if s.issues != 1 }} · {{ s.read }} read{% if s.publisher %} · {{ s.publisher }}{% endif %}</div>
-            </a>
+            </button>
         </li>
         {% endfor %}
     </ul>
@@ -119,6 +140,8 @@
     </div>
     {% endif %}
 </div>
+
+{% include 'partials/reader_modal.html' %}
 
 {% if is_creator %}
 <div class="modal fade" id="followModal" tabindex="-1" aria-labelledby="followModalLabel" aria-hidden="true">
@@ -168,6 +191,75 @@
 
 {% block scripts %}
 {{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/clu-streaming.js') }}"></script>
+<script src="{{ url_for('static', filename='js/reader.js') }}"></script>
+<script>
+(function () {
+    const apiUrl = {{ (url_for('creators.api_creator_issues', name=p.name) if is_creator else url_for('creators.api_character_issues', name=p.name)) | tojson }};
+    const role = {{ (role or '') | tojson }};
+    const grid = document.querySelector('.person-grid');
+    if (!grid) return;
+
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+    }
+    function label(i) {
+        const n = i.number ? '#' + i.number : '';
+        return [i.series || '', n].filter(Boolean).join(' ') || i.name;
+    }
+    function build(card, d) {
+        const panel = el('li', 'person-panel');
+        const head = el('div', 'person-panel-head');
+        head.appendChild(el('strong', '', card.dataset.title + ' · ' + d.issues.length + ' issue' + (d.issues.length === 1 ? '' : 's')));
+        const open = el('a', 'small', 'Open folder');
+        open.href = d.folder_href;
+        head.appendChild(open);
+        panel.appendChild(head);
+        const items = d.issues.map(i => ({ type: 'file', name: i.name, path: i.path, thumbnailUrl: i.thumbnail_url }));
+        d.issues.forEach(i => {
+            const b = el('button', 'person-issue');
+            b.type = 'button';
+            const img = el('img'); img.src = i.thumbnail_url; img.alt = ''; img.loading = 'lazy';
+            b.appendChild(img);
+            const t = el('span', 'person-issue-name', label(i) + (i.title ? ' · ' + i.title : ''));
+            t.title = i.name;
+            b.appendChild(t);
+            b.appendChild(el('span', 'person-issue-state', i.read ? 'Read' : 'Unread'));
+            b.addEventListener('click', () => {
+                if (typeof window.openComicReader !== 'function') { CLU.toast('Reader failed to load. Try refreshing the page.', 'error'); return; }
+                // "Next issue" in the reader follows this person's list.
+                window._readerAllItems = items;
+                window.openComicReader(i.path);
+            });
+            panel.appendChild(b);
+        });
+        return panel;
+    }
+
+    grid.addEventListener('click', function (e) {
+        const card = e.target.closest('.person-card');
+        if (!card) return;
+        const li = card.closest('li');
+        const open = card.getAttribute('aria-expanded') === 'true';
+        if (open) {
+            card.setAttribute('aria-expanded', 'false');
+            if (li.nextElementSibling && li.nextElementSibling.classList.contains('person-panel')) li.nextElementSibling.remove();
+            return;
+        }
+        card.setAttribute('aria-expanded', 'true');
+        const url = apiUrl + '?folder=' + encodeURIComponent(card.dataset.folder) + (role ? '&role=' + encodeURIComponent(role) : '');
+        fetch(url).then(r => r.json()).then(d => {
+            if (!d.success) { card.setAttribute('aria-expanded', 'false'); CLU.toast(d.error || 'Could not load issues', 'error'); return; }
+            if (card.getAttribute('aria-expanded') !== 'true') return;
+            li.after(build(card, d));
+        }).catch(() => { card.setAttribute('aria-expanded', 'false'); CLU.toast('Could not load issues', 'error'); });
+    });
+})();
+</script>
 {% if is_creator %}
 <script>
 (function () {

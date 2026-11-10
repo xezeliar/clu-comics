@@ -32,6 +32,21 @@ def _index(kinds, template, **extra):
     return render_template(template, people=people, q=q, **extra)
 
 
+def _issues(kinds, name):
+    folder = request.args.get("folder", "")
+    if not folder:
+        return jsonify({"success": False, "error": "Missing folder"}), 400
+    issues = creators.person_issues(
+        kinds, strip_provider_ids(name) or name, folder,
+        prefixes=accessible_folder_prefixes(current_user()))
+    if issues is None:
+        return jsonify({"success": False, "error": "Could not read issues"}), 500
+    for i in issues:
+        i["thumbnail_url"] = url_for("get_thumbnail", path=i["path"])
+    return jsonify({"success": True, "issues": issues,
+                    "folder_href": url_for("collection.collection", path=folder)})
+
+
 @creators_bp.route("/creators")
 def creators_index():
     return _index(creators.CREDIT_KINDS, "people_index.html",
@@ -48,6 +63,18 @@ def creator_page(name):
     return _page(kinds, name, "person.html", role_kinds=creators.CREDIT_KINDS,
                  kind="creators", follow=follow,
                  role=role, roles=creators.ROLE_LABELS, scopes=creators.FOLLOW_SCOPES)
+
+
+@creators_bp.route("/api/creators/<path:name>/issues")
+def api_creator_issues(name):
+    role = request.args.get("role")
+    kinds = (role,) if role in creators.CREDIT_KINDS else creators.CREDIT_KINDS
+    return _issues(kinds, name)
+
+
+@creators_bp.route("/api/characters/<path:name>/issues")
+def api_character_issues(name):
+    return _issues(("characters",), name)
 
 
 @creators_bp.route("/characters")
