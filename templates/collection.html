@@ -230,9 +230,10 @@
         {% endif %}
         {% endfor %}
     </div>
-    <div id="loading-indicator" class="text-center py-5">
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Loading...</span>
+    <div id="loading-indicator" role="status">
+        <span class="visually-hidden">Loading...</span>
+        <div class="file-grid" aria-hidden="true">
+            {% for _ in range(12) %}<div class="clu-skeleton clu-skeleton-card"></div>{% endfor %}
         </div>
     </div>
 </div>
