@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state %}
+
+{% block title %}CLU: Gap report{% endblock %}
+
+{% block content %}
+{% call(slot) page_header('Gap report', 'bi-slash-square',
+                          subtitle='Series with missing issue numbers, from the Wanted list.') %}
+{% if slot == 'actions' %}
+  <button class="btn btn-sm btn-primary" id="gap-search-all" type="button" disabled><i class="bi bi-search me-1"></i>Search all</button>
+{% endif %}
+{% endcall %}
+
+<div class="card"><div class="list-group list-group-flush" id="gap-list"></div></div>
+<div id="gap-empty" class="d-none">{{ empty_state('No gaps', 'Every mapped series is complete, or the Wanted list has not been refreshed yet.', 'bi-check2-circle') }}</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function () {
+  var searchAllUrl = null;
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function start(url, btn, ok) {
+    btn.disabled = true;
+    fetch(url, {method: 'POST'}).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.success) CLU.toast(d.message || ok, 'success');
+      else { CLU.toast(d.error || 'Search failed', 'danger'); btn.disabled = false; }
+    }).catch(function () { CLU.toast('Search failed', 'danger'); btn.disabled = false; });
+  }
+  function row(g) {
+    var r = el('div', 'list-group-item d-flex flex-wrap align-items-center gap-2');
+    var t = el('div', 'flex-grow-1');
+    t.appendChild(el('div', 'fw-semibold', g.name + (g.volume ? ' (v' + g.volume + ')' : '')));
+    t.appendChild(el('div', 'small text-muted', g.owned + ' of ' + g.total + ' owned'));
+    r.appendChild(t);
+    var chips = el('div', 'd-flex flex-wrap gap-1');
+    g.ranges.forEach(function (x) { chips.appendChild(el('span', 'badge text-bg-warning', x)); });
+    r.appendChild(chips);
+    var b = el('button', 'btn btn-sm btn-primary', 'Search');
+    b.type = 'button';
+    b.onclick = function () { start(g.check_url, b, 'Search started'); };
+    r.appendChild(b);
+    return r;
+  }
+  fetch("{{ url_for('smart_collections.api_gaps') }}").then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.success) { CLU.toast(d.error || 'Could not load the gap report', 'danger'); return; }
+    var list = document.getElementById('gap-list');
+    d.gaps.forEach(function (g) { list.appendChild(row(g)); });
+    document.getElementById('gap-empty').classList.toggle('d-none', d.gaps.length > 0);
+    searchAllUrl = d.search_all_url;
+    var all = document.getElementById('gap-search-all');
+    all.disabled = d.gaps.length === 0;
+    all.onclick = function () { start(searchAllUrl, all, 'Search started'); };
+  });
+})();
+</script>
+{% endblock %}

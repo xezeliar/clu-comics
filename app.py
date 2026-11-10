@@ -402,6 +402,9 @@ from routes.download_queue import download_queue_bp
 
 app.register_blueprint(activity_bp)
 app.register_blueprint(download_queue_bp)
+from routes.smart_collections import smart_collections_bp
+
+app.register_blueprint(smart_collections_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()

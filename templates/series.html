@@ -212,6 +212,9 @@
                     </div>
                     {% if mapped_path %}
                     <hr class="my-2">
+                    {% if missing_line %}
+                    <div class="small text-warning mb-2" id="missingLine"><i class="bi bi-slash-square me-1"></i>Missing: {{ missing_line|join(', ') }}</div>
+                    {% endif %}
                     <div class="d-flex justify-content-end gap-3">
                         <button class="btn btn-outline-primary btn-sm" onclick="checkForMissing()"
                             id="checkMissingBtn"

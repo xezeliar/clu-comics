@@ -1168,6 +1168,22 @@ def series_view(slug):
         if manual_status:
             app_logger.info(f"Series {series_id} manual_status: {manual_status}")
 
+        # "Missing: #4, #7" line: the same rule the issue rows use (not found,
+        # not marked by hand, not yet released), and only while the mapped
+        # folder is readable -- an unmounted folder would read as all missing.
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        missing_nums = []
+        if mapped_path and os.path.isdir(mapped_path):
+            for i in all_issues:
+                num = str(get_attr(i, "number"))
+                sd = get_attr(i, "store_date")
+                if (not issue_status.get(num, {}).get("found")
+                        and not (manual_status and num in manual_status)
+                        and not (sd and str(sd) > today_str)):
+                    missing_nums.append(num)
+        from core.gaps import missing_ranges
+        missing_line = missing_ranges(missing_nums)
+
         # Convert series_info to dict for JSON serialization
         series_dict = None
         if series_info:
@@ -1279,6 +1295,7 @@ def series_view(slug):
             list_wants=list_wants,
             has_series_json=has_series_json,
             char_map=load_char_map(),
+            missing_line=missing_line,
         )
     except Exception as e:
         if metron.is_connection_error(e):
