@@ -367,7 +367,6 @@ _CLERK_PREFIXES = (
     "/api/download-runs",      # automatic download run reports (Status page)
     "/api/activity",           # activity feed
     "/api/download-queue",     # download queue page
-    "/api/release-calendar",   # weekly release calendar
     "/api/indexers",
     "/api/usenet",
     "/api/dcpp",
@@ -396,7 +395,6 @@ _CLERK_PAGE_PATHS = frozenset({
     "/status",           # Download Status
     "/activity",         # Activity feed
     "/download-queue",   # Download queue
-    "/release-calendar", # Release calendar
     "/weekly-packs",     # Weekly Packs
     "/series-search",    # Series Search
     "/publishers",       # Publishers

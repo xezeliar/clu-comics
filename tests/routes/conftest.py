@@ -197,7 +197,6 @@ def app(db_connection, tmp_path):
     from routes.search_review import search_review_bp
     from routes.activity import activity_bp
     from routes.download_queue import download_queue_bp
-    from routes.release_calendar import release_calendar_bp
 
     test_app.register_blueprint(auth_bp)
     test_app.register_blueprint(favorites_bp)
@@ -226,7 +225,6 @@ def app(db_connection, tmp_path):
     test_app.register_blueprint(search_review_bp)
     test_app.register_blueprint(activity_bp)
     test_app.register_blueprint(download_queue_bp)
-    test_app.register_blueprint(release_calendar_bp)
 
     # Stub routes that app.py defines but aren't in any blueprint.
     # Templates reference these via url_for().

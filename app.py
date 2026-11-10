@@ -397,11 +397,9 @@ from routes.search_review import search_review_bp
 app.register_blueprint(search_review_bp)
 from routes.activity import activity_bp
 from routes.download_queue import download_queue_bp
-from routes.release_calendar import release_calendar_bp
 
 app.register_blueprint(activity_bp)
 app.register_blueprint(download_queue_bp)
-app.register_blueprint(release_calendar_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()

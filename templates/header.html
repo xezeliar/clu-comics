@@ -119,18 +119,6 @@
               </a>
             </li>
             <li>
-              <a href="{{ url_for('release_calendar.page') }}"
-                class="dropdown-item {% if current_page == url_for('release_calendar.page') %}active{% endif %}">
-                <i class="bi bi-calendar3 me-2"></i>Release calendar
-              </a>
-            </li>
-            <li>
-              <a href="{{ url_for('activity.activity_page') }}"
-                class="dropdown-item {% if current_page == url_for('activity.activity_page') %}active{% endif %}">
-                <i class="bi bi-activity me-2"></i>Activity
-              </a>
-            </li>
-            <li>
               <a href="{{ url_for('series.wanted') }}"
                 class="dropdown-item {% if current_page == url_for('series.wanted') %}active{% endif %}">
                 <i class="bi bi-star me-2"></i>Wanted
@@ -186,6 +174,14 @@
             Insights
           </a>
         </li>
+        {% if _nav_is_clerk %}
+        <li class="nav-item">
+          <a href="{{ url_for('activity.activity_page') }}"
+            class="nav-link {% if current_page == url_for('activity.activity_page') %}active{% endif %}">
+            Activity
+          </a>
+        </li>
+        {% endif %}
         {# Signed-in identity. Gated on session.user_id rather than g.current_user:
            in implicit-owner mode current_user resolves to the owner even though
            nobody logged in, and "signed in as owner" would be misleading there.
