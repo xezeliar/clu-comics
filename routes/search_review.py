@@ -143,3 +143,22 @@ def api_research(attempt_id):
         attempt["series_id"], attempt["series_name"], attempt["issue_number"]
     )
     return jsonify({"success": True, "cleared": cleared})
+
+
+@search_review_bp.route("/api/search-review/research-all", methods=["POST"])
+def api_research_all():
+    """Search again for every listed attempt that failed or found nothing.
+
+    ``outcome`` is ``search_error`` (default) or ``nothing_found``.
+    """
+    outcome = (request.get_json(silent=True) or {}).get("outcome", "search_error")
+    if outcome not in ("search_error", "nothing_found"):
+        return jsonify({"success": False, "error": "Unknown outcome"}), 400
+    attempts = list_search_attempts(outcome=outcome, limit=1000)
+    if attempts is None:
+        return jsonify({"success": False, "error": "Could not read attempts"}), 500
+    # One issue can have several attempts; clear each issue once.
+    issues = {(a["series_id"], a["series_name"], a["issue_number"]) for a in attempts}
+    for series_id, name, number in issues:
+        clear_search_queue_stamps(series_id, name, number)
+    return jsonify({"success": True, "issues": len(issues)})
