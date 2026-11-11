@@ -56,7 +56,8 @@
     {% set wanted_rows = missing|length + upcoming|length + reading_list_wanted|length %}
     {% call toolbar('Filter wanted issues', id='wantedToolbar') %}
         <div class="clu-toolbar-row">
-            {{ search_input('wantedSearch', 'Search series and reading lists') }}
+            {% set wanted_q = request.args.get('q', '') %}
+            {{ search_input('wantedSearch', 'Search series and reading lists', value=wanted_q) }}
             <div class="clu-toolbar-end">
                 {{ result_count('wantedCount', wanted_rows, 'wanted issues', one='wanted issue') }}
             </div>
@@ -526,6 +527,8 @@
         }
 
         CLU.bindSearch(box, apply, { delay: 0 });
+        // ?q= (the series page's "N missing" link) opens the list narrowed.
+        if (box.value.trim()) apply(box.value);
     });
 
     // Auto-poll when in loading state

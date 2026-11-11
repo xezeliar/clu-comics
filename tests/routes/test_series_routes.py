@@ -957,6 +957,68 @@ class TestSeriesPageWantedLabels:
         assert html.count(self.WANTED_BADGE) == 0
 
 
+class TestSeriesPageHeader:
+    """Header: stat line, run strip, banner, actions. Seeded Batman #1-3."""
+
+    PATH = "/data/DC Comics/Batman"
+
+    def _page(self, app, client, found=(1,), banner=None):
+        app.jinja_env.globals["generate_series_slug"] = (
+            lambda name, sid, volume=None: f"{sid}-slug"
+        )
+        status = {str(n): {"found": n in found, "file_path": None} for n in (1, 2, 3)}
+        with patch("routes.series.os.path.isdir", return_value=True), \
+             patch("routes.series.match_issues_to_collection", return_value=status), \
+             patch("core.series_header.banner_url", return_value=banner):
+            resp = client.get("/series/batman-v2020-100")
+        assert resp.status_code == 200
+        return resp.get_data(as_text=True)
+
+    def test_stat_line_and_run_strip(self, app, client_with_data):
+        html = self._page(app, client_with_data)
+        assert "<b>1</b> of 3 owned" in html
+        assert "/wanted?q=Batman" in html and "<b>2</b> missing</a>" in html
+        assert "<b>1</b> read" in html  # conftest marks #1 read
+        assert 'class="sh-run"' in html
+        assert html.count('<li class="miss"') == 2
+        assert 'class="sh-ring"' in html and 'aria-hidden="true"' in html
+
+    def test_complete_run(self, app, client_with_data):
+        html = self._page(app, client_with_data, found=(1, 2, 3))
+        assert "<b>Complete</b> · 3 issues" in html
+        assert "sh-ring done" in html
+
+    def test_banner_only_when_art_exists(self, app, client_with_data):
+        assert "sh-banner" not in self._page(app, client_with_data)
+        html = self._page(app, client_with_data, banner="/api/folder-thumbnail?kind=header")
+        assert 'class="sh-banner"' in html and "has-banner" in html
+
+    def test_actions_follow_the_header_rule(self, app, client_with_data):
+        html = self._page(app, client_with_data)
+        assert "Remove mapping" in html and "dropdown-item text-danger" in html
+        # Mapped: no Subscribe; series.json lives in More.
+        assert 'onclick="openSubscribeModal()" data-clu-keep' not in html
+        assert "CLU.openSeriesJsonModal" in html
+
+    def test_no_description_leaves_no_placeholder(self, app, client_with_data):
+        assert "No description available" not in self._page(app, client_with_data)
+
+    def test_credits_from_owned_files(self, app, client_with_data, db_connection):
+        from core.database import _backfill_file_metadata_tags
+        db_connection.execute(
+            "UPDATE file_index SET ci_writer = 'Tom King', has_comicinfo = 1"
+            " WHERE parent = ? AND name LIKE 'Batman 00_ (2020).cbz' AND name != ?",
+            (self.PATH, "Batman 003 (2020).cbz"))
+        db_connection.commit()
+        _backfill_file_metadata_tags(db_connection)
+        db_connection.commit()
+        # The seeded rows sit under /data, outside the test library root.
+        with patch("core.auth.accessible_folder_prefixes", return_value=["/data"]):
+            html = self._page(app, client_with_data)
+        assert "/creators/Tom%20King" in html
+        assert "Credits from 2 of 3 issues" in html
+
+
 class _MetronSeries:
     """Stand-in for the mokkari Series model the route gets back from Metron."""
 
@@ -1089,6 +1151,14 @@ class TestWantedPage:
         assert "wanted-section-count" in html
         assert "CLU.bindSearch(box, apply, { delay: 0 })" in html
         assert "CLU.noMatches({" in html and "noun: 'wanted issues'" in html
+
+    def test_q_prefills_the_search(self, app, client_with_data):
+        """The series header's "N missing" link opens the list narrowed."""
+        self._register_slug_global(app)
+        self._seed_wanted()
+        html = client_with_data.get("/wanted?q=Iron%20Man").get_data(as_text=True)
+        assert 'id="wantedSearch"' in html and 'value="Iron Man"' in html
+        assert "if (box.value.trim()) apply(box.value);" in html
 
     def test_falls_back_to_cover_date(self, app, client_with_data):
         self._register_slug_global(app)

@@ -1184,6 +1184,27 @@ def series_view(slug):
         from core.gaps import missing_ranges
         missing_line = missing_ranges(missing_nums)
 
+        # Header: banner art, owned-of-run, read count and credits. Ownership
+        # needs a readable mapped folder for the same reason as missing_nums.
+        from core.series_header import banner_url, run_summary
+
+        header_banner = banner_url(mapped_path)
+        run = None
+        series_credits = None
+        if mapped_path and os.path.isdir(mapped_path):
+            released = [
+                str(get_attr(i, "number")) for i in all_issues
+                if not ((sd := get_attr(i, "store_date")) and str(sd) > today_str)
+            ]
+            found = {n for n in released if issue_status.get(n, {}).get("found")}
+            run = run_summary(released, found, set(missing_nums))
+            from core.database import get_folder_read_progress
+            run["read"] = get_folder_read_progress([mapped_path])[mapped_path]["read"]
+            from core.auth import accessible_folder_prefixes, current_user
+            from core.creators import series_credits as _series_credits
+            series_credits = _series_credits(
+                mapped_path, prefixes=accessible_folder_prefixes(current_user()))
+
         # Convert series_info to dict for JSON serialization
         series_dict = None
         if series_info:
@@ -1296,6 +1317,9 @@ def series_view(slug):
             has_series_json=has_series_json,
             char_map=load_char_map(),
             missing_line=missing_line,
+            header_banner=header_banner,
+            run=run,
+            series_credits=series_credits,
         )
     except Exception as e:
         if metron.is_connection_error(e):
