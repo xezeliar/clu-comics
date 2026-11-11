@@ -802,3 +802,66 @@ a.clu-stat:focus-visible .clu-stat-value {
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
 }
+
+/* Visible focus ring (UX polish): one ring everywhere, keyboard focus only.
+   Controls that fill with the accent (navbar, primary buttons) take the fill's
+   text colour; cover art gets white with a dark outer edge so it shows on any
+   artwork. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--clu-select, var(--bs-primary));
+  outline-offset: 2px;
+}
+.navbar :focus-visible,
+.btn-primary:focus-visible {
+  outline-color: currentColor;
+}
+.grid-item :focus-visible {
+  outline-color: #fff;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.75);
+}
+
+/* Touch shortcuts (clu-gestures.js). A held cover presses to 97%. */
+.grid-item.clu-pressing {
+  transform: scale(0.97);
+  transition: transform 0.12s ease-out;
+}
+.grid-item { -webkit-touch-callout: none; }
+@media (prefers-reduced-motion: reduce) {
+  .grid-item.clu-pressing { transition: none; }
+}
+
+/* Menus as a bottom sheet below 576px. !important beats Popper's inline
+   placement. */
+.clu-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1055;
+  background: rgba(0, 0, 0, 0.45);
+}
+.dropdown-menu.clu-sheet {
+  position: fixed !important;
+  inset: auto 0 0 0 !important;
+  transform: none !important;
+  margin: 0 !important;
+  width: 100%;
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: 1056;
+  border-radius: 1rem 1rem 0 0;
+  padding: 1.5rem 0 max(0.5rem, env(safe-area-inset-bottom));
+}
+.dropdown-menu.clu-sheet::before {
+  content: "";
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.25rem;
+  margin-left: -1.25rem;
+  border-radius: 0.125rem;
+  background: var(--bs-secondary-color);
+  opacity: 0.5;
+}
+.dropdown-menu.clu-sheet .dropdown-item {
+  padding: 0.75rem 1.5rem;
+}

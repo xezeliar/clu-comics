@@ -3482,10 +3482,40 @@ function renderBreadcrumbs(path) {
         breadcrumb.appendChild(li);
     });
 
+    collapseCrumbs(breadcrumb);
+
     // Update library header title if function exists (multi-library support)
     if (typeof updateLibraryHeaderTitle === 'function') {
         updateLibraryHeaderTitle(path);
     }
+}
+
+/**
+ * A deep path keeps the root and the last two levels and folds the middle
+ * into a "..." menu of the same links. shortcut: folds by depth (> 4 items),
+ * not by measured width.
+ */
+function collapseCrumbs(ol) {
+    const items = Array.from(ol.children);
+    if (items.length <= 4) return;
+    const middle = items.slice(1, -2);
+    const li = document.createElement('li');
+    li.className = 'breadcrumb-item dropdown';
+    li.innerHTML = '<button type="button" class="btn btn-link p-0 text-decoration-none" ' +
+        'data-bs-toggle="dropdown" aria-expanded="false" aria-label="Show hidden folders">&hellip;</button>' +
+        '<ul class="dropdown-menu"></ul>';
+    const menu = li.querySelector('ul');
+    middle.forEach(m => {
+        const a = m.querySelector('a');
+        const row = document.createElement('li');
+        if (a) {
+            a.classList.add('dropdown-item');
+            row.appendChild(a);
+        }
+        menu.appendChild(row);
+        m.remove();
+    });
+    ol.insertBefore(li, ol.children[1]);
 }
 
 /**

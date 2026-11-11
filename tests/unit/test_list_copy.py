@@ -283,3 +283,18 @@ def test_file_manager_view_buttons_are_small_secondary_and_fit_a_phone():
     assert views.count("btn btn-sm btn-outline-secondary") == 4
     assert 'Recent<span class="d-none d-sm-inline"> Files</span>' in views
     assert ".files-source-views .btn {\n    white-space: nowrap;" in _read("static/css/files.css")
+
+
+def test_no_matches_lists_suggestions(env):
+    html = _render(env, "{% from 'partials/empty_state.html' import no_matches %}"
+                        "{{ no_matches('series', query='batmn', clear_id='c', "
+                        "suggestions=[{'name': 'Batman', 'href': '/s/1'}], suggestions_hidden=True) }}")
+    assert '<a href="/s/1">Batman</a>' in html
+    assert "ignoring your filters" in html
+    assert html.index("Batman") < html.index('id="c"')
+
+
+def test_no_matches_without_suggestions_has_no_block(env):
+    html = _render(env, "{% from 'partials/empty_state.html' import no_matches %}"
+                        "{{ no_matches('series', query='zzz', clear_id='c') }}")
+    assert "clu-empty-suggest" not in html

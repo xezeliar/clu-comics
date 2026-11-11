@@ -77,6 +77,10 @@
     </td>
 </tr>
 {% else %}
+{% set sugg = [] %}
+{% for s in (suggestions or []) %}
+{% set _ = sugg.append({'name': s.name, 'href': url_for('series.series_view', slug=generate_series_slug(s.name, s.id, s.volume))}) %}
+{% endfor %}
 <tr class="pl-no-match">
     {% if load_error %}
     <td colspan="9" class="text-center text-danger py-4">{{ load_error }}</td>
@@ -84,7 +88,8 @@
     <td colspan="9" class="border-0">
         {{ no_matches('series', query=filters.q if filters else '',
                       filtered=filters and (filters.publisher_id or filters.letter or filters.status),
-                      clear_id='plClear') }}
+                      clear_id='plClear', suggestions=sugg,
+                      suggestions_hidden=filters and (filters.publisher_id or filters.letter or filters.status)) }}
     </td>
     {% endif %}
 </tr>

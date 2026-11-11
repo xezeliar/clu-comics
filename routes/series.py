@@ -551,6 +551,27 @@ def _pull_list_args():
     }
 
 
+def _pull_list_suggestions(a, today, result):
+    """Up to three Pull List series nearest to a search that matched nothing.
+
+    Searches the whole list, ignoring the other filters, so a filter that was
+    hiding the answer does not hide the suggestion. Empty when the page is not
+    empty, there is no query, or nothing is close enough.
+    """
+    if result.get("rows") or result.get("error") or not a["q"]:
+        return []
+    import difflib
+    from core.database import get_pull_list_page
+
+    q = a["q"].lower()
+    everything = get_pull_list_page(today, per_page=5000)["rows"]
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, q, r["name"].lower()).ratio(), r) for r in everything),
+        key=lambda t: -t[0],
+    )
+    return [r for score, r in scored[:3] if score >= 0.6]
+
+
 def _pull_list_filters(a):
     return {k: a[k] for k in ("q", "publisher_id", "letter", "status")}
 
@@ -581,6 +602,7 @@ def pull_list():
     return render_template(
         "pull_list.html",
         series_list=result["rows"],
+        suggestions=_pull_list_suggestions(a, today, result),
         pager=result,
         total_series=facets["total"],
         publishers=facets["publishers"],
@@ -607,6 +629,7 @@ def pull_list_rows():
     html = render_template(
         "partials/pull_list_rows.html",
         series_list=result["rows"],
+        suggestions=_pull_list_suggestions(a, today, result),
         filters=a,
     )
     return jsonify({

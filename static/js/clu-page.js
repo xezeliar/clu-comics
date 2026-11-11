@@ -108,7 +108,9 @@
  * no_matches() in empty_state.html. query is the search text; filtered says
  * another filter is narrowing the list too. onClear runs from its button
  * ("Clear search", or "Clear filters" when a filter is on) and should clear
- * every narrowing control the button names.
+ * every narrowing control the button names. suggestions: [{name, href}] (up
+ * to three, closest first) lists nearest matches above the button;
+ * suggestionsHidden says a filter was hiding them.
  */
 (function () {
     'use strict';
@@ -179,10 +181,28 @@
     CLU.noMatches = function (o) {
         var opts = o || {};
         var t = CLU.noMatchesText(opts);
-        return CLU.emptyState({
+        var el = CLU.emptyState({
             icon: t.icon, title: t.title, message: t.message, compact: opts.compact,
             actions: opts.onClear ? [{ label: t.clear, onClick: opts.onClear }] : []
         });
+        if (opts.suggestions && opts.suggestions.length) {
+            var box = document.createElement('div');
+            box.className = 'clu-empty-suggest w-100';
+            var lead = document.createElement('p');
+            lead.className = 'clu-empty-text mb-1';
+            lead.textContent = 'Closest matches' + (opts.suggestionsHidden ? ', ignoring your filters' : '') + ':';
+            var ul = document.createElement('ul');
+            ul.className = 'list-unstyled mb-2';
+            opts.suggestions.slice(0, 3).forEach(function (s) {
+                var li = document.createElement('li'), a = document.createElement('a');
+                a.href = s.href; a.textContent = s.name;
+                li.appendChild(a); ul.appendChild(li);
+            });
+            box.appendChild(lead); box.appendChild(ul);
+            var actions = el.querySelector('.clu-empty-actions');
+            el.insertBefore(box, actions);
+        }
+        return el;
     };
 })();
 

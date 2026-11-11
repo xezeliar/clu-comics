@@ -300,3 +300,14 @@ class TestCountsSqlHelper:
         from core.database import get_pull_list_facets
         create_publisher(publisher_id=30, name="Image")
         assert [p["name"] for p in get_pull_list_facets()["publishers"]] == ["DC Comics", "Marvel"]
+
+
+def test_suggestions_search_the_whole_list_ignoring_filters(library):
+    from routes.series import _pull_list_suggestions
+
+    a = {"q": "Batmn", "publisher_id": 20, "letter": "", "status": ""}
+    result = {"rows": [], "error": None}
+    got = _pull_list_suggestions(a, TODAY, result)
+    assert [r["name"] for r in got] == ["Batman"]  # DC series, though Marvel is filtered
+    assert _pull_list_suggestions({**a, "q": "qqqqqq"}, TODAY, result) == []
+    assert _pull_list_suggestions(a, TODAY, {"rows": [1], "error": None}) == []
