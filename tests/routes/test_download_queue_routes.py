@@ -67,6 +67,17 @@ def test_remove_queued(client, fake_api):
     assert client.delete("/api/download-queue/a").status_code == 404
 
 
+def test_rows_carry_retry_and_cloudflare_fields(client, fake_api):
+    fake_api.download_progress.update({
+        "cf": {"status": "error", "error": "challenge", "manual_url": "https://getcomics.org/x"},
+        "wait": {"status": "retry_pending", "retry_count": 2, "retry_at": 0, "error": "timeout"},
+    })
+    d = client.get("/api/download-queue").get_json()
+    assert d["failed"][0]["manual_url"] == "https://getcomics.org/x"
+    row = d["active"][0]
+    assert row["retry_count"] == 2 and row["retry_max"] and row["error"] == "timeout"
+
+
 def test_pause_resume(client, fake_api):
     assert client.post("/api/download-queue/pause", json={"paused": True}).get_json()["paused"]
     assert client.get("/api/download-queue").get_json()["paused"] is True
@@ -75,12 +86,12 @@ def test_pause_resume(client, fake_api):
 
 def test_page_and_roles(app, client):
     r = client.get("/download-queue")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/status#queue")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/status")
     # The test app stubs /status, so check the template that carries the tab.
     import os
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     with open(os.path.join(root, "templates", "status.html"), encoding="utf-8") as f:
-        assert 'id="queue-pane"' in f.read()
+        assert 'id="downloads-pane"' in f.read()
     assert _role(app, "/download-queue", "GET") == "clerk"
     assert _role(app, "/api/download-queue/pause", "POST") == "clerk"
 
