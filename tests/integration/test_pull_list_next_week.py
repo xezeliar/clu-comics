@@ -1,9 +1,20 @@
 """Pull List: Next issue, This week, Needs attention and the have/missing bar."""
 import pytest
 
-from tests.factories.db_factories import create_publisher, create_series, create_issue
+from tests.factories.db_factories import create_publisher, create_issue
+from tests.factories.db_factories import create_series as _create_series
 
 TODAY = "2026-11-11"  # a Wednesday: the store week is Sun 8 - Sat 14 Nov
+
+
+def create_series(**kw):
+    """A series synced today, so a never-synced flag does not hide the reason under test."""
+    from core.database import db_conn
+    sid = _create_series(**kw)
+    with db_conn() as conn:
+        conn.execute("UPDATE series SET last_synced_at = ? WHERE id = ?", (TODAY + " 09:00:00", sid))
+        conn.commit()
+    return sid
 
 
 def _mark(series_id, issue_id, number, found):
@@ -159,6 +170,11 @@ class TestAttentionAndBar:
         assert _row(2)["attention"] == "Not synced for 15 days"
         # 12 days is not stale (series 1 is flagged only for being overdue).
         assert _row(1)["attention"] == "Next issue is overdue"
+
+    def test_never_synced_needs_attention(self, pub):
+        sid = _create_series(series_id=1, name="Never", publisher_id=pub)
+        assert _row(sid)["attention"] == "Never synced"
+        assert _row(sid, attention=True)["id"] == sid
 
     def test_facet_count(self, pub):
         from core.database import get_pull_list_facets

@@ -11627,7 +11627,7 @@ def _pull_list_next_sql(today, series_ids=None):
 
 
 def _pull_list_attention_sql(today):
-    """The four reasons a series "needs attention", as EXISTS fragments over `s`."""
+    """The four reasons a series "needs attention", as SQL fragments over `s`."""
     cutoff = _shift_date(today, -PULL_LIST_NEXT_LOOKBACK_DAYS)
     overdue = _shift_date(today, -PULL_LIST_OVERDUE_DAYS)
     stale = _shift_date(today, -PULL_LIST_STALE_SYNC_DAYS)
@@ -11650,7 +11650,9 @@ def _pull_list_attention_sql(today):
         "overdue": f"""EXISTS (SELECT 1 FROM issues i {_ISSUE_STATUS_JOINS}
             WHERE i.series_id = s.id AND {_UNOWNED_SQL}
               AND i.store_date >= '{cutoff}' AND i.store_date <= '{overdue}')""",
-        "stale": f"(s.last_synced_at IS NOT NULL AND s.last_synced_at < '{stale}')",
+        # Never synced means the first sync after subscribing failed: the series
+        # has no issue list and would otherwise just read "None announced".
+        "stale": f"(s.last_synced_at IS NULL OR s.last_synced_at < '{stale}')",
     }
 
 # sqlite3 binds 64-bit integers only, so ?page=99999999999999999999 would
@@ -11805,6 +11807,8 @@ def _attention_reason(row, today):
     if row["attn_overdue"]:
         return "Next issue is overdue"
     if row["attn_stale"]:
+        if not row["last_synced_at"]:
+            return "Never synced"
         days = (datetime.strptime(today, "%Y-%m-%d")
                 - datetime.strptime(row["last_synced_at"][:10], "%Y-%m-%d")).days
         return f"Not synced for {days} days"

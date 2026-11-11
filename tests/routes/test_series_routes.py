@@ -2242,6 +2242,14 @@ class TestReleasesPublisherFilter:
 class TestPullListRedesign:
     """Next issue, This week strip and the Needs attention filter on /pull-list."""
 
+    @pytest.fixture(autouse=True)
+    def _all_synced_today(self, client_with_data):
+        # A never-synced series needs attention; keep only the reason under test.
+        from core.database import db_conn
+        with db_conn() as conn:
+            conn.execute("UPDATE series SET last_synced_at = CURRENT_TIMESTAMP")
+            conn.commit()
+
     @staticmethod
     def _issue(sid, number, store_date, issue_id):
         from tests.factories.db_factories import create_issue
