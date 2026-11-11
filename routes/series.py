@@ -483,7 +483,7 @@ PULL_LIST_PAGE_SIZES = PAGE_SIZES
 PULL_LIST_DEFAULT_PER_PAGE = DEFAULT_PER_PAGE
 # The size last picked in the select; used when the URL does not say.
 PULL_LIST_PER_PAGE_COOKIE = "clu_per_page_pull_list"
-_PULL_LIST_SORT_KEYS = ("name", "year", "status", "publisher", "issues", "collection", "synced")
+_PULL_LIST_SORT_KEYS = ("name", "year", "status", "publisher", "issues", "collection", "synced", "next")
 # Columns a user may hide, in table order, with their header labels. Series,
 # Issues and Actions always show. Stored per user (user_settings), so one
 # Clerk's layout is not everyone's.
@@ -492,6 +492,7 @@ PULL_LIST_OPTIONAL_COLUMNS = (
     ("status", "Status"),
     ("publisher", "Publisher"),
     ("collection", "Collection"),
+    ("next", "Next issue"),
     ("synced", "Last Synced"),
 )
 PULL_LIST_HIDDEN_COLUMNS_KEY = "pull_list_hidden_columns"
@@ -512,8 +513,10 @@ def _sanitize_hidden_columns(value):
 
 def _pull_list_hidden_columns():
     from core.database import get_user_setting
-    return _sanitize_hidden_columns(
-        get_user_setting(PULL_LIST_HIDDEN_COLUMNS_KEY, default=[]))
+    # Never saved: Last Synced starts hidden (Next issue took its place). Saving
+    # an empty list means "show everything", so None is checked, not falsiness.
+    saved = get_user_setting(PULL_LIST_HIDDEN_COLUMNS_KEY, default=None)
+    return ["synced"] if saved is None else _sanitize_hidden_columns(saved)
 
 
 def _pull_list_args():
@@ -544,6 +547,7 @@ def _pull_list_args():
         "publisher_id": publisher_id,
         "letter": (args.get("letter") or "").strip().upper(),
         "status": status,
+        "attention": args.get("attention") == "1",
         "sort": sort,
         "descending": bool(sort) and args.get("dir") == "desc",
         "page": page,
@@ -552,7 +556,31 @@ def _pull_list_args():
 
 
 def _pull_list_filters(a):
-    return {k: a[k] for k in ("q", "publisher_id", "letter", "status")}
+    return {k: a[k] for k in ("q", "publisher_id", "letter", "status", "attention")}
+
+
+def _week_state(item):
+    """The This week strip's state line, in the Downloads page's words."""
+    if item["found"]:
+        return "Arrived", "ok"
+    status = item["download_status"]
+    if status in ("failed", "interrupted"):
+        return "Failed", "bad"
+    if status in ("queued", "retrying"):
+        from api import download_progress
+        pct = (download_progress.get(item["download_id"]) or {}).get("progress") or 0
+        return (f"Downloading {pct}%", "") if 0 < pct < 100 else ("Waiting in Downloads", "")
+    if item["search_outcome"] == "nothing_found":
+        return "Not found", "bad"
+    return "Not searched yet", ""
+
+
+def _this_week_items(rows):
+    out = []
+    for r in rows:
+        state, tone = _week_state(r)
+        out.append(dict(r, state=state, state_tone=tone))
+    return out
 
 
 @series_bp.route("/pull-list")
@@ -564,10 +592,12 @@ def pull_list():
     (core.database.get_pull_list_page); later changes fetch
     /api/pull-list/rows, rendered from the same row partial.
     """
-    from core.database import get_pull_list_facets, get_pull_list_page
+    from core.database import (
+        get_pull_list_facets, get_pull_list_page, get_pull_list_this_week)
 
     a = _pull_list_args()
-    facets = get_pull_list_facets()
+    today = datetime.now().strftime("%Y-%m-%d")
+    facets = get_pull_list_facets(today)
     # A letter or publisher the bar no longer offers (a bookmark from before
     # the last such series was unmapped) would filter on something the page
     # shows as "All".
@@ -575,12 +605,14 @@ def pull_list():
         a["letter"] = ""
     if a["publisher_id"] not in {p["id"] for p in facets["publishers"]}:
         a["publisher_id"] = None
-    today = datetime.now().strftime("%Y-%m-%d")
     result = get_pull_list_page(today, **a)
 
     return render_template(
         "pull_list.html",
         series_list=result["rows"],
+        this_week=_this_week_items(get_pull_list_this_week(today)),
+        attention_count=facets["attention"],
+        today=today,
         pager=result,
         total_series=facets["total"],
         publishers=facets["publishers"],
@@ -608,6 +640,7 @@ def pull_list_rows():
         "partials/pull_list_rows.html",
         series_list=result["rows"],
         filters=a,
+        today=today,
     )
     return jsonify({
         "success": True,

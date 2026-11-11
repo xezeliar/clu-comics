@@ -1357,17 +1357,20 @@ class TestPullListPaging:
         TestPullListPage._register_slug_global(app)
         html = client_with_data.get("/pull-list").get_data(as_text=True)
         assert 'id="plColumnsMenu"' in html
-        for key in ("year", "status", "publisher", "collection", "synced"):
+        keys = ("year", "status", "publisher", "collection", "next", "synced")
+        for key in keys:
             assert f'id="plCol-{key}"' in html
             assert f"pl-hide-{key} [data-col=\"{key}\"]" in html
+        # Last Synced starts hidden; Next issue replaced it as a default.
         table_tag = html[html.index("<table"):html.index('id="seriesTable"')]
-        assert "pl-hide-" not in table_tag
-        assert html.count('class="form-check-input pl-col-toggle"') == 5
+        assert "pl-hide-synced" in table_tag and table_tag.count("pl-hide-") == 1
+        assert html.count('class="form-check-input pl-col-toggle"') == 6
         # Every optional cell in every row carries its column key.
         rows = html.count("data-series-id=")
-        for key in ("year", "status", "publisher", "collection", "synced"):
+        for key in keys:
             cells = (html.count(f'<td class="text-center" data-col="{key}">')
-                     + html.count(f'<td data-col="{key}">'))
+                     + html.count(f'<td data-col="{key}">')
+                     + html.count(f'<td data-col="{key}" class="text-nowrap pl-next">'))
             assert cells == rows, key
 
     def test_save_columns_hides_them_on_the_next_render(self, app, client_with_data):
@@ -2234,3 +2237,55 @@ class TestReleasesPublisherFilter:
         resp = client.post(self.ENDPOINT, json={})
         assert resp.status_code == 200
         assert resp.get_json()["publishers"] == {}
+
+
+class TestPullListRedesign:
+    """Next issue, This week strip and the Needs attention filter on /pull-list."""
+
+    @staticmethod
+    def _issue(sid, number, store_date, issue_id):
+        from tests.factories.db_factories import create_issue
+        create_issue(issue_id=issue_id, series_id=sid, number=number, store_date=store_date)
+
+    def test_this_week_strip_and_next_column(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        from datetime import date
+        today = date.today()
+        self._issue(100, "77", today.isoformat(), 7777)
+        html = client_with_data.get("/pull-list").get_data(as_text=True)
+        assert 'id="plWeekTitle"' in html
+        assert "Batman #77" in html
+        assert 'data-sort="next"' in html
+        assert "#77 · Today" in html
+        # Wording shared with the Downloads page.
+        assert "Not searched yet" in html
+
+    def test_no_strip_when_nothing_is_out_this_week(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        html = client_with_data.get("/pull-list").get_data(as_text=True)
+        assert 'id="plWeekTitle"' not in html
+
+    def test_attention_filter_and_empty_state(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        from datetime import date, timedelta
+        old = (date.today() - timedelta(days=10)).isoformat()
+        self._issue(100, "5", old, 5555)
+        html = client_with_data.get("/pull-list?attention=1").get_data(as_text=True)
+        assert html.count("data-series-id=") == 1 and 'data-series-id="100"' in html
+        assert "Next issue is overdue" in html
+        assert 'aria-pressed="true"' in html
+        data = client_with_data.get("/api/pull-list/rows?attention=1").get_json()
+        assert data["total"] == 1
+        assert client_with_data.get("/api/pull-list/ids?attention=1").get_json()["ids"] == [100]
+
+    def test_attention_empty_state_only_when_that_filter_empties_it(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        html = client_with_data.get("/api/pull-list/rows?attention=1").get_json()["html"]
+        assert "Nothing needs attention" in html
+        html = client_with_data.get("/api/pull-list/rows?attention=1&q=zzz").get_json()["html"]
+        assert "Nothing needs attention" not in html
+        assert "No series match" in html
+
+    def test_wanted_accepts_a_series_preset(self, app, client_with_data):
+        html = client_with_data.get("/wanted?q=Batman").get_data(as_text=True)
+        assert "new URLSearchParams(location.search).get('q')" in html
