@@ -474,15 +474,16 @@ WHATS_NEW_ITEMS = [
     "Settings has a search box that filters by label.",
 ]
 CHANGELOG_URL = "https://github.com/allaboutduncan/clu-comics/releases"
+WHATS_NEW_KEY = "whats_new_dismissed"  # a user_settings key, per user
 
 
 @collection_bp.route('/api/whats-new')
 def api_whats_new():
-    """The "What's new" card; visible until this version's card is dismissed."""
-    from core.settings import get_setting
+    """The "What's new" card; visible until this user dismisses this version's card."""
+    from core.database import get_user_setting_override
     from core.version import __version__
     return jsonify({
-        "visible": get_setting("WHATS_NEW_DISMISSED") != __version__,
+        "visible": get_user_setting_override(WHATS_NEW_KEY) != __version__,
         "version": __version__,
         "items": WHATS_NEW_ITEMS[:3],
         "changelog_url": CHANGELOG_URL,
@@ -491,9 +492,10 @@ def api_whats_new():
 
 @collection_bp.route('/api/whats-new/dismiss', methods=['POST'])
 def api_whats_new_dismiss():
-    from core.settings import set_setting
+    """Per user: one reader dismissing the card must not hide it for everyone."""
+    from core.database import set_user_setting
     from core.version import __version__
-    return jsonify({"success": set_setting("WHATS_NEW_DISMISSED", __version__)})
+    return jsonify({"success": set_user_setting(WHATS_NEW_KEY, __version__)})
 
 
 @collection_bp.route('/api/browse')

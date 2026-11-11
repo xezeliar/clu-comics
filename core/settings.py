@@ -43,7 +43,6 @@ SETTINGS_SCHEMA = {
     # Home-page setup checklist hidden for good (Dismiss on the card).
     "ONBOARDING_DISMISSED": _s("onboarding_dismissed", _B, False, "system"),
     # Version whose "What's new" card was dismissed on Home ("" = never).
-    "WHATS_NEW_DISMISSED": _s("whats_new_dismissed", _S, "", "system"),
     "AUTOCONVERT": _s("autoconvert", _B, False, "file_processing"),
     "AUTO_COMPRESS": _s("auto_compress", _B, False, "file_processing"),
     # How hard Compress squeezes a CBZ: full | balanced | small (cbz_ops.compress.LEVELS).
