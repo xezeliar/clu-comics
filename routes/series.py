@@ -585,6 +585,7 @@ def pull_list():
         total_series=facets["total"],
         publishers=facets["publishers"],
         letters=facets["letters"],
+        new_arrivals=facets["new_arrivals"],
         filters=a,
         hidden_columns=_pull_list_hidden_columns(),
         optional_columns=PULL_LIST_OPTIONAL_COLUMNS,
@@ -1274,6 +1275,12 @@ def series_view(slug):
                 os.path.join(mapped_path, SERIES_JSON_FILENAME)
             )
 
+        # Opening the series page clears this user's "new" sticker; the
+        # issues that arrived since their last visit stay available to the
+        # page (for the header's run strip).
+        from core.database import mark_series_visited
+        arrived_paths = mark_series_visited(mapped_path) if mapped_path else []
+
         from core.series_status import year_ended_label
 
         return render_template(
@@ -1296,6 +1303,7 @@ def series_view(slug):
             has_series_json=has_series_json,
             char_map=load_char_map(),
             missing_line=missing_line,
+            arrived_paths=arrived_paths,
         )
     except Exception as e:
         if metron.is_connection_error(e):

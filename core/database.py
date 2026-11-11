@@ -173,6 +173,10 @@ def _rebuild_add_user_scope(c, table, new_table_sql, new_cols, index_sqls):
         c.execute(isql)
 
 
+# user_preferences key: nothing indexed before this moment is a new arrival.
+NEW_ARRIVALS_EPOCH_KEY = "new_arrivals_epoch"
+
+
 def init_db():
     """Initialize the SQLite database and create tables if they don't exist.
 
@@ -1144,6 +1148,27 @@ def _init_db_locked():
                 PRIMARY KEY (folder_path, kind)
             )
         """)
+
+        # "New issue arrived" badge: when each user last opened each series
+        # folder. The arrival itself is file_index.first_indexed_at, recorded
+        # once per file; see get_new_arrival_counts. previous_visited_at is the
+        # visit before the one that last saw new files, so the series page can
+        # still show which issues arrived after the badge clears.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS series_visits (
+                user_id INTEGER NOT NULL,
+                folder_path TEXT NOT NULL,
+                visited_at REAL NOT NULL,
+                previous_visited_at REAL,
+                PRIMARY KEY (user_id, folder_path)
+            )
+        """)
+        # Nothing indexed before the feature existed counts as new.
+        c.execute(
+            "INSERT OR IGNORE INTO user_preferences (key, value, category) "
+            "VALUES (?, ?, 'internal')",
+            (NEW_ARRIVALS_EPOCH_KEY, repr(time.time())),
+        )
 
         # Create reading_positions table (save reading position for comics).
         # Shape matches the post-migration table produced by
@@ -3751,6 +3776,23 @@ def save_file_index_to_db(file_index):
 
             c = conn.cursor()
 
+            # A rebuild is not an arrival: keep each known path's first-indexed
+            # time, or every series would read as "new" afterwards. On a first
+            # build there is nothing to keep, so the epoch moves up instead.
+            c.execute(
+                "SELECT path, first_indexed_at FROM file_index "
+                "WHERE first_indexed_at IS NOT NULL"
+            )
+            known = dict(c.fetchall())
+            if known:
+                records = [r[:-1] + (known.get(r[1], current_time),) for r in records]
+            else:
+                c.execute(
+                    "INSERT OR REPLACE INTO user_preferences (key, value, category) "
+                    "VALUES (?, ?, 'internal')",
+                    (NEW_ARRIVALS_EPOCH_KEY, repr(current_time)),
+                )
+
             # Clear existing index
             c.execute("DELETE FROM file_index")
             conn.commit()
@@ -4028,7 +4070,8 @@ def set_directory_has_thumbnail(path, has_thumbnail=True):
 
 
 def add_file_index_entry(
-    name, path, entry_type, size=None, parent=None, has_thumbnail=0, modified_at=None
+    name, path, entry_type, size=None, parent=None, has_thumbnail=0, modified_at=None,
+    first_indexed_at=None,
 ):
     """
     Add a new entry to the file index.
@@ -4041,6 +4084,10 @@ def add_file_index_entry(
         parent: Parent directory path (optional)
         has_thumbnail: 1 if directory has folder.png/jpg, 0 otherwise (optional)
         modified_at: Modification timestamp (optional)
+        first_indexed_at: carry an existing arrival time over (a conversion
+            or a rescan re-adds a row for a file that did not arrive). Set
+            even when the row already exists: the file watcher can index the
+            new path first, with "now".
 
     Returns:
         True if successful, False otherwise
@@ -4065,7 +4112,8 @@ def add_file_index_entry(
                     size = excluded.size,
                     parent = excluded.parent,
                     has_thumbnail = excluded.has_thumbnail,
-                    modified_at = excluded.modified_at
+                    modified_at = excluded.modified_at,
+                    first_indexed_at = COALESCE(?, file_index.first_indexed_at)
             """,
                 (
                     name,
@@ -4075,7 +4123,8 @@ def add_file_index_entry(
                     parent,
                     has_thumbnail,
                     modified_at,
-                    time.time(),
+                    first_indexed_at or time.time(),
+                    first_indexed_at,
                 ),
             )
 
@@ -4214,6 +4263,155 @@ def _like_prefix(path):
     """
     escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"{escaped}/%"
+
+
+#########################
+#   New arrivals        #
+#########################
+#
+# The "New issue arrived" badge. An arrival is recorded once, as the file's
+# file_index.first_indexed_at: a download filed into a library, a WATCH move
+# landing there (the file watcher indexes it -- monitor.py needs no hook) and a
+# scan that finds a new path all insert a fresh row. A rename keeps its row
+# (move_indexed_path), a metadata write upserts it, and a conversion, a folder
+# rescan and a full rebuild carry the old time over. Per user there is only a
+# series_visits row per folder, written when that user opens it.
+
+_ARRIVAL_COMIC_SQL = "f.type = 'file' AND (f.name LIKE '%.cbz' OR f.name LIKE '%.cbr')"
+
+# A series row (alias s) with comics in its folder newer than the user's last
+# visit. Placeholders: user id, arrivals floor.
+_NEW_ARRIVAL_SERIES_SQL = (
+    "EXISTS (SELECT 1 FROM file_index f LEFT JOIN series_visits v "
+    "ON v.user_id = ? AND v.folder_path = f.parent "
+    f"WHERE f.parent = s.mapped_path AND {_ARRIVAL_COMIC_SQL} "
+    "AND f.first_indexed_at > COALESCE(v.visited_at, ?))"
+)
+
+
+def _arrivals_floor(c, uid):
+    """Nothing indexed before this counts as new for *uid*: the feature's
+    epoch, or the user's creation if later (a new reader is not shown the
+    whole library as new)."""
+    c.execute("SELECT value FROM user_preferences WHERE key = ?", (NEW_ARRIVALS_EPOCH_KEY,))
+    row = c.fetchone()
+    floor = float(row[0]) if row else 0.0
+    c.execute("SELECT CAST(strftime('%s', created_at) AS REAL) FROM users WHERE id = ?", (uid,))
+    row = c.fetchone()
+    return max(floor, row[0]) if row and row[0] else floor
+
+
+def new_arrival_params(user_id=None):
+    """(user id, floor): the two placeholders of _NEW_ARRIVAL_SERIES_SQL."""
+    uid = _resolve_user_id(user_id)
+    try:
+        with db_conn() as conn:
+            return uid, (_arrivals_floor(conn.cursor(), uid) if conn else time.time())
+    except Exception as e:
+        app_logger.error(f"Failed to read new-arrivals floor: {e}")
+        return uid, time.time()
+
+
+def get_first_indexed_times(path):
+    """{path: first_indexed_at} for *path* and everything under it, so a
+    re-add (conversion, rescan) can carry the arrival time over."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return {}
+            c = conn.cursor()
+            c.execute(
+                "SELECT path, first_indexed_at FROM file_index "
+                "WHERE (path = ? OR path LIKE ? ESCAPE '\\') AND first_indexed_at IS NOT NULL",
+                (path, _like_prefix(path)),
+            )
+            return {r[0]: r[1] for r in c.fetchall()}
+    except Exception as e:
+        app_logger.error(f"Failed to read first-indexed times under {path}: {e}")
+        return {}
+
+
+def get_new_arrival_counts(folder_paths, user_id=None):
+    """{folder: comics that arrived since this user last opened it}.
+
+    Folders with none are left out. Counts direct children only: the series
+    folder is the one that holds the issues.
+    """
+    paths = list(folder_paths)
+    if not paths:
+        return {}
+    uid = _resolve_user_id(user_id)
+    out = {}
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return {}
+            c = conn.cursor()
+            floor = _arrivals_floor(c, uid)
+            for i in range(0, len(paths), 500):
+                chunk = paths[i:i + 500]
+                c.execute(
+                    "SELECT f.parent, COUNT(*) FROM file_index f "
+                    "LEFT JOIN series_visits v ON v.user_id = ? AND v.folder_path = f.parent "
+                    f"WHERE f.parent IN ({_in_placeholders(chunk)}) AND {_ARRIVAL_COMIC_SQL} "
+                    "AND f.first_indexed_at > COALESCE(v.visited_at, ?) GROUP BY f.parent",
+                    [uid] + chunk + [floor],
+                )
+                out.update({r[0]: r[1] for r in c.fetchall()})
+    except Exception as e:
+        app_logger.error(f"Failed to count new arrivals: {e}")
+    return out
+
+
+def mark_series_visited(folder_path, user_id=None):
+    """Clear this user's "new" badge for *folder_path* and return the comic
+    paths that arrived since their last visit.
+
+    The returned set survives the clear: previous_visited_at only moves when
+    this visit found something new, so reloading the series page keeps
+    showing the batch that arrived (the series header's run strip dots them).
+    """
+    if not folder_path:
+        return []
+    uid = _resolve_user_id(user_id)
+    now = time.time()
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return []
+            c = conn.cursor()
+            floor = _arrivals_floor(c, uid)
+            c.execute(
+                "SELECT visited_at, previous_visited_at FROM series_visits "
+                "WHERE user_id = ? AND folder_path = ?",
+                (uid, folder_path),
+            )
+            row = c.fetchone()
+            since = max(row[0], floor) if row else floor
+            c.execute(
+                f"SELECT 1 FROM file_index f WHERE f.parent = ? AND {_ARRIVAL_COMIC_SQL} "
+                "AND f.first_indexed_at > ? LIMIT 1",
+                (folder_path, since),
+            )
+            fresh = c.fetchone() is not None
+            previous = since if fresh or not row or row[1] is None else row[1]
+            c.execute(
+                "INSERT INTO series_visits (user_id, folder_path, visited_at, previous_visited_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, folder_path) DO UPDATE SET "
+                "visited_at = excluded.visited_at, "
+                "previous_visited_at = excluded.previous_visited_at",
+                (uid, folder_path, now, previous),
+            )
+            conn.commit()
+            c.execute(
+                f"SELECT f.path FROM file_index f WHERE f.parent = ? AND {_ARRIVAL_COMIC_SQL} "
+                "AND f.first_indexed_at > ? ORDER BY f.name",
+                (folder_path, previous),
+            )
+            return [r[0] for r in c.fetchall()]
+    except Exception as e:
+        app_logger.error(f"Failed to record series visit for {folder_path}: {e}")
+        return []
 
 
 def _prune_vanished_files_outside_roots():
@@ -10768,6 +10966,15 @@ def move_path_references(old_path, new_path, is_dir=False, conn=None):
                  old_path, _like_prefix(old_path)),
             )
             moved += c.rowcount
+            # The "new arrivals" visits are keyed the same way.
+            c.execute(
+                "UPDATE OR REPLACE series_visits SET folder_path = "
+                "CASE WHEN folder_path = ? THEN ? ELSE ? || SUBSTR(folder_path, ?) END "
+                "WHERE folder_path = ? OR folder_path LIKE ? ESCAPE '\\'",
+                (old_path, new_path, new_path, len(old_path) + 1,
+                 old_path, _like_prefix(old_path)),
+            )
+            moved += c.rowcount
 
         if owns_conn:
             conn.commit()
@@ -11565,6 +11772,8 @@ _PULL_LIST_ROW_STATUS_SQL = """
 """
 
 PULL_LIST_STATUSES = ("complete", "missing", "upcoming", "unmonitored")
+# Not a row status: series with issues filed since this user last opened them.
+PULL_LIST_NEW_ARRIVALS = "new"
 
 # Sort keys the page offers -> ORDER BY expression. Every order ends on name,
 # start year and id, so a page boundary never splits ties differently between
@@ -11698,6 +11907,9 @@ def _pull_list_where(q="", publisher_id=None, letter="", status=""):
         clauses.append(f"({_PULL_LIST_ROW_STATUS_SQL}) = ?")
         params.append(status)
         needs_counts = True
+    elif status == PULL_LIST_NEW_ARRIVALS:
+        clauses.append(_NEW_ARRIVAL_SERIES_SQL)
+        params.extend(new_arrival_params())
 
     return " AND ".join(clauses), params, needs_counts
 
@@ -11831,9 +12043,10 @@ def get_pull_list_facets():
 
     Returns {"total": mapped series, "letters": first letters present (with
     "#" for anything outside A-Z), "publishers": [{id, name}] that have at
-    least one mapped series}.
+    least one mapped series, "new_arrivals": series with issues filed since
+    the current user last opened them}.
     """
-    out = {"total": 0, "letters": [], "publishers": []}
+    out = {"total": 0, "letters": [], "publishers": [], "new_arrivals": 0}
     try:
         with db_conn() as conn:
             if not conn:
@@ -11860,6 +12073,11 @@ def get_pull_list_facets():
                 """
             )
             out["publishers"] = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
+            cur.execute(
+                f"SELECT COUNT(*) FROM series s WHERE {mapped} AND {_NEW_ARRIVAL_SERIES_SQL}",
+                new_arrival_params(),
+            )
+            out["new_arrivals"] = cur.fetchone()[0]
     except Exception as e:
         app_logger.error(f"Failed to get pull list facets: {e}")
     return out

@@ -108,7 +108,7 @@
                 {{ per_page_select('plPerPage', pager.per_page, sizes=page_sizes, default=default_per_page) }}
             </div>
         </div>
-        {% set _st = filters.status if filters.status in ['complete', 'missing', 'upcoming', 'unmonitored'] else '' %}
+        {% set _st = filters.status if filters.status in ['complete', 'missing', 'upcoming', 'unmonitored', 'new'] else '' %}
         <div class="clu-toolbar-row">
             {{ filter_bar('statusFilter', [
                 ('', 'All'),
@@ -116,6 +116,7 @@
                 {'value': 'missing', 'label': 'Missing', 'icon': 'bi-square-fill', 'icon_class': 'text-danger'},
                 {'value': 'upcoming', 'label': 'Upcoming', 'icon': 'bi-square-fill', 'icon_class': 'text-info'},
                 {'value': 'unmonitored', 'label': 'Not monitored', 'icon': 'bi-square-fill', 'icon_class': 'text-secondary'},
+                {'value': 'new', 'label': 'New arrivals', 'count': new_arrivals},
             ], active=_st, label='Status') }}
         </div>
         <div class="clu-toolbar-row">
