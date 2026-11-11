@@ -1,11 +1,10 @@
 /* Series page header (templates/series.html).
    The banner is a strip with nothing on it; the title stays the page's
    page_header h1. Owned cells and the ring use the selection colour
-   (collection.css --clu-select, falling back to primary where that sheet is
-   not loaded). */
+   (--clu-select from clu-page.css, loaded on every page). */
 
 .series-header {
-    --sh-select: var(--clu-select, var(--bs-primary));
+    --sh-select: var(--clu-select);
     margin-bottom: 1.5rem;
 }
 

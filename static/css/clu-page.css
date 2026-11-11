@@ -802,3 +802,24 @@ a.clu-stat:focus-visible .clu-stat-value {
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
 }
+
+/* Selection colours.
+   --clu-select is an outline: the theme's primary pushed 30% toward its
+   emphasis colour (black on light themes, white on dark), so it stands off the
+   page on either.
+   --clu-select-fill carries white ink (the check, the drop label), so it is
+   always pushed toward black - pushing it toward white on a dark theme would
+   leave Cyborg's or Solar's white check at about 2:1.
+   Plain primary first: a custom property holding an unsupported color-mix()
+   is not discarded at parse time, it is invalid wherever it is used. */
+:root {
+    --clu-select: var(--bs-primary);
+    --clu-select-fill: var(--bs-primary);
+}
+
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+    :root {
+        --clu-select: color-mix(in srgb, var(--bs-primary) 70%, var(--bs-emphasis-color));
+        --clu-select-fill: color-mix(in srgb, var(--bs-primary) 70%, #000);
+    }
+}
