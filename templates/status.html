@@ -106,6 +106,23 @@
       </div>
     </div>
   </div>
+  <div class="modal fade" id="dlCancelModal" tabindex="-1" aria-labelledby="dlCancelTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="dlCancelTitle">Cancel this download?</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-0"><span id="dlCancelName" class="font-monospace"></span> stops now and its partial file is deleted. This can't be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Keep downloading</button>
+          <button type="button" class="btn btn-danger" id="dlCancelConfirm">Cancel download</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
@@ -467,9 +484,26 @@
       });
     }
 
-    // Cancel, Remove, Dismiss and Clear act at once. There is no Undo: the
-    // server forgets the entry (and a cancel deletes the partial file), so
-    // nothing could put it back.
+    // There is no Undo: the server forgets the entry, so nothing could put it
+    // back. Remove, Dismiss and Clear act at once; Cancel asks first, because
+    // it also deletes a running download's partial file.
+    function confirmCancel(row) {
+      const el = document.getElementById('dlCancelModal');
+      const yes = document.getElementById('dlCancelConfirm');
+      document.getElementById('dlCancelName').textContent = row.name;
+      const modal = bootstrap.Modal.getOrCreateInstance(el);
+      return new Promise(resolve => {
+        let ok = false;
+        const onYes = () => { ok = true; modal.hide(); };
+        yes.addEventListener('click', onYes, { once: true });
+        el.addEventListener('hidden.bs.modal', () => {
+          yes.removeEventListener('click', onYes);
+          resolve(ok);
+        }, { once: true });
+        modal.show();
+      });
+    }
+
     const DL_ACTIONS = {
       pause: () => dlCall(DL.pause, 'POST', { paused: !dlPaused }).then(ok => {
         if (ok) dlSay(dlPaused ? 'Queue resumed.' : 'Queue paused.');
@@ -478,7 +512,9 @@
       waitall: () => { dlShowAllWait = true; },
       up: row => moveWaiting(row, -1),
       down: row => moveWaiting(row, 1),
-      cancel: row => dlCall(dlUrl(DL.cancel, row.id)).then(ok => { if (ok) CLU.toast(`${row.name} cancelled.`, 'success'); }),
+      cancel: row => confirmCancel(row).then(yes => yes && dlCall(dlUrl(DL.cancel, row.id)).then(ok => {
+        if (ok) CLU.toast(`${row.name} cancelled.`, 'success');
+      })),
       remove: row => dlCall(dlUrl(DL.remove, row.id), 'DELETE').then(ok => {
         if (ok) CLU.toast(`${row.name} removed from the queue.`, 'success');
       }),

@@ -65,3 +65,11 @@ class TestBucketNamesMatchTheServer:
         assert "complete_no_move" in CLIENT_COMPLETED_STATUSES
         assert "complete_no_move" not in CLIENT_FAILED_STATUSES
         assert CLIENT_COMPLETED_STATUSES.isdisjoint(CLIENT_FAILED_STATUSES)
+
+
+def test_cancel_asks_first_in_a_modal():
+    """Cancel deletes a running download's partial file and has no Undo."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[2].joinpath("templates", "status.html").read_text()
+    assert 'id="dlCancelModal"' in src
+    assert "cancel: row => confirmCancel(row)" in src
