@@ -47,10 +47,21 @@ class TestDeriveState:
                          progress={"status": "in_progress", "progress": 64})
         assert (s["code"], s["label"]) == ("downloading", "Downloading 64%")
 
-    @pytest.mark.parametrize("status", ["failed", "interrupted", "cancelled"])
+    @pytest.mark.parametrize("status", ["failed", "interrupted"])
     def test_failed_download(self, status):
         s = derive_state({"outcome": "queued", "download_status": status, "detail": "404"})
         assert (s["code"], s["label"], s["detail"]) == ("failed", "Failed", "404")
+
+    def test_cancelled_is_searchable_again_not_failed(self):
+        s = derive_state({"outcome": "queued", "download_status": "cancelled"})
+        assert (s["code"], s["label"]) == ("not_searched", "Cancelled")
+
+    def test_search_info_is_carried(self):
+        s = derive_state({"outcome": "no_match", "search_info": '{"sources": ["getcomics"]}'})
+        assert s["search"] == {"sources": ["getcomics"]}
+
+    def test_unreadable_search_info_is_dropped(self):
+        assert "search" not in derive_state({"outcome": "no_match", "search_info": "{oops"})
 
     def test_downloaded_but_not_filed_is_not_searched_again(self):
         assert derive_state({"outcome": "queued", "download_status": "complete"})["code"] == "waiting"
@@ -72,6 +83,14 @@ class TestIssueStates:
         assert states[(1, "4")]["detail"] == "closest: 2019 series"
         assert states[(1, "4")]["when"] == "2026-11-10 03:05:00"
         assert states[(1, "5")]["code"] == "failed"
+
+    def test_search_info_reaches_the_state(self, db_connection):
+        run = _run(db_connection)
+        _item(db_connection, run, 1, "4", "no_match")
+        db_connection.execute("UPDATE download_run_items SET search_info = ?",
+                              ('{"sources": ["getcomics"], "queries": [], "nearest": null}',))
+        db_connection.commit()
+        assert issue_states()[(1, "4")]["search"]["sources"] == ["getcomics"]
 
     def test_a_capped_run_counts_only_the_items_it_lists(self, db_connection):
         run = _run(db_connection, truncated=1)
@@ -180,3 +199,20 @@ class TestWantedSearch:
         finally:
             app_state.release_getcomics_sweep(scope)
         assert resp.status_code == 409
+
+
+class TestWhyPanelTemplate:
+    """Provider strings reach the page as text only."""
+
+    def _panel(self):
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "wanted.html")
+        src = open(path, encoding="utf-8").read()
+        start = src.index("function whyPanel")
+        return src[start:src.index("function checkbox", start)]
+
+    def test_renders_search_info_without_innerhtml(self):
+        panel = self._panel()
+        for key in ("q.sources", "q.queries", "q.nearest"):
+            assert key in panel
+        assert "innerHTML" not in panel and "insertAdjacentHTML" not in panel

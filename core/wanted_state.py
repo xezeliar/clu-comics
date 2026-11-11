@@ -10,13 +10,14 @@ Ignore is the existing ``issue_manual_status`` row with status ``skipped``,
 which the wanted cache, the sweep and the series counts already subtract.
 """
 
+import json
 from collections import defaultdict
 
 from core.app_logging import app_logger
 from core.database import db_conn
 
 _QUEUED = ("queued", "duplicate")
-_FAILED = ("failed", "interrupted", "cancelled")
+_FAILED = ("failed", "interrupted")
 _DOWNLOADED = ("complete", "complete_no_move")
 
 
@@ -33,8 +34,17 @@ def derive_state(row, tries=0, progress=None):
         "detail": row.get("detail"),
         "when": row.get("when"),
     }
+    try:
+        info = json.loads(row["search_info"]) if row.get("search_info") else None
+    except (TypeError, ValueError):
+        info = None
+    if isinstance(info, dict):
+        base["search"] = info
     status = row.get("download_status")
     if row.get("outcome") in _QUEUED:
+        if status == "cancelled":
+            # The user cancelled it: searchable again, not a failure.
+            return dict(base, code="not_searched", label="Cancelled")
         if status in _FAILED:
             return dict(base, code="failed", label="Failed")
         if status in _DOWNLOADED:
@@ -61,7 +71,8 @@ def issue_states():
             rows = conn.execute(
                 """
                 SELECT d.series_id, d.issue_number, d.outcome, d.provider, d.detail,
-                       d.download_id, d.download_status, d.updated_at AS "when", t.tries
+                       d.download_id, d.download_status, d.updated_at AS "when", t.tries,
+                       d.search_info
                 FROM download_run_items d
                 JOIN (SELECT MAX(id) AS id,
                              SUM(outcome NOT IN ('queued', 'duplicate')) AS tries

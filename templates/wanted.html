@@ -565,11 +565,28 @@
         function whyPanel(it, id) {
             const s = it.state, dl = el('dl', 'wanted-why');
             dl.id = id;
-            if (s.code === 'not_searched') {
+            if (s.code === 'not_searched' && !s.when) {
                 dl.append(el('dt', null, 'Searched'), el('dd', null, 'Not yet. The next run or Search looks for it.'));
             } else if (s.code !== 'ignored') {
                 dl.append(el('dt', null, 'Searched'),
                     el('dd', null, [s.provider, day(s.when)].filter(Boolean).join(' · ') || 'Yes'));
+                const q = s.search || {};
+                if (Array.isArray(q.sources) && q.sources.length) {
+                    dl.append(el('dt', null, 'Sources tried'), el('dd', null, q.sources.join(', ')));
+                }
+                if (Array.isArray(q.queries) && q.queries.length) {
+                    const ul = el('ul', 'list-unstyled mb-0 small font-monospace');
+                    q.queries.forEach(x => ul.appendChild(el('li', null,
+                        (q.sources.length > 1 ? x.source + ': ' : '') + x.query)));
+                    const dd = el('dd');
+                    dd.appendChild(ul);
+                    dl.append(el('dt', null, 'Searched for'), dd);
+                }
+                if (q.nearest) {
+                    const n = q.nearest;
+                    dl.append(el('dt', null, 'Nearest rejected'), el('dd', null,
+                        n.title + ' (score ' + n.score + ')' + (n.reason ? ': ' + n.reason : '')));
+                }
                 dl.append(el('dt', null, s.code === 'not_found' ? 'Closest result' : 'Result'),
                     el('dd', null, s.detail || (s.code === 'not_found'
                         ? 'Nothing close enough to show. The issue may not be posted yet, or it is listed under another name.'

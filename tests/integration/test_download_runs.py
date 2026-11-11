@@ -5,6 +5,7 @@ easiest simplification to make and the one that turns a report into the largest
 table in the database.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -97,6 +98,13 @@ class TestRecording:
         got = dr.get_run(run.run_id)
         assert got["scope"] == "Batman"
         assert got["trigger"] == dr.TRIGGER_SERIES
+
+    def test_search_info_is_written(self, store):
+        run = dr.start_run(dr.KIND_GETCOMICS)
+        _item(run, 1, search_info=dr.search_info([("getcomics", ["Batman 1"], [])]))
+        run.finish()
+        row = store.execute("SELECT search_info FROM download_run_items").fetchone()
+        assert json.loads(row[0])["queries"] == [{"source": "getcomics", "query": "Batman 1"}]
 
     def test_long_detail_is_clipped(self, store):
         run = dr.start_run(dr.KIND_GETCOMICS)
@@ -274,3 +282,47 @@ class TestReadSide:
     def test_list_read_failure_is_none_not_empty(self):
         with patch("core.database.get_db_connection", side_effect=RuntimeError("boom")):
             assert dr.list_runs() is None
+
+
+class TestSearchInfo:
+    def test_nothing_tried_is_none(self):
+        assert dr.search_info([]) is None
+
+    def test_keeps_sources_queries_and_the_best_reject(self):
+        info = json.loads(dr.search_info([
+            ("usenet", None, [{"title": "Batman 4 (1940)", "score": 30, "decision": "REJECT"}]),
+            ("getcomics", ["Batman 2016 4", "Batman 4"], [
+                {"title": "Batman #4 (2016)", "score": 90, "decision": "ACCEPT"},
+                {"title": "Batman #5 (2016)", "score": 55, "decision": "REJECT",
+                 "reason": "wrong issue"},
+            ]),
+        ]))
+        assert info["sources"] == ["usenet", "getcomics"]
+        assert [q["query"] for q in info["queries"]] == ["Batman 2016 4", "Batman 4"]
+        assert info["nearest"] == {"source": "getcomics", "title": "Batman #5 (2016)",
+                                   "score": 55, "reason": "wrong issue"}
+
+    def test_is_bounded(self):
+        info = json.loads(dr.search_info([
+            ("getcomics", ["q" * 1000] * 50,
+             [{"title": "t" * 5000, "score": 1, "decision": "REJECT", "reason": "r" * 5000}]),
+        ]))
+        assert len(info["queries"]) == dr.SEARCH_INFO_QUERIES
+        assert all(len(q["query"]) <= 160 for q in info["queries"])
+        assert len(info["nearest"]["title"]) <= 200 and len(info["nearest"]["reason"]) <= 200
+
+
+class TestSearchInfoMigration:
+    def test_an_old_table_gains_the_column(self, store):
+        from core.database import init_db
+
+        store.execute("DROP TABLE download_run_items")
+        store.execute("CREATE TABLE download_run_items (id INTEGER PRIMARY KEY,"
+                      " run_id INTEGER NOT NULL, series_id INTEGER, series_name TEXT,"
+                      " issue_number TEXT, source TEXT, provider TEXT, outcome TEXT NOT NULL,"
+                      " detail TEXT, download_id TEXT, download_status TEXT,"
+                      " updated_at TIMESTAMP)")
+        store.commit()
+        init_db()
+        cols = [r[1] for r in store.execute("PRAGMA table_info(download_run_items)")]
+        assert "search_info" in cols

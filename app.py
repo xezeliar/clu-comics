@@ -1301,12 +1301,14 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             ),
         )
 
-    def _record(item, outcome, provider="getcomics", detail=None, download_id=None):
+    def _record(item, outcome, provider="getcomics", detail=None, download_id=None,
+                search_info=None):
         """One searched issue's outcome, for the run report."""
         run.item(
             item["series_name"], item["issue_num"], outcome,
             series_id=item.get("series_id"), source=item.get("source"),
             provider=provider, detail=detail, download_id=download_id,
+            search_info=search_info,
         )
 
     try:
@@ -1688,6 +1690,9 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 # the fallback sources below have had their turn -- an issue a
                 # fallback found must not also be reported as not found.
                 gc_miss = None
+                # (source, queries, scored candidates) per source tried, for
+                # the miss record's search_info ("Why not found").
+                tried = []
                 for src_name, src_label, src_try in pre_sources:
                     u = src_try(
                         series_name, issue_num,
@@ -1699,6 +1704,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                         series_aliases=series_aliases,
                         dry_run=bool(dry_run),
                     )
+                    tried.append((src_name, None, u.get("all_results")))
                     if dry_run and u.get("status") == "match_found":
                         simulation_results.append({
                             "series": series_name,
@@ -1753,6 +1759,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 # nothing about the issue. Read the flag before `or []`
                 # replaces the object that carries it.
                 search_failed = bool(getattr(results, "failed", False))
+                gc_queries = list(getattr(results, "queries", ()))
                 results = results or []
 
                 if not results:
@@ -1831,6 +1838,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 refine_year = issue_year or series_year
                 if accept_count > 1 and refine_year:
                     refined_query = f"{series_name} {issue_num} {refine_year}"
+                    gc_queries.append(refined_query)
                     app_logger.info(
                         f"Multiple ACCEPT matches ({accept_count}) for {series_name} #{issue_num} "
                         f"— refining with year: {refined_query} {search_context}"
@@ -1887,6 +1895,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             f"Refinement did not improve match — keeping original best ACCEPT {search_context}"
                         )
 
+                tried.append(("getcomics", gc_queries, scored_results))
                 chosen = best_accept or best_fallback
                 if chosen:
                     best_result, best_score = chosen
@@ -2197,6 +2206,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             search_variants=search_variants,
                             series_aliases=series_aliases,
                         )
+                        tried.append((src_name, None, u.get("all_results")))
                         if u.get("submitted"):
                             download_count += 1
                             app_logger.info(
@@ -2215,7 +2225,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             break
 
                 if gc_miss:
-                    _record(item, gc_miss[0], detail=gc_miss[1])
+                    _record(item, gc_miss[0], detail=gc_miss[1],
+                            search_info=download_runs.search_info(tried))
                     if attempt_outcome is None:
                         attempt_outcome = (
                             "search_error" if search_failed and not results
