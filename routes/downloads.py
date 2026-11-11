@@ -945,6 +945,42 @@ def api_check_series_missing(series_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@downloads_bp.route('/api/wanted/search', methods=['POST'])
+def api_wanted_search():
+    """Search the configured sources for issues picked on the Wanted page.
+
+    The same pass as the series check, narrowed to exactly these issues
+    (``only_issues``). The page sends only Not found and Not searched issues;
+    failed downloads are retried from Downloads.
+    """
+    from core.wanted_state import parse_issues
+
+    issues = parse_issues(request.get_json(silent=True))
+    if not issues:
+        return jsonify({"success": False, "error": "No issues to search"}), 400
+    if app_state.getcomics_sweep_running(only_issues=True):
+        return jsonify({
+            "success": False,
+            "error": "A Wanted search is already running; try again when it finishes",
+        }), 409
+    try:
+        from app import scheduled_getcomics_download
+
+        n = len(issues)
+        op_id = app_state.register_operation(
+            "search", f"Searching {n} wanted issue{'' if n == 1 else 's'}")
+        threading.Thread(
+            target=scheduled_getcomics_download,
+            kwargs={"only_issues": issues, "op_id": op_id},
+            daemon=True,
+        ).start()
+        return jsonify({"success": True, "op_id": op_id, "count": n,
+                        "message": f"Searching {n} issue{'' if n == 1 else 's'}"})
+    except Exception as e:
+        app_logger.error(f"Failed to start a Wanted search: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @downloads_bp.route('/api/operation/<op_id>', methods=['GET'])
 def api_operation_status(op_id):
     """Status of a single background operation.

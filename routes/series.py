@@ -339,6 +339,7 @@ def wanted():
     Fast load from database cache, refresh via API endpoint.
     """
     from core.database import get_cached_wanted_issues, get_wanted_cache_age
+    from core.wanted_state import get_ignored_issues, issue_states
     from core.wanted_reading_lists import (
         get_reading_list_wanted_items,
         dedupe_key,
@@ -376,6 +377,7 @@ def wanted():
             total_wanted=len(reading_list_wanted),
             total_upcoming=0,
             total_missing=0,
+            ignored=[],
             loading=True,
             refreshing=True,
             cache_age=None,
@@ -388,6 +390,7 @@ def wanted():
 
     wanted_issues = []
     series_stats_dict = {}
+    states = issue_states()
 
     for item in cached:
         issue_data = {
@@ -412,6 +415,8 @@ def wanted():
                 "series_id": item["series_id"],
                 "series_name": item["series_name"],
                 "series_volume": item["series_volume"],
+                "state": states.get((item["series_id"], str(item["issue_number"])))
+                or {"code": "not_searched", "label": "Not searched yet"},
             }
         )
 
@@ -469,6 +474,7 @@ def wanted():
         missing=missing,
         series_stats=series_stats,
         reading_list_wanted=reading_list_wanted,
+        ignored=get_ignored_issues(),
         total_wanted=len(wanted_issues) + len(reading_list_wanted),
         total_upcoming=len(upcoming),
         total_missing=len(missing),
@@ -1901,6 +1907,30 @@ def set_bulk_manual_status(series_id):
         return jsonify({"success": True, "count": count, "status": status})
     else:
         return jsonify({"error": "Failed to set bulk manual status"}), 500
+
+
+@series_bp.route("/api/wanted/ignore", methods=["POST", "DELETE"])
+def wanted_ignore():
+    """Ignore wanted issues (POST) or bring them back (DELETE).
+
+    ``{"issues": [{"series_id", "issue_number"}]}``. Ignore is the skipped
+    manual status, so the issues also leave the wanted cache at once; bringing
+    them back recomputes their series' wanted rows.
+    """
+    from core.wanted_state import ignore_issues, parse_issues, unignore_issues
+
+    issues = parse_issues(request.get_json(silent=True))
+    if not issues:
+        return jsonify({"success": False, "error": "No issues given"}), 400
+    try:
+        if request.method == "POST":
+            count = ignore_issues(issues)
+        else:
+            count = unignore_issues(issues)
+    except Exception as e:
+        app_logger.error(f"Wanted ignore failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, "count": count})
 
 
 @series_bp.route("/api/series/<int:series_id>/bulk-manual-status", methods=["DELETE"])
