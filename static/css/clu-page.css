@@ -295,7 +295,7 @@ a.clu-stat:focus-visible .clu-stat-value {
 
 .clu-page-help > summary .bi {
     font-size: 0.75em;
-    transition: transform 0.15s ease-out;
+    transition: transform var(--clu-dur-fast) var(--clu-ease);
 }
 
 .clu-page-help[open] > summary .bi {
@@ -801,4 +801,91 @@ a.clu-stat:focus-visible .clu-stat-value {
     padding-top: env(safe-area-inset-top, 0px);
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* ---- Motion tokens (design board "Motion") ---------------------------
+   One scale. A literal duration or easing in page CSS is drift: use these.
+   Spring is for toast arrival and press release only (overshoot of a pixel
+   or two); sheets use ease-out, since an overshooting sheet shows a gap. */
+:root {
+    --clu-dur-press: 120ms;
+    --clu-dur-fast: 150ms;
+    --clu-dur-base: 250ms;
+    --clu-dur-travel-in: 400ms;
+    --clu-dur-travel-back: 300ms;
+    --clu-dur-long: 500ms;
+    --clu-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --clu-spring: cubic-bezier(0.34, 1.35, 0.64, 1);
+    --clu-stagger: 40ms;
+}
+
+/* Press feedback: scale to 97% on touch-down, back on the spring. :active
+   also covers the keyboard's pressed state. */
+.btn,
+.dashboard-card,
+.grid-item {
+    transition-property: transform, color, background-color, border-color, box-shadow, opacity;
+    transition-duration: var(--clu-dur-base);
+    transition-timing-function: var(--clu-spring);
+}
+.btn:active:not(:disabled),
+.dashboard-card:active,
+.grid-item:active {
+    transform: scale(0.97);
+    transition-duration: var(--clu-dur-press);
+    transition-timing-function: var(--clu-ease);
+}
+
+/* Toast arrival: rise 16px on the spring. Leaving is Bootstrap's own 150ms
+   .fade. */
+@keyframes clu-toast-in {
+    from { transform: translateY(16px); }
+}
+.clu-toast.show {
+    animation: clu-toast-in var(--clu-dur-base) var(--clu-spring);
+}
+
+/* Collapsibles (Bootstrap .collapse): the height transition on the token. */
+.collapsing {
+    transition-duration: var(--clu-dur-base);
+    transition-timing-function: var(--clu-ease);
+}
+
+/* Reduced motion: no movement or scale, only colour and opacity fades at
+   150ms, so an action is still acknowledged. Status indicators (the
+   Active Operations spinner, loading pulse) keep running: they report state.
+   Same pair of selectors the board specifies for the reduce_motion setting. */
+@media (prefers-reduced-motion: reduce) {
+    :root:not([data-clu-motion="full"]) *,
+    :root:not([data-clu-motion="full"]) *::before,
+    :root:not([data-clu-motion="full"]) *::after {
+        transition-property: opacity, color, background-color, border-color, filter !important;
+        transition-duration: var(--clu-dur-fast) !important;
+        scroll-behavior: auto !important;
+    }
+    :root:not([data-clu-motion="full"]) .clu-toast.show { animation: none; }
+    :root:not([data-clu-motion="full"]) .btn:active:not(:disabled),
+    :root:not([data-clu-motion="full"]) .dashboard-card:active,
+    :root:not([data-clu-motion="full"]) .grid-item:active,
+    :root:not([data-clu-motion="full"]) .grid-item:hover,
+    :root:not([data-clu-motion="full"]) .dashboard-card:hover {
+        transform: none !important;
+        filter: brightness(0.88);
+    }
+}
+:root[data-clu-motion="reduce"] *,
+:root[data-clu-motion="reduce"] *::before,
+:root[data-clu-motion="reduce"] *::after {
+    transition-property: opacity, color, background-color, border-color, filter !important;
+    transition-duration: var(--clu-dur-fast) !important;
+    scroll-behavior: auto !important;
+}
+:root[data-clu-motion="reduce"] .clu-toast.show { animation: none; }
+:root[data-clu-motion="reduce"] .btn:active:not(:disabled),
+:root[data-clu-motion="reduce"] .dashboard-card:active,
+:root[data-clu-motion="reduce"] .grid-item:active,
+:root[data-clu-motion="reduce"] .grid-item:hover,
+:root[data-clu-motion="reduce"] .dashboard-card:hover {
+    transform: none !important;
+    filter: brightness(0.88);
 }

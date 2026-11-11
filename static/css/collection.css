@@ -214,7 +214,6 @@
 
 .grid-item {
     cursor: pointer;
-    transition: transform 0.2s;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -850,7 +849,6 @@ body.collection-select-mode {
 .dashboard-card {
     width: 100%;
     cursor: pointer;
-    transition: transform 0.2s ease;
 }
 
 .dashboard-card:hover {
