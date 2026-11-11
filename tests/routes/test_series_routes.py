@@ -1000,6 +1000,15 @@ class TestSeriesPageHeader:
         assert 'onclick="openSubscribeModal()" data-clu-keep' not in html
         assert "CLU.openSeriesJsonModal" in html
 
+    def test_search_missing_is_the_primary_only_while_issues_are_missing(self, app, client_with_data):
+        html = self._page(app, client_with_data)
+        assert html.count('id="checkMissingBtn"') == 1
+        assert 'class="btn btn-sm btn-primary" onclick="checkForMissing()"' in html
+        done = self._page(app, client_with_data, found=(1, 2, 3))
+        assert done.count('id="checkMissingBtn"') == 1
+        assert "btn-primary\" onclick=\"checkForMissing()" not in done
+        assert "Check for Missing Issues" in done
+
     def test_no_description_leaves_no_placeholder(self, app, client_with_data):
         assert "No description available" not in self._page(app, client_with_data)
 

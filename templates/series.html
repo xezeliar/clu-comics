@@ -37,6 +37,11 @@
                         <button type="button" class="btn btn-sm btn-primary" onclick="openSubscribeModal()" data-clu-keep>
                             <i class="bi bi-bookmark-plus me-1" aria-hidden="true"></i>Subscribe
                         </button>
+                        {% elif run and run.missing %}
+                        <button type="button" class="btn btn-sm btn-primary" onclick="checkForMissing()" id="checkMissingBtn"
+                            title="Search the configured sources for this series' missing issues">
+                            <i class="bi bi-search me-1" aria-hidden="true"></i>Search missing
+                        </button>
                         {% endif %}
                         <button onclick="forceRefresh()" class="btn btn-sm btn-outline-secondary" title="Force refresh from Metron API">
                             <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
@@ -206,11 +211,13 @@
                     {% if mapped_path %}
                     <hr class="my-2">
                     <div class="d-flex justify-content-end gap-3">
+                        {% if not (run and run.missing) %}
                         <button class="btn btn-outline-primary btn-sm" onclick="checkForMissing()"
                             id="checkMissingBtn"
                             title="Search the configured sources for this series' missing issues">
                             <i class="bi bi-search me-1"></i>Check for Missing Issues
                         </button>
+                        {% endif %}
                         <button class="btn btn-outline-secondary btn-sm" onclick="syncSeries()" id="sync-btn"
                             title="Check API for New Issues">
                             <i class="bi bi-arrow-repeat me-1"></i>API Sync
@@ -1080,7 +1087,9 @@
     // the identical pass across every monitored series; this one is scoped to
     // this series and ignores its Monitor toggle, since clicking it is an
     // explicit request.
-    const CHECK_MISSING_LABEL = '<i class="bi bi-search me-1"></i>Check for Missing Issues';
+    // The button is the header's primary ("Search missing") when issues are
+    // missing, else the outline one in the mapping card; restore whichever it is.
+    const CHECK_MISSING_LABEL = document.getElementById('checkMissingBtn')?.innerHTML || '';
     let missingCheckPoll = null;
 
     function checkForMissing() {
