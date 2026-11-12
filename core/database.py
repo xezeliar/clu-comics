@@ -14038,6 +14038,56 @@ def remove_series_mappings_bulk(series_ids):
         return 0
 
 
+def unsubscribe_series_returning_path(series_id):
+    """Unsubscribe one series and return the folder it was mapped to.
+
+    Unsubscribing only clears ``mapped_path`` (monitored flag, lock and every
+    other column stay), so the returned path is all an Undo needs. Returns
+    None when the series was not subscribed or the write failed.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            row = conn.execute(
+                "SELECT mapped_path FROM series WHERE id = ?", (int(series_id),)
+            ).fetchone()
+            if not row or not row["mapped_path"]:
+                return None
+            conn.execute(
+                "UPDATE series SET mapped_path = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (int(series_id),),
+            )
+            conn.commit()
+            return row["mapped_path"]
+    except Exception as e:
+        app_logger.error(f"Failed to unsubscribe series {series_id}: {e}")
+        return None
+
+
+def restore_series_mapping(series_id, mapped_path):
+    """Undo an unsubscribe: put ``mapped_path`` back on a series that has none.
+
+    Never overwrites a mapping made since (the WHERE clause). Returns True when
+    the row was restored.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            cur = conn.execute(
+                "UPDATE series SET mapped_path = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND (mapped_path IS NULL OR mapped_path = '')",
+                (mapped_path, int(series_id)),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+    except Exception as e:
+        app_logger.error(f"Failed to restore series mapping for {series_id}: {e}")
+        return False
+
+
 # =============================================================================
 # Issues CRUD Operations (Metron Issue Caching)
 # =============================================================================

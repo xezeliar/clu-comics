@@ -865,3 +865,36 @@ a.clu-stat:focus-visible .clu-stat-value {
 .dropdown-menu.clu-sheet .dropdown-item {
   padding: 0.75rem 1.5rem;
 }
+
+/* Swipe rows (clu-gestures.js). The cells slide left by --clu-sw-x; the
+   action strip lives in the last cell and slides back by the same amount, so
+   it stays pinned to the row's right edge. Unsubscribe is undoable, so it is
+   not drawn in danger red. */
+[data-swipe-row] { touch-action: pan-x pan-y; }
+[data-swipe-row].clu-swiping > td {
+  transform: translateX(var(--clu-sw-x, 0));
+  transition: transform 0.25s ease-out;
+}
+[data-swipe-row].clu-swipe-drag > td { transition: none; }
+.clu-swipe-acts {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 176px;
+  display: flex;
+  transform: translateX(calc(-1 * var(--clu-sw-x, 0px)));
+}
+.clu-swipe-acts[hidden] { display: none; }
+.clu-swipe-acts button {
+  flex: 1;
+  border: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--bs-secondary-color);
+  color: var(--bs-body-bg);
+}
+.clu-swipe-acts button + button { background: var(--bs-emphasis-color); }
+@media (prefers-reduced-motion: reduce) {
+  [data-swipe-row].clu-swiping > td { transition: none; }
+}

@@ -32,3 +32,15 @@ def test_reader_footer_has_progress_line_and_loupe():
 def test_focus_ring_rule_exists():
     assert ":focus-visible" in _read("static/css/clu-page.css")
     assert "collapseCrumbs" in _read("static/js/collection.js")
+
+
+def test_swipe_rows_are_wired_to_the_row_menu():
+    js = _read("static/js/clu-gestures.js")
+    assert "[data-swipe-row]" in js and ".clu-swipe-acts" in js and ".clu-row-more" in js
+    assert "touch-action" in _read("static/css/clu-page.css") and ".clu-swipe-acts" in _read("static/css/clu-page.css")
+    rows = _read("templates/partials/pull_list_rows.html")
+    assert "data-swipe-row" in rows and "clu-swipe-acts" in rows
+    page = _read("templates/pull_list.html")
+    # Undo restores through the server, never by faking the row back.
+    assert "'restore-subscription'" in page and "label: 'Undo'" in page
+    assert "'unsubscribe'" in page

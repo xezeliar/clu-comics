@@ -869,6 +869,62 @@ class TestSeriesBulkUnsubscribe:
         assert 'id="bulkUnsubscribeBtn"' in html
 
 
+class TestSeriesUnsubscribeWithUndo:
+    """Pull List row menu / swipe: unsubscribe one series, then Undo."""
+
+    def test_unsubscribe_then_restore_puts_back_exactly_what_it_cleared(self, client_with_data):
+        from core.database import get_series_mapping, get_series_monitored, set_series_monitored
+
+        set_series_monitored(100, False, lock=True)
+        resp = client_with_data.post("/api/series/100/unsubscribe")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body == {"success": True, "mapped_path": "/data/DC Comics/Batman"}
+        assert not get_series_mapping(100)
+        assert get_series_monitored(100) is False  # untouched by unsubscribe
+
+        with patch("helpers.library.is_valid_library_path", return_value=True):
+            resp = client_with_data.post(
+                "/api/series/100/restore-subscription", json={"path": body["mapped_path"]}
+            )
+        assert resp.status_code == 200
+        assert get_series_mapping(100) == "/data/DC Comics/Batman"
+        assert get_series_monitored(100) is False
+
+    def test_unsubscribe_an_unsubscribed_series_is_a_404(self, client_with_data):
+        assert client_with_data.post("/api/series/100/unsubscribe").status_code == 200
+        assert client_with_data.post("/api/series/100/unsubscribe").status_code == 404
+
+    def test_restore_refuses_a_folder_outside_the_libraries(self, client_with_data):
+        from core.database import get_series_mapping
+
+        client_with_data.post("/api/series/100/unsubscribe")
+        with patch("helpers.library.is_valid_library_path", return_value=False):
+            resp = client_with_data.post(
+                "/api/series/100/restore-subscription", json={"path": "/etc"}
+            )
+        assert resp.status_code == 400
+        assert not get_series_mapping(100)
+
+    def test_restore_never_overwrites_a_newer_mapping(self, client_with_data):
+        from core.database import get_series_mapping
+
+        with patch("helpers.library.is_valid_library_path", return_value=True):
+            resp = client_with_data.post(
+                "/api/series/100/restore-subscription", json={"path": "/data/Other"}
+            )
+        assert resp.status_code == 409
+        assert get_series_mapping(100) == "/data/DC Comics/Batman"
+
+    def test_pull_list_rows_carry_the_row_menu_and_swipe_actions(self, app, client_with_data):
+        TestPullListPage._register_slug_global(app)
+        html = client_with_data.get("/pull-list").get_data(as_text=True)
+        assert 'data-swipe-row' in html and 'class="dropdown d-inline-block clu-row-more"' in html
+        assert 'aria-label="More actions for Batman"' in html
+        assert html.count('data-pl-action="unsubscribe"') >= 2  # menu + swipe strip
+        assert "Open in Wanted" in html
+
+
 class TestSeriesPageSearchYear:
     """Same on the series page: the row and its search button carry the
     issue's publication year so both GetComics and Usenet can narrow."""

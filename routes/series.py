@@ -1684,6 +1684,38 @@ def bulk_unsubscribe_series():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@series_bp.route("/api/series/<int:series_id>/unsubscribe", methods=["POST"])
+def unsubscribe_one_series(series_id):
+    """Unsubscribe one series (Pull List row menu / swipe).
+
+    Returns the folder it was mapped to, which is everything unsubscribing
+    clears, so the Undo toast can hand it to restore-subscription.
+    """
+    from core.database import unsubscribe_series_returning_path
+
+    path = unsubscribe_series_returning_path(series_id)
+    if not path:
+        return jsonify({"success": False, "error": "Series is not subscribed"}), 404
+    return jsonify({"success": True, "mapped_path": path})
+
+
+@series_bp.route("/api/series/<int:series_id>/restore-subscription", methods=["POST"])
+def restore_series_subscription(series_id):
+    """Undo an unsubscribe: map the series back to its folder.
+
+    The folder comes from the client, so it must sit inside a library.
+    """
+    from core.database import restore_series_mapping
+    from helpers.library import is_valid_library_path
+
+    path = ((request.get_json(silent=True) or {}).get("path") or "").strip()
+    if not path or not is_valid_library_path(path):
+        return jsonify({"success": False, "error": "Folder is not inside a library"}), 400
+    if not restore_series_mapping(series_id, path):
+        return jsonify({"success": False, "error": "Series is already subscribed or was not found"}), 409
+    return jsonify({"success": True})
+
+
 @series_bp.route("/api/series/<int:series_id>/check-collection", methods=["GET"])
 def check_series_collection(series_id):
     """
