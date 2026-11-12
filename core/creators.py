@@ -176,6 +176,61 @@ def person_issues(kinds, name, folder, prefixes=None, user_id=None):
     return issues
 
 
+HEADER_ROLES = ("writer", "penciller", "coverartist")
+
+
+def series_credits(folder, prefixes=None, top=2):
+    """Who is credited in one series folder's owned issues, for the series header.
+
+    ``{"issues": owned files, "credited": files with any credit, "roles": [...],
+    "header": [...]}``. ``roles`` lists every stored role in ``CREDIT_KINDS``
+    order, each with every person ranked by how many owned issues credit them;
+    ``header`` is Writer/Penciller/Cover artist cut to the top ``top``. A
+    person's ``show_count`` is False when they are on every credited issue,
+    where the number would only repeat the total. None when unreadable.
+    """
+    folder = (folder or "").rstrip("/\\")
+    if not folder:
+        return None
+    scope_sql, scope_params = _scope(prefixes)
+    where = " WHERE fi.parent = ? AND " + _COMIC_FILE_CLAUSE_FI + scope_sql
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            issues = conn.execute(
+                "SELECT COUNT(*) FROM file_index fi" + where,
+                [folder, *scope_params]).fetchone()[0]
+            credited = conn.execute(
+                "SELECT COUNT(DISTINCT t.file_path) FROM file_metadata_tags t"
+                " JOIN file_index fi ON fi.path = t.file_path" + where
+                + f" AND t.kind IN ({_in(CREDIT_KINDS)})",
+                [folder, *scope_params, *CREDIT_KINDS]).fetchone()[0]
+            rows = conn.execute(
+                "SELECT t.kind AS kind, MIN(t.value) AS name,"
+                " COUNT(DISTINCT t.file_path) AS n"
+                " FROM file_metadata_tags t JOIN file_index fi ON fi.path = t.file_path"
+                + where + f" AND t.kind IN ({_in(CREDIT_KINDS)})"
+                " GROUP BY t.kind, t.value COLLATE NOCASE",
+                [folder, *scope_params, *CREDIT_KINDS]).fetchall()
+    except Exception as e:
+        app_logger.error(f"Failed to read series credits for {folder}: {e}")
+        return None
+
+    by_kind = {}
+    for r in rows:
+        by_kind.setdefault(r["kind"], []).append(
+            {"name": r["name"], "count": r["n"], "show_count": r["n"] < credited})
+    roles = []
+    for kind in CREDIT_KINDS:
+        people = by_kind.get(kind)
+        if people:
+            people.sort(key=lambda p: (-p["count"], p["name"].casefold()))
+            roles.append({"kind": kind, "label": ROLE_LABELS[kind], "people": people})
+    header = [dict(r, people=r["people"][:top]) for r in roles if r["kind"] in HEADER_ROLES]
+    return {"issues": issues, "credited": credited, "roles": roles, "header": header}
+
+
 def _issue_sort_key(number):
     """Numeric issue order; non-numbers (annuals, specials) sort after the numbered ones."""
     try:
