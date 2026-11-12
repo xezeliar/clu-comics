@@ -1049,6 +1049,21 @@ class TestSeriesPageHeader:
         html = self._page(app, client_with_data, banner="/api/folder-thumbnail?kind=header")
         assert 'class="sh-banner"' in html and "has-banner" in html
 
+    def test_banner_generated_from_cover_without_art(self, app, client_with_data):
+        from core.database import get_db_connection
+        conn = get_db_connection()
+        conn.execute("UPDATE series SET cover_image = ? WHERE id = 100",
+                     ("https://img.example/batman-1.jpg",))
+        conn.commit()
+        conn.close()
+        html = self._page(app, client_with_data)
+        assert 'class="sh-banner sh-banner-generated" aria-hidden="true"' in html
+        assert "--sh-banner-img: url('https://img.example/batman-1.jpg')" in html
+        assert "has-banner" in html
+        # Real header art still wins over the generated one.
+        html = self._page(app, client_with_data, banner="/api/folder-thumbnail?kind=header")
+        assert 'class="sh-banner"' in html and "sh-banner-generated" not in html
+
     def test_actions_follow_the_header_rule(self, app, client_with_data):
         html = self._page(app, client_with_data)
         assert "Remove mapping" in html and "dropdown-item text-danger" in html
