@@ -21,7 +21,10 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     assert "'dragstart'" in js
     css = _read("static/css/clu-page.css")
     assert "user-select: none" in css and "-webkit-user-drag: none" in css
-    assert "clu-sheet" in _read("static/css/clu-page.css")
+    assert "clu-sheet" in css
+    # A transformed ancestor (sticky :hover on a tapped card) must not contain
+    # the fixed sheet on its first open.
+    assert "clu-sheet-host" in js and ".clu-sheet-host {" in css
 
 
 def test_settings_search_is_wired():

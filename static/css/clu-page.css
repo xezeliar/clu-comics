@@ -864,6 +864,13 @@ a.clu-stat:focus-visible .clu-stat-value {
   z-index: 1055;
   background: rgba(0, 0, 0, 0.45);
 }
+.clu-sheet-host {
+  transform: none !important;
+  filter: none !important;
+  will-change: auto !important;
+  contain: none !important;
+  z-index: auto !important;
+}
 .dropdown-menu.clu-sheet {
   position: fixed !important;
   inset: auto 0 0 0 !important;
