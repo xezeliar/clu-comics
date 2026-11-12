@@ -7487,7 +7487,10 @@ def get_reading_trends(field_name, year=None, limit=10, user_id=None):
             " AND " + field_name + " != '' AND " + field_name + " IS NOT NULL"
         )
         if year:
-            c.execute(base + " AND strftime('%Y', read_at) = ?", (uid, str(year)))
+            # read_at is UTC; the year is the user's, as on the rest of Insights.
+            from core.user_time import user_offset_hours
+            shift = f"{round(user_offset_hours() * 60):+d} minutes"
+            c.execute(base + " AND strftime('%Y', read_at, ?) = ?", (uid, shift, str(year)))
         else:
             c.execute(base, (uid,))
 
