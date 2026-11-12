@@ -6,7 +6,7 @@ links to ``/series/<slug>`` only for such folders.
 import os
 import time
 from unittest.mock import MagicMock, patch
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 
@@ -59,6 +59,59 @@ class TestBrowse:
         assert by_name["Batman"]["series_url"] == "/series/batman-v1-7"
         assert "series_url" not in by_name["Other"]
 
+    @patch("routes.collection.get_directory_children")
+    def test_sidecar_folder_carries_resolve_url(self, mock_children, client, db_connection, tmp_path):
+        root = str(tmp_path / "data")
+        sidecar, plain = os.path.join(root, "Saga"), os.path.join(root, "Other")
+        os.makedirs(sidecar)
+        os.makedirs(plain)
+        open(os.path.join(sidecar, "cvinfo"), "w").close()
+        mock_children.return_value = (
+            [{"name": "Saga", "path": sidecar, "has_thumbnail": False},
+             {"name": "Other", "path": plain, "has_thumbnail": False}], [])
+        with patch.dict("sys.modules", {"app": MagicMock(DATA_DIR=root)}):
+            dirs = client.get(f"/api/browse?path={root}").get_json()["directories"]
+        by_name = {d["name"]: d for d in dirs}
+        url = urlsplit(by_name["Saga"]["series_resolve_url"])
+        assert url.path == "/api/series/for-folder" and parse_qs(url.query)["path"] == [sidecar]
+        assert "series_resolve_url" not in by_name["Other"]
+
+
+class TestSeriesForFolder:
+    @pytest.fixture
+    def folder(self, tmp_path):
+        d = tmp_path / "Saga"
+        d.mkdir()
+        with patch("helpers.library.is_valid_library_path", return_value=True):
+            yield str(d)
+
+    def _get(self, client, path, ident):
+        with patch("models.library_automap._resolve_identity", return_value=ident), \
+             patch("routes.series.metron.get_flask_api", return_value=None), \
+             patch("models.comicvine_source.is_available", return_value=False):
+            return client.get("/api/series/for-folder?path=" + quote(path))
+
+    def test_mapped_folder_uses_its_series(self, client, db_connection, folder):
+        _series(db_connection, 7, "Saga", 1, folder)
+        assert self._get(client, folder, None).get_json()["url"] == "/series/saga-v1-7"
+
+    def test_sidecar_metron_id(self, client, folder):
+        d = self._get(client, folder, {"metron_id": 42, "series_name": "Saga"}).get_json()
+        assert d == {"success": True, "url": "/series/saga-42"}
+
+    def test_unresolvable_sidecar_reports_why(self, client, folder):
+        d = self._get(client, folder, {"metron_id": None, "reason": "no id"}).get_json()
+        assert d == {"success": False, "error": "no id"}
+
+    def test_comicvine_only_needs_pull_list(self, client, folder):
+        from helpers.comicvine_ids import make_comicvine_series_id
+        d = self._get(client, folder, {"metron_id": make_comicvine_series_id(5), "series_name": "Saga"}).get_json()
+        assert d["success"] is False and "Pull List" in d["error"]
+
+    def test_outside_library_is_404(self, client, tmp_path):
+        with patch("helpers.library.is_valid_library_path", return_value=False):
+            assert client.get("/api/series/for-folder?path=" + quote(str(tmp_path))).status_code == 404
+
 
 class TestCreatorIssues:
     @pytest.fixture
@@ -83,6 +136,16 @@ class TestCreatorIssues:
         with open(path, encoding="utf-8") as fh:
             body = fh.read()
         assert "if (d.series_href)" in body and "'Series page'" in body
+
+
+class TestSmartCollectionReader:
+    def test_cards_open_the_reader(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "smart_collections.html")
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        assert "partials/reader_modal.html" in body
+        assert "js/reader.js" in body
+        assert "window.openComicReader(it.path)" in body
 
 
 class TestSmartCollectionIssues:
