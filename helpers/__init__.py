@@ -66,6 +66,17 @@ def is_hidden(filepath):
     return False
 
 
+
+def count_visible_entries(path):
+    """How many entries a folder holds, as the File Manager's fact line counts
+    them: names starting with '.' or '_' are left out (is_hidden's prefix rule).
+    None when the folder cannot be read."""
+    try:
+        with os.scandir(path) as it:
+            return sum(1 for e in it if not e.name.startswith(('.', '_')))
+    except OSError:
+        return None
+
 # Roots this sweep has already declined, and when it last said so. TARGET
 # inside a library is a supported layout, and this sweep runs on a timer, so
 # the refusal is announced on the transition and then only occasionally --

@@ -3349,7 +3349,7 @@ from helpers.collection import (
     match_wanted_issues_to_files,
     collect_target_candidates,
 )
-from helpers import is_hidden
+from helpers import is_hidden, count_visible_entries
 
 
 # app = Flask(__name__)
@@ -3673,6 +3673,7 @@ def get_directory_listing(path):
 
             # Single pass to categorize entries
             directories = []
+            dir_counts = {}
             files = []
             excluded_extensions = {
                 ".png",
@@ -3706,12 +3707,15 @@ def get_directory_listing(path):
                     stat = os.stat(full_path)
                     if stat.st_mode & 0o40000:  # Directory
                         directories.append(entry)
+                        # The File Manager's fact line ("12 items").
+                        dir_counts[entry] = count_visible_entries(full_path)
                     else:  # File
                         # Check if file should be excluded (but allow specific files like missing.txt)
                         if entry.lower() in allowed_files or not any(
                             entry.lower().endswith(ext) for ext in excluded_extensions
                         ):
-                            files.append({"name": entry, "size": stat.st_size})
+                            files.append({"name": entry, "size": stat.st_size,
+                                          "mtime": stat.st_mtime})
                 except (OSError, IOError):
                     # Skip files we can't access
                     continue
@@ -3722,6 +3726,7 @@ def get_directory_listing(path):
 
             result = {
                 "directories": directories,
+                "dir_counts": dir_counts,
                 "files": files,
                 "hash": get_directory_hash(path),
             }

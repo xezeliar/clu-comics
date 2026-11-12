@@ -1447,6 +1447,7 @@ def list_directories():
             return jsonify({
                 "current_path": current_path,
                 "directories": cached_data["directories"],
+                "dir_counts": cached_data.get("dir_counts", {}),
                 "files": compress_status.annotate_files(current_path, cached_data["files"]),
                 "parent": parent_dir,
                 "cached": True
@@ -1467,6 +1468,7 @@ def list_directories():
         return jsonify({
             "current_path": current_path,
             "directories": listing_data["directories"],
+            "dir_counts": listing_data.get("dir_counts", {}),
             "files": compress_status.annotate_files(current_path, listing_data["files"]),
             "parent": parent_dir,
             "cached": False
@@ -1593,6 +1595,7 @@ def list_downloads():
             return jsonify({
                 "current_path": current_path,
                 "directories": cached_data["directories"],
+                "dir_counts": cached_data.get("dir_counts", {}),
                 "files": compress_status.annotate_files(current_path, cached_data["files"]),
                 "parent": parent_dir,
                 "cached": True
@@ -1613,6 +1616,7 @@ def list_downloads():
         return jsonify({
             "current_path": current_path,
             "directories": listing_data["directories"],
+            "dir_counts": listing_data.get("dir_counts", {}),
             "files": compress_status.annotate_files(current_path, listing_data["files"]),
             "parent": parent_dir,
             "cached": False
