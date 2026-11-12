@@ -20,6 +20,8 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     assert press.index("swallowClick = false") < press.index("e.button !== 0")
     assert "'dragstart'" in js
     css = _read("static/css/clu-page.css")
+    # The press must beat the hover lift, or a mouse never sees it.
+    assert ".grid-item.clu-pressing:hover" in css
     assert "user-select: none" in css and "-webkit-user-drag: none" in css
     assert "clu-sheet" in css
     # A transformed ancestor (sticky :hover on a tapped card) must not contain
