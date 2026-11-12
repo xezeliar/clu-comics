@@ -102,6 +102,14 @@
         };
         menu.ontouchend = function () { menu.style.translate = ''; y0 = null; };
     });
+    // Item handlers often stopPropagation(), which also keeps Bootstrap from
+    // closing the menu, so the sheet would vanish (or be re-rendered away) and
+    // leave its scrim behind. Close it in the capture phase, before they run.
+    document.addEventListener('click', function (e) {
+        var item = e.target.closest('.dropdown-menu.clu-sheet .dropdown-item');
+        var btn = item && item.closest('.dropdown-menu').parentElement.querySelector('[data-bs-toggle="dropdown"]');
+        if (btn) bootstrap.Dropdown.getOrCreateInstance(btn).hide();
+    }, true);
     document.addEventListener('hidden.bs.dropdown', function (e) {
         var menu = menuFor(e.target);
         if (menu) { menu.classList.remove('clu-sheet'); menu.style.translate = ''; }

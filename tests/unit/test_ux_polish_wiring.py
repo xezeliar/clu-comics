@@ -28,6 +28,8 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     # Built before the first paint, or the menu flashes as a dropdown.
     # Above its scrim (1055) whatever page rule sets a menu z-index.
     assert "z-index: 1056 !important" in css
+    # A tapped item closes the sheet even when its handler stops propagation.
+    assert "'.dropdown-menu.clu-sheet .dropdown-item'" in js and "}, true);" in js
     assert "'show.bs.dropdown'" in js and "'shown.bs.dropdown'" not in js
 
 
