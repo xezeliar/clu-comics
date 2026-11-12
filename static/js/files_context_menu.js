@@ -1,124 +1,31 @@
 // ===========================
-// Multi-file Context Menu Functions
+// Selection actions (the File Manager's selection bar and menus)
 // ===========================
 
+// The pane the action was asked from; files.js sets it before calling in.
 let contextMenuPanel = null;
 
-// Update the selection badge
-function updateSelectionBadge() {
-  const badge = document.getElementById('selectionBadge');
-  const countSpan = document.getElementById('selectionCount');
-
-  if (!badge || !countSpan) return;
-
-  const count = selectedFiles.size;
-
-  if (count > 0) {
-    countSpan.textContent = `${count} selected`;
-    badge.classList.add('show');
-  } else {
-    badge.classList.remove('show');
-  }
-  updateFilesBulkActionBar();
-}
-
-// The two selected CBZs Merge Pages works on, or null. Selection is one Set
-// across both panels, so Ctrl-click picks one file on each side.
+// The two selected CBZs Merge Pages works on, or null. A selection lives in
+// one pane, so both copies must be in the same folder.
 function mergeCandidates() {
   if (selectedFiles.size !== 2) return null;
   const files = Array.from(selectedFiles);
   return files.every(f => f.toLowerCase().endsWith('.cbz')) ? files : null;
 }
 
-// Bulk action bar: shown while anything is selected.
-function updateFilesBulkActionBar() {
-  const bar = document.getElementById('filesBulkActionBar');
-  if (!bar) return;
-  const count = selectedFiles.size;
-  if (count === 0) {
-    bar.style.display = 'none';
-    document.body.classList.remove('files-bulkbar-open');
-    return;
-  }
-  bar.style.display = '';
-  document.body.classList.add('files-bulkbar-open');
-  document.getElementById('filesBulkCount').textContent =
-    `${count} item${count === 1 ? '' : 's'} selected`;
-
-  const cbzCount = Array.from(selectedFiles).filter(f => f.toLowerCase().endsWith('.cbz')).length;
-  document.getElementById('filesBulkCombine').disabled = cbzCount < 2;
-  document.getElementById('filesBulkMerge').disabled = !mergeCandidates();
-}
-
-// Which panel the selection lives in, for handlers that refresh "their" panel.
-function selectionPanel() {
-  const li = document.querySelector('#destination-list li.selected, #source-list li.selected');
-  return li && li.closest('#source-list') ? 'source' : 'destination';
-}
-
-function clearFileSelection() {
-  selectedFiles.clear();
-  document.querySelectorAll('li.list-group-item.selected').forEach(item => {
-    item.classList.remove('selected');
-    item.removeAttribute('data-selection-hint');
-  });
-  updateSelectionBadge();
-}
-
-// Reload a panel in whatever view it is showing.
-function refreshFilePanel(panel) {
-  const path = panel === 'source' ? currentSourcePath : currentDestinationPath;
-  if (path === 'recent-files') loadRecentFiles(panel);
-  else if (path === 'trash') loadTrash(panel);
-  else if (path) loadDirectories(path, panel);
-}
-
 // Merge Pages: build one CBZ from the best pages of the two selected copies.
 function mergeSelectedPages() {
-  hideFileContextMenu();
   const files = mergeCandidates();
   if (!files) {
-    CLU.toast('Select exactly two CBZ files to merge (Ctrl-click one in each panel)', 'warning');
+    CLU.toast('Select exactly two CBZ files to merge', 'warning');
     return;
   }
   CLU.showCBZMerge(files[0], files[1], {
     onComplete: function () {
       clearFileSelection();
-      refreshFilePanel('source');
-      refreshFilePanel('destination');
+      fmRefreshAll();
     }
   });
-}
-
-// Run a context-menu action from the bulk bar.
-function runBulkAction(action) {
-  contextMenuPanel = selectionPanel();
-  action();
-}
-
-// Show context menu for multi-file selection
-function showFileContextMenu(event, panel) {
-  const menu = document.getElementById('fileContextMenu');
-  contextMenuPanel = panel;
-  const mergeItem = document.getElementById('contextMergePages');
-  if (mergeItem) mergeItem.style.display = mergeCandidates() ? '' : 'none';
-
-  // Position the menu at the cursor
-  menu.style.display = 'block';
-  menu.style.left = event.pageX + 'px';
-  menu.style.top = event.pageY + 'px';
-
-  // Hide menu when clicking elsewhere
-  setTimeout(() => {
-    document.addEventListener('click', hideFileContextMenu);
-  }, 10);
-}
-
-// Hide context menu
-function hideFileContextMenu() {
-  const menu = document.getElementById('fileContextMenu');
-  menu.style.display = 'none';
-  document.removeEventListener('click', hideFileContextMenu);
 }
 
 // Extract series name from filename
@@ -172,8 +79,6 @@ function getMostCommonSeriesName(filePaths) {
 
 // Create folder with selected files
 function createFolderWithSelection() {
-  hideFileContextMenu();
-
   if (selectedFiles.size === 0) {
     CLU.toast('No files selected', 'warning');
     return;
@@ -251,28 +156,16 @@ function proceedWithFolderCreation(filePaths, folderName) {
     if (result.success) {
       // Move all selected files to the new folder
       moveMultipleItems(filePaths, newFolderPath, contextMenuPanel);
-      selectedFiles.clear();
-      updateSelectionBadge();
+      clearFileSelection();
 
-      // Refresh the view
-      if (contextMenuPanel === 'source') {
-        loadDirectories(currentSourcePath, 'source');
-      } else {
-        loadDirectories(currentDestinationPath, 'destination');
-      }
+      refreshFilePanel(contextMenuPanel);
     } else {
       // If folder already exists, just move the files
       if (result.error && result.error.includes('exists')) {
         moveMultipleItems(filePaths, newFolderPath, contextMenuPanel);
-        selectedFiles.clear();
-        updateSelectionBadge();
+        clearFileSelection();
 
-        // Refresh the view
-        if (contextMenuPanel === 'source') {
-          loadDirectories(currentSourcePath, 'source');
-        } else {
-          loadDirectories(currentDestinationPath, 'destination');
-        }
+        refreshFilePanel(contextMenuPanel);
       } else {
         CLU.toast('Error creating folder: ' + result.error, 'error');
       }
@@ -286,8 +179,6 @@ function proceedWithFolderCreation(filePaths, folderName) {
 
 // Show the Combine Files modal
 function showCombineFilesModal() {
-  hideFileContextMenu();
-
   // Filter to only CBZ files
   const cbzFiles = Array.from(selectedFiles).filter(f => f.toLowerCase().endsWith('.cbz'));
 
@@ -303,8 +194,10 @@ function showCombineFilesModal() {
 
   // Show file list
   const filesList = document.getElementById('combineFilesList');
-  filesList.innerHTML = '<strong>Files to combine:</strong><br>' +
-    cbzFiles.map(f => `• ${f.split(/[/\\]/).pop()}`).join('<br>');
+  const head = document.createElement('strong');
+  head.textContent = 'Files to combine:';
+  filesList.replaceChildren(head);
+  cbzFiles.forEach(f => filesList.append(document.createElement('br'), '\u2022 ' + f.split(/[/\\]/).pop()));
 
   const modal = new bootstrap.Modal(document.getElementById('combineFilesModal'));
   modal.show();
@@ -330,8 +223,6 @@ function combineSelectedFiles() {
   const firstFile = cbzFiles[0];
   const lastSlash = Math.max(firstFile.lastIndexOf('/'), firstFile.lastIndexOf('\\'));
   const directory = firstFile.substring(0, lastSlash);
-
-  console.log('Combining files:', { cbzFiles, directory, fileName });
 
   // Hide modal
   const modalEl = document.getElementById('combineFilesModal');
@@ -361,15 +252,9 @@ function combineSelectedFiles() {
   .then(data => {
     if (data.success) {
       CLU.showToast('Success', `Created ${data.output_file}`, 'success');
-      selectedFiles.clear();
-      updateSelectionBadge();
+      clearFileSelection();
 
-      // Refresh the directory
-      if (contextMenuPanel === 'source') {
-        loadDirectories(currentSourcePath, 'source');
-      } else {
-        loadDirectories(currentDestinationPath, 'destination');
-      }
+      refreshFilePanel(contextMenuPanel);
     } else {
       CLU.showToast('Error', data.error || 'Failed to combine files', 'error');
     }
@@ -382,8 +267,6 @@ function combineSelectedFiles() {
 
 // Show remove XML confirmation modal
 function showRemoveXmlConfirmation() {
-  hideFileContextMenu();
-
   const cbzFiles = Array.from(selectedFiles).filter(f => f.toLowerCase().endsWith('.cbz'));
 
   if (cbzFiles.length === 0) {
@@ -431,8 +314,7 @@ function removeXmlFromSelected() {
   .then(data => {
     if (data.success) {
       CLU.showToast('Processing', removeXmlStartedMessage(data), 'info');
-      selectedFiles.clear();
-      updateSelectionBadge();
+      clearFileSelection();
     } else {
       CLU.showToast('Error', data.error || 'Failed to remove XML', 'error');
     }
@@ -442,81 +324,13 @@ function removeXmlFromSelected() {
   });
 }
 
-// Show delete confirmation modal for multiple files — thin wrapper delegating to clu-delete.js
-function showDeleteMultipleConfirmation() {
-  hideFileContextMenu();
-
-  if (selectedFiles.size === 0) {
-    CLU.toast('No files selected', 'warning');
-    return;
-  }
-
-  window._cluDelete = {
-    onBulkDeleteComplete: function (paths, results) {
-      const container = contextMenuPanel === 'source'
-        ? document.getElementById('source-list')
-        : document.getElementById('destination-list');
-
-      // Remove successfully deleted items from UI
-      results.forEach(function (result) {
-        if (result.success) {
-          const item = container.querySelector('li[data-fullpath="' + result.path + '"]');
-          if (item) {
-            item.classList.add('deleting');
-            setTimeout(function () { item.remove(); }, 200);
-          }
-        }
-      });
-
-      const failures = results.filter(r => !r.success);
-
-      selectedFiles.clear();
-      updateSelectionBadge();
-      document.querySelectorAll('li.list-group-item.selected').forEach(item => {
-        item.classList.remove('selected');
-        item.removeAttribute('data-selection-hint');
-      });
-
-      if (failures.length > 0) {
-        CLU.toast(failures.length + ' file(s) failed to delete. Check console for details.', 'error');
-        console.error('Failed deletions:', failures);
-      }
-
-      // Refresh the view
-      if (contextMenuPanel === 'source') {
-        loadDirectories(currentSourcePath, 'source');
-      } else {
-        loadDirectories(currentDestinationPath, 'destination');
-      }
-    }
-  };
-
-  CLU.showBulkDeleteConfirmation(Array.from(selectedFiles));
-}
-
 // deleteMultipleFiles is now handled by clu-delete.js via CLU.confirmBulkDelete
 
 // Initialize context menu event listeners
 document.addEventListener('DOMContentLoaded', function() {
-  const contextCreateFolder = document.getElementById('contextCreateFolder');
-  const contextDeleteFiles = document.getElementById('contextDeleteFiles');
   const confirmCustomFolderBtn = document.getElementById('confirmCustomFolderBtn');
 
-  if (contextCreateFolder) {
-    contextCreateFolder.addEventListener('click', function(e) {
-      e.preventDefault();
-      createFolderWithSelection();
-    });
-  }
 
-  if (contextDeleteFiles) {
-    contextDeleteFiles.addEventListener('click', function(e) {
-      e.preventDefault();
-      showDeleteMultipleConfirmation();
-    });
-  }
-
-  // confirmDeleteMultipleBtn wiring now handled by clu-delete.js
 
   if (confirmCustomFolderBtn) {
     confirmCustomFolderBtn.addEventListener('click', function() {
@@ -540,15 +354,8 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Remove XML handlers
-  const contextRemoveXml = document.getElementById('contextRemoveXml');
   const confirmRemoveXmlBtn = document.getElementById('confirmRemoveXmlBtn');
 
-  if (contextRemoveXml) {
-    contextRemoveXml.addEventListener('click', function(e) {
-      e.preventDefault();
-      showRemoveXmlConfirmation();
-    });
-  }
 
   if (confirmRemoveXmlBtn) {
     confirmRemoveXmlBtn.addEventListener('click', function() {
@@ -586,15 +393,8 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Combine Files handlers
-  const contextCombineFiles = document.getElementById('contextCombineFiles');
   const confirmCombineFilesBtn = document.getElementById('confirmCombineFilesBtn');
 
-  if (contextCombineFiles) {
-    contextCombineFiles.addEventListener('click', function(e) {
-      e.preventDefault();
-      showCombineFilesModal();
-    });
-  }
 
   if (confirmCombineFilesBtn) {
     confirmCombineFilesBtn.addEventListener('click', function() {
@@ -602,11 +402,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  const contextMergePages = document.getElementById('contextMergePages');
-  if (contextMergePages) {
-    contextMergePages.addEventListener('click', function(e) {
-      e.preventDefault();
-      mergeSelectedPages();
-    });
-  }
 });

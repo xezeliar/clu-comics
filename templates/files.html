@@ -10,155 +10,84 @@
 
 {% block content %}
 
-<div>
-  {{ page_header('File Manager', 'bi-folder2-open') }}
+{#
+  One pane head, used twice (Source, Destination): the four places, the open
+  folder as a breadcrumb with its menu, the search box, the letter bar (shown
+  by files.js only in a folder of more than 40 folders), the list and a footer.
+  files.js draws the rows, the breadcrumb, the counts and the selection bar.
+#}
+{% macro fm_pane(panel, label, lib) %}
+<section class="fm-pane" id="{{ panel }}-pane" data-panel="{{ panel }}" aria-label="{{ label }}">
+  <div class="fm-ph">
+    <h2 class="fm-lbl">{{ label }}</h2>
+    <div class="btn-group fm-places files-source-views" role="group" aria-label="{{ label }} place">
+      <div class="btn-group dropdown" role="group">
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-fm-place="library"
+                id="{{ lib }}LibraryDropdown" data-bs-toggle="dropdown" aria-expanded="false" aria-pressed="false">
+          <i class="bi bi-folder2-open me-1" aria-hidden="true"></i><span id="{{ lib }}LibraryName">Library</span>
+        </button>
+        <ul class="dropdown-menu" id="{{ lib }}LibraryMenu">
+          <!-- Populated by JavaScript -->
+        </ul>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-fm-place="downloads" aria-pressed="false"
+        onclick="loadDownloads(fmTargetDir(), '{{ panel }}');">Downloads</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-fm-place="recent" aria-pressed="false"
+        onclick="loadRecentFiles('{{ panel }}');" aria-label="Recent Files">Recent<span class="d-none d-sm-inline"> Files</span></button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-fm-place="trash" aria-pressed="false"
+        onclick="loadTrash('{{ panel }}');"><i class="bi bi-trash3 me-1" aria-hidden="true"></i>Trash<span class="fm-trash-count" hidden></span></button>
+    </div>
+  </div>
+  <div class="fm-loc">
+    <nav class="fm-crumb" id="{{ panel }}-path-display" aria-label="{{ label }} path"></nav>
+    <button type="button" class="btn btn-sm fm-ib" data-fm-pane-menu aria-haspopup="menu" aria-expanded="false"
+      aria-label="Actions for this folder" title="Actions for this folder"><i class="bi bi-three-dots-vertical" aria-hidden="true"></i></button>
+  </div>
+  <div id="{{ panel }}-directory-filter" class="fm-sr">
+    <div id="{{ panel }}-directory-search-row"></div>
+    <div class="clu-letter-bar mt-2" role="group" aria-label="Filter folders by first letter" hidden>
+      <!-- CLU.letterBar draws the buttons (files.js updateFilterBar) -->
+    </div>
+  </div>
+  <ul id="{{ panel }}-list" class="fm-list drop-target" role="grid" aria-multiselectable="true"
+      aria-label="{{ label }} files" tabindex="0"></ul>
+  <div class="fm-ft" id="{{ panel }}-footer" aria-live="polite"></div>
+</section>
+{% endmacro %}
+
+<div class="fm" id="fm" data-target-dir="{{ target_dir }}">
+  {% call(slot) page_header('File Manager', 'bi-folder2-open') %}
+    {% if slot == 'actions' %}
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openSearchModal()"><i class="bi bi-search me-1" aria-hidden="true"></i>Search Files</button>
+    {% endif %}
+  {% endcall %}
 
   <!-- Progress indicator -->
   {% include 'partials/progress_container.html' %}
 
-  <!-- Selection Count Badge -->
-  <div id="selectionBadge" class="selection-badge">
-    <i class="bi bi-check2-square badge-icon"></i>
-    <span id="selectionCount">0 selected</span>
-    <span class="badge-hint">Drag to move • Right-click for options</span>
+  <!-- Phone: the panes are two tabs (files.css shows this below md). -->
+  <div class="fm-tabs" role="tablist" aria-label="Panes">
+    <button type="button" role="tab" data-fm-tab="source" aria-selected="true" aria-controls="source-pane">Source</button>
+    <button type="button" role="tab" data-fm-tab="destination" aria-selected="false" aria-controls="destination-pane">Destination</button>
   </div>
 
-  <div class="row">
-    <!-- Source Panel -->
-    <div class="col-md-6">
-      <h3>Source</h3>
-      <!-- Button group for switching between Library, Downloads and Recent Files -->
-      <div class="btn-group mb-2 files-source-views" role="group" aria-label="View Options">
-        <!-- Library Dropdown -->
-        <div class="dropdown">
-          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                  id="sourceLibraryDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-            <i class="bi bi-folder2-open me-1"></i><span id="sourceLibraryName">Library</span>
-          </button>
-          <ul class="dropdown-menu" id="sourceLibraryMenu">
-            <!-- Populated by JavaScript -->
-          </ul>
-        </div>
-        <button type="button" id="btnDownloads" class="btn btn-sm btn-outline-secondary"
-          onclick="loadDownloads('{{ target_dir }}', 'source');" data-bs-toggle="button">Downloads</button>
-        <button type="button" id="btnRecentFiles" class="btn btn-sm btn-outline-secondary" onclick="loadRecentFiles('source');"
-          data-bs-toggle="button" aria-label="Recent Files">Recent<span class="d-none d-sm-inline"> Files</span></button>
-        <button type="button" id="btnTrash" class="btn btn-sm btn-outline-secondary" onclick="loadTrash('source');"
-          data-bs-toggle="button"><i class="bi bi-trash3 me-1"></i>Trash<span id="trashBadge" class="badge rounded-pill text-bg-warning ms-1" style="display:none"></span></button>
-      </div>
-      <!-- Filter buttons for source panel -->
-      <div id="source-directory-filter" class="mb-2">
-        <div class="clu-letter-bar" role="group" aria-label="Directory Filter">
-          <!-- CLU.letterBar draws the buttons (files.js updateFilterBar) -->
-        </div>
-        <div id="source-directory-search-row" class="pt-2"></div>
-        <div id="source-directory-rename-row" class="pt-2"></div>
-      </div>
-      <nav aria-label="breadcrumb">
-        <ol id="source-path-display" class="breadcrumb">
-          <li class="breadcrumb-item active">Loading...</li>
-        </ol>
-      </nav>
-      <ul id="source-list" class="list-group drop-target"></ul>
-    </div>
-    <!-- Destination Panel -->
-    <div class="col-md-6">
-      <h3>Destination</h3>
-      <!-- Library Dropdown and Action Buttons -->
-      <div class="d-flex gap-2 mb-2">
-        <!-- Library Dropdown -->
-        <div class="dropdown">
-          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button"
-                  id="destLibraryDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-            <i class="bi bi-folder2-open me-1"></i><span id="destLibraryName">Library</span>
-          </button>
-          <ul class="dropdown-menu" id="destLibraryMenu">
-            <!-- Populated by JavaScript -->
-          </ul>
-        </div>
-        <!-- Action Buttons -->
-        <div class="btn-group" role="group" aria-label="Folder Options">
-          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openCreateFolderModal()"><i
-              class="bi bi-folder-plus me-1" aria-hidden="true"></i>Create Folder</button>
-          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openSearchModal()"><i class="bi bi-search me-1" aria-hidden="true"></i>Search Files</button>
-        </div>
-      </div>
-
-      <!-- Filter buttons for destination panel -->
-      <div id="destination-directory-filter" class="mb-2">
-        <div class="clu-letter-bar" role="group" aria-label="Directory Filter">
-          <!-- CLU.letterBar draws the buttons (files.js updateFilterBar) -->
-        </div>
-        <div id="destination-directory-search-row" class="pt-2"></div>
-        <div id="destination-directory-rename-row" class="pt-2"></div>
-      </div>
-      <nav aria-label="breadcrumb">
-        <ol id="destination-path-display" class="breadcrumb">
-          <li class="breadcrumb-item active">Loading...</li>
-        </ol>
-      </nav>
-      <ul id="destination-list" class="list-group drop-target"></ul>
-    </div>
+  <div class="fm-panes">
+    {{ fm_pane('source', 'Source', 'source') }}
+    {{ fm_pane('destination', 'Destination', 'dest') }}
   </div>
+
+  <!-- The one selection bar (files.js fmDrawBar). -->
+  <div class="fm-bar" id="fmBar" role="region" aria-label="Selection" hidden></div>
 
   <!--
     The ComicInfo clear flow lives in clu-cbz-info.js: it confirms through
     #clearComicInfoConfirmModal (partials/modal_cbz_info.html) and reports via
-    CLU.showSuccess/CLU.showError. The hand-rolled toasts that used to sit here
-    were never wired to anything.
+    CLU.showSuccess/CLU.showError.
   -->
-
 </div>
 
-<!-- Context Menu for Multi-file Selection -->
-<div id="fileContextMenu" class="dropdown-menu" style="display: none; position: absolute; z-index: 1050;">
-  <a class="dropdown-item" href="#" id="contextCreateFolder">
-    <i class="bi bi-folder-plus me-2"></i>Create Folder with Selection
-  </a>
-  <a class="dropdown-item" href="#" id="contextCombineFiles">
-    <i class="bi bi-collection me-2"></i>Combine Selected Files
-  </a>
-  <a class="dropdown-item" href="#" id="contextMergePages" style="display: none;">
-    <i class="bi bi-layers me-2"></i>Merge Files&hellip;
-  </a>
-  <a class="dropdown-item text-danger" href="#" id="contextDeleteFiles">
-    <i class="bi bi-trash me-2"></i>Delete Selected Files
-  </a>
-  <div class="dropdown-divider"></div>
-  <a class="dropdown-item text-danger" href="#" id="contextRemoveXml">
-    <i class="bi bi-eraser me-2"></i>Remove XML from Selected
-  </a>
-</div>
-
-<!-- Bulk Action Bar (files_context_menu.js updateFilesBulkActionBar) -->
-<div id="filesBulkActionBar" class="files-bulk-action-bar text-white bg-info" style="display: none;">
-  <div class="container-lg d-flex flex-wrap align-items-center justify-content-between gap-2">
-    <div class="d-flex align-items-center gap-3">
-      <span class="text-white fw-bold" id="filesBulkCount">0 items selected</span>
-      <button type="button" class="btn btn-sm btn-light" onclick="clearFileSelection()">
-        <i class="bi bi-x-lg me-1"></i>Clear
-      </button>
-    </div>
-    <div class="d-flex flex-wrap gap-2">
-      <button type="button" class="btn btn-sm btn-primary" onclick="runBulkAction(createFolderWithSelection)">
-        <i class="bi bi-folder-plus me-1"></i>Create Folder
-      </button>
-      <button type="button" class="btn btn-sm btn-light" id="filesBulkCombine" onclick="runBulkAction(showCombineFilesModal)">
-        <i class="bi bi-collection me-1"></i>Combine Files
-      </button>
-      <button type="button" class="btn btn-sm btn-light" id="filesBulkMerge" onclick="runBulkAction(mergeSelectedPages)"
-        title="Pick pages from two copies of one issue. Ctrl-click one CBZ in each panel.">
-        <i class="bi bi-layers me-1"></i>Merge Files
-      </button>
-      <button type="button" class="btn btn-sm btn-warning" onclick="runBulkAction(showRemoveXmlConfirmation)">
-        <i class="bi bi-eraser me-1"></i>Remove XML
-      </button>
-      <button type="button" class="btn btn-sm btn-danger" onclick="runBulkAction(showDeleteMultipleConfirmation)">
-        <i class="bi bi-trash me-1"></i>Delete
-      </button>
-    </div>
-  </div>
-</div>
+<!-- Row, folder and selection menus (files.js fmOpenMenu). -->
+<div id="fmMenu" class="dropdown-menu fm-menu" role="menu" hidden></div>
 
 {% include 'partials/modal_delete_confirm.html' %}
 
@@ -692,6 +621,8 @@ async function loadLibraryDropdowns() {
         const data = await response.json();
 
         if (data.success && data.libraries && data.libraries.length > 0) {
+            // files.js names the Library button and roots the breadcrumb from these.
+            window.fmLibraries = data.libraries;
             populateLibraryMenu('sourceLibraryMenu', 'source', data.libraries);
             populateLibraryMenu('destLibraryMenu', 'destination', data.libraries);
 
@@ -748,7 +679,6 @@ async function selectLibrary(path, panel, name, libraryId) {
             destLibraryId = libraryId;
             destLibraryProviders = providers;
         }
-        console.log(`Library ${name} (${panel}): ${providers.length} providers loaded`);
     }
 
     // Load the library root directory

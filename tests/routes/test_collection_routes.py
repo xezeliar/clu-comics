@@ -1423,7 +1423,7 @@ class TestSearchCountNoMatchesWiring:
         src = self._read("static/js/files.js")
         assert "label: 'Search files and folders'" in src
         # The search narrows files as well as folders, in either pane.
-        assert "if (term && !String(fileData.name).toLowerCase().includes(term)) return;" in src
+        assert "if (term && !e.name.toLowerCase().includes(term)) return false;" in src
         assert "const panelSearch = { source: '', destination: '' };" in src
         assert "Type to filter" not in src and "No folders match your search" not in src
         assert "No results found for" not in src

@@ -168,11 +168,12 @@ def test_status_page_says_when_nothing_is_running():
 def test_file_manager_says_when_a_listing_is_empty():
     """A Downloads folder with nothing in it rendered a blank panel."""
     src = (JS / "files.js").read_text(encoding="utf-8")
-    assert "function appendEmptyListing(" in src
-    downloads = src[src.index("function loadDownloads("):]
-    downloads = downloads[:downloads.index("\n}\n")]
-    assert "'No downloads waiting'" in downloads
-    assert "if (data.error)" in downloads  # a server error is not an empty folder
-    listing = src[src.index("function renderDirectoryListing("):]
+    empty = src[src.index("function fmEmptyRow("):]
+    empty = empty[:empty.index("\n}\n")]
+    assert "'No downloads waiting'" in empty
+    assert "'This folder is empty'" in empty
+    # A server error is not an empty folder.
+    assert "if (p.error)" in empty
+    listing = src[src.index("function fmLoadListing("):]
     listing = listing[:listing.index("\n}\n")]
-    assert "'This folder is empty'" in listing
+    assert "if (data.error) throw" in listing

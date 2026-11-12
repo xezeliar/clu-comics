@@ -28,6 +28,11 @@ def test_file_names_are_escaped_in_innerhtml_templates():
 
 
 def test_listing_row_name_is_text_content():
+    """One row builder (fmRow) draws every place; it writes no markup at all."""
     src = FILES_JS.read_text(encoding="utf-8")
-    assert "nameSpan.textContent = fileData.name;" in src
+    row = src[src.index("function fmRow("):]
+    row = row[:row.index("\n}\n")]
+    assert "go.textContent = e.name;" in row
+    assert "nm.textContent = e.name;" in row
+    assert "innerHTML" not in row
     assert "nameSpan.innerHTML" not in src
