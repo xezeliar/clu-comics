@@ -133,6 +133,8 @@ SETTINGS_SCHEMA = {
     # same pref name, written by the reader's own toolbar buttons.
     "READER_MODE": _s("reader_mode", _S, "paged", "personalization"),
     "READER_FIT": _s("reader_fit", _S, "width", "personalization"),
+    # How a page change looks: slide (today's), turn (hinged on the spine) or none.
+    "READER_PAGE_TURN": _s("reader_page_turn", _S, "slide", "personalization"),
     # Guided Setup (core/setup_state.py). Never in an ini; init_db stamps the
     # state once, and "" (undecided) deliberately does not redirect.
     "GUIDED_SETUP_STATE": _s("guided_setup_state", _S, "", "onboarding"),

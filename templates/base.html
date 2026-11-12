@@ -105,7 +105,7 @@
   <script src="{{ url_for('static', filename='js/clu-pager.js') }}"></script>
 </head>
 
-<body class="d-flex flex-column min-vh-100">
+<body class="d-flex flex-column min-vh-100"{% if appearance_cover_tilt is defined and not appearance_cover_tilt %} data-cover-tilt="off"{% endif %}>
   {# The page shell's width. A page states what it wants by overriding
      page_shell (cover grids ask for full width); the page_width setting
      (core/page_width.py: auto / wide / constrained, per user) decides whether
