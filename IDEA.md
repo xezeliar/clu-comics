@@ -10,7 +10,16 @@ cover progress marks, creator and character pages, follow-a-creator, smart
 collections, gap report, Activity feed, download queue page, bulk Unsubscribe,
 Search all failed again, Undo toast, skeleton loaders, pull-to-refresh, larger
 touch targets, phone tab bar, onboarding checklist, clearer empty states,
-ghost-publisher fix, back-to-top button, Gruvbox and Catppuccin themes.
+ghost-publisher fix, back-to-top button, Gruvbox and Catppuccin themes,
+series page header (banner, owned run, credits), "new issue arrived" badge,
+Pull List, Wanted, Reading Lists, Insights and CBZ Information redesigns, one
+Downloads tab, reading-list highlight covers, series page links from Library
+and creator pages, long-press cover menu, swipe rows, phone bottom sheets, focus
+rings, search suggestions, breadcrumb collapse, reader pace line, double-tap
+zoom and loupe, settings search, "What's new" card, and the motion set (one
+reduce-motion setting, shared cover and reader open, grid stagger, cover
+fade-in, tab pill, press feedback, spring toasts, count-up, favourite burst,
+queue motion, collapse timing).
 
 The reader still has no right-to-left mode, no brightness control and no
 keep-awake.
@@ -29,64 +38,18 @@ keep-awake.
 - **Preload the next issue** in the background so it opens instantly.
 - **Offline reading**: download an issue to the device through the PWA.
 
-## Library and browsing
-
-- **Publisher alias setting** ("DC" → "DC Comics").
-- **Series page header**: large banner art, description, creators, and an
-  "12 of 18 owned" ring.
-- ⚡ **Sticky A-Z bar** on long grids.
-- **Global search shortcut**: `/` or `Ctrl+K` from any page, searching series,
-  issues, creators and settings.
-
-## Pull List, Wanted and downloads
-
-- **"New issue arrived" badge** on the series card, cleared once opened.
-
 ## UX polish
 
-- ⚡ **Long-press a cover** on touch for a context menu: mark read, subscribe,
-  open folder, search metadata.
-- ⚡ **Swipe actions on list rows** on phones: swipe left to unsubscribe or mark read.
-- **Bottom sheets on phones** instead of centred modals for pickers and filters,
-  with a drag handle and swipe-to-dismiss.
-- ⚡ **Visible focus rings** on every control for keyboard and switch users.
-- ⚡ **Empty search results** suggest the nearest matches and offer a "clear
-  filters" button.
-- **Breadcrumbs** on folder browsing, so a deep path can be climbed in one tap.
-- **Reader progress line**: "Page 12 of 24 · about 6 min left" in the footer.
-- **Double-tap to zoom** on a page in paged mode, and a press-and-hold loupe.
 - **Inline rename**: double-click or long-press a series title to edit it in place.
-- ⚡ **Settings search box** that filters the settings page by label.
-- **"What's new" card** after an upgrade, dismissible, linking to the changelog.
 
 ## Motion and animation
 
-Keep every item here behind `prefers-reduced-motion`, with a single
-reduce-motion setting that also covers the reader transitions above.
+Keep every item here behind the reduce-motion setting.
 
-- **Shared-element open**: the tapped cover grows into the series page header
-  instead of the page cutting over.
-- **Reader open and close from the cover**: the page scales up from the tapped
-  cover and shrinks back to it on close.
-- ⚡ **Staggered grid entrance**: cards fade and rise in with a small delay per
-  row on first load, once per visit only.
 - **Blur-up covers**: a tiny blurred thumbnail sharpens into the full image,
   so grids never show empty boxes while they load.
-- ⚡ **Fade-in per cover** as each image finishes loading, rather than popping in.
-- **Sliding pill on the phone tab bar**: the active indicator slides and stretches
-  between tabs instead of jumping.
-- ⚡ **Press feedback**: buttons and cover cards scale to about 97% on touch-down
-  and spring back on release.
-- **Spring-eased toasts and sheets**: toasts slide in with a slight overshoot and
-  can be swiped away.
-- **Animated count-up** for the numbers on the Insights page.
 - **Progress ring fill** on a series card animates when a new issue is read.
 - ⚡ **Smooth scroll to a letter** when tapping the A-Z bar, instead of an instant jump.
-- **Collapsible panels** (filters, advanced settings) animate their height
-  rather than snapping open.
-- **Favourite burst**: a small particle pop when a series is favourited or subscribed.
-- **Queue item motion**: items in the download queue slide when reordered, and a
-  finished item fades out with a check.
 
 ## Themes and cosmetics
 
@@ -106,9 +69,7 @@ a stylesheet under `static/css/themes/`, a 1000×600 preview image).
 - ⚡ **Accent colour picker** on top of any theme.
 - **Publisher-coloured badges**: DC blue, Marvel red, Image black.
 - ⚡ **Cover hover effects**: a slight lift and shadow, and a 3D tilt on desktop.
-- **Animated page transitions** in the reader (slide or curl), with a
-  "reduce motion" option.
-- **Seasonal touches**: Halloween, Christmas, or a "Free Comic Book Day" banner each May.
+- **Animated page transitions** in the reader (slide or curl).
 - **Wrapped upgrades**: more card styles, matching the active theme.
 
 ## Small fixes worth doing
