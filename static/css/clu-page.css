@@ -897,9 +897,12 @@ a.clu-stat:focus-visible .clu-stat-value {
 @keyframes clu-sheet-up { from { translate: 0 100%; } }
 @keyframes clu-sheet-fade { from { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .dropdown-menu.clu-sheet,
-  .clu-sheet-scrim { animation: none; }
+  :root:not([data-clu-motion="full"]) .dropdown-menu.clu-sheet { animation: none; }
+  :root:not([data-clu-motion="full"]) .clu-sheet-scrim { animation: none; }
 }
+/* The in-app "Reduce motion" setting, whatever the OS says. */
+:root[data-clu-motion="reduce"] .dropdown-menu.clu-sheet { animation: none; }
+:root[data-clu-motion="reduce"] .clu-sheet-scrim { animation: none; }
 .dropdown-menu.clu-sheet::before {
   content: "";
   position: absolute;
