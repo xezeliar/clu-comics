@@ -840,7 +840,8 @@ a.clu-stat:focus-visible .clu-stat-value {
   position: fixed;
   inset: 0;
   z-index: 1055;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.3);
+  animation: clu-sheet-fade 0.2s ease-out;
 }
 .clu-sheet-host {
   transform: none !important;
@@ -860,6 +861,13 @@ a.clu-stat:focus-visible .clu-stat-value {
   z-index: 1056;
   border-radius: 1rem 1rem 0 0;
   padding: 1.5rem 0 max(0.5rem, env(safe-area-inset-bottom));
+  animation: clu-sheet-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes clu-sheet-up { from { translate: 0 100%; } }
+@keyframes clu-sheet-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-menu.clu-sheet,
+  .clu-sheet-scrim { animation: none; }
 }
 .dropdown-menu.clu-sheet::before {
   content: "";
