@@ -603,6 +603,8 @@ function openComicReader(filePath) {
     // Show modal
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
+    // Grow from the tapped cover (clu-motion.js); a no-op for next-issue reopens.
+    if (window.CLU && CLU.readerOpened) CLU.readerOpened(modal);
     blockNativePageZoom();
 
     // Immersive mode: hide chrome by default on mobile/tablet
@@ -2474,6 +2476,9 @@ function closeComicReader() {
     hidePanHint();
 
     const modal = document.getElementById('comicReaderModal');
+    // Shrink back to the cover (clu-motion.js). Called before the hide so it
+    // can measure the page; the modal itself still goes away at once.
+    if (window.CLU && CLU.readerClosing) CLU.readerClosing(modal);
     modal.style.display = 'none';
     document.body.style.overflow = ''; // Restore scrolling
     allowNativePageZoom();

@@ -2323,6 +2323,9 @@ function renderGrid(items) {
     initNameTooltips(grid);
 
     CLU.progress.apply(grid);
+
+    // First grid of the visit only; staggerIn ignores every later redraw.
+    if (CLU.staggerIn) CLU.staggerIn(grid);
 }
 
 // ===========================
@@ -3316,10 +3319,14 @@ function pollThumbnail(imgElement) {
                 // We found it's ready. Stop polling.
                 imgElement.classList.remove('polling');
 
-                // Update the image to the new version
-                imgElement.src = newSrc;
+                // Update the image to the new version. Fade it in only if a
+                // miss above means the placeholder is what is showing: a ready
+                // thumbnail swapped for its cache-busted copy must not blink.
+                if (imgElement.dataset.pollMissed && CLU.swapImage) CLU.swapImage(imgElement, newSrc);
+                else imgElement.src = newSrc;
 
             } else if (imgElement.classList.contains('polling')) {
+                imgElement.dataset.pollMissed = '1';
                 // Still generating, poll again in 2 seconds
                 setTimeout(() => pollThumbnail(imgElement), 2000);
             }
@@ -3554,7 +3561,8 @@ function initLazyLoading() {
                 if (entry.isIntersecting) {
                     const img = entry.target;
                     if (img.dataset.src) {
-                        img.src = img.dataset.src;
+                        if (CLU.swapImage) CLU.swapImage(img, img.dataset.src);
+                        else img.src = img.dataset.src;
                         img.classList.remove('lazy');
                         observer.unobserve(img);
                     }
@@ -5272,6 +5280,7 @@ function togglePublisherFavorite(path, name, button) {
                     button.classList.add('favorited');
                     icon.className = 'bi bi-bookmark-heart-fill';
                     button.title = 'Remove from Favorites';
+                    if (CLU.burst) CLU.burst(button);
                     // Sync global favoritePaths
                     window.favoritePaths?.add(path);
                     CLU.showSuccess(`${name} added as a favorite`);

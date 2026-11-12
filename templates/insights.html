@@ -32,7 +32,7 @@
                 <div class="stat-icon primary">
                     <i class="bi bi-file-earmark-text"></i>
                 </div>
-                <div class="stat-value">{{ "{:,}".format(library_stats.total_files) }}</div>
+                <div class="stat-value" data-clu-count>{{ "{:,}".format(library_stats.total_files) }}</div>
                 <div class="stat-label">Total Files</div>
             </div>
         </div>
@@ -53,7 +53,7 @@
                 <div class="stat-icon info">
                     <i class="bi bi-folder"></i>
                 </div>
-                <div class="stat-value">{{ "{:,}".format(library_stats.total_directories) }}</div>
+                <div class="stat-value" data-clu-count>{{ "{:,}".format(library_stats.total_directories) }}</div>
                 <div class="stat-label">Folders</div>
             </div>
         </div>
@@ -100,7 +100,7 @@
                 <div class="stat-icon warning">
                     <i class="bi bi-book"></i>
                 </div>
-                <div class="stat-value" id="statIssuesRead">{{ "{:,}".format(library_stats.total_read) }}</div>
+                <div class="stat-value" id="statIssuesRead" data-clu-count>{{ "{:,}".format(library_stats.total_read) }}</div>
                 <div class="stat-label">Issues Read</div>
             </div>
         </div>
@@ -109,7 +109,7 @@
                 <div class="stat-icon primary">
                     <i class="bi bi-files"></i>
                 </div>
-                <div class="stat-value" id="statPagesRead">{{ "{:,}".format(reading_totals.total_pages) }}</div>
+                <div class="stat-value" id="statPagesRead" data-clu-count>{{ "{:,}".format(reading_totals.total_pages) }}</div>
                 <div class="stat-label">Total Pages Read</div>
             </div>
         </div>

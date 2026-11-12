@@ -7342,6 +7342,7 @@ def config_page():
         enableDebugLogging=st["ENABLE_DEBUG_LOGGING"],
         bootstrapTheme=get_user_preference("bootstrap_theme", default="default"),
         pageWidth=st["PAGE_WIDTH"],
+        reduceMotion=st["REDUCE_MOTION"],
         timezone=get_user_preference("timezone", default="UTC"),
         # Named exactly, for the Komga schedule card: the preference is a fixed
         # offset with no DST.

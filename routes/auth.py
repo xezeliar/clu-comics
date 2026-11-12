@@ -130,6 +130,40 @@ def _resolve_request_page_width():
     return width
 
 
+# Motion: "system" follows prefers-reduced-motion, "reduce" and "full" are
+# written as data-clu-motion on <html> (clu-page.css, static/js/clu-motion.js).
+MOTION_MODES = ("system", "reduce", "full")
+
+
+def _site_motion():
+    mode = get_setting("REDUCE_MOTION")
+    return mode if mode in MOTION_MODES else "system"
+
+
+def _resolve_request_motion():
+    """The motion mode this request renders with: the user's own choice, else
+    the site default. Same shape as _resolve_request_page_width."""
+    memo = getattr(g, "_clu_motion", None)
+    if memo is not None:
+        return memo
+
+    mode = None
+    try:
+        user = getattr(g, "current_user", None)
+        if user:
+            mode = get_user_setting_override("reduce_motion", user_id=user["id"])
+    except Exception:
+        mode = None
+
+    if mode not in MOTION_MODES:
+        try:
+            mode = _site_motion()
+        except Exception:
+            mode = "system"
+    g._clu_motion = mode
+    return mode
+
+
 # Every theme global for the <head> and the theme picker, in one place.
 # Registered on this blueprint rather than in app.py so the test app, which
 # registers the blueprints but cannot import app.py, renders the same head.
@@ -149,6 +183,7 @@ def _inject_theme_assets():
         "page_width": _resolve_request_page_width(),
         "page_width_shell": shell_classes,
         "page_width_chrome": chrome_container,
+        "clu_motion": _resolve_request_motion(),
     }
 
 
@@ -228,6 +263,7 @@ def _reset_request_identity(exc=None):
     g.pop("current_user", None)
     g.pop("_clu_theme", None)
     g.pop("_clu_page_width", None)
+    g.pop("_clu_motion", None)
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -305,6 +341,10 @@ def account():
         account_page_width=page_width_override or site_page_width,
         page_width_is_override=page_width_override is not None,
         site_page_width=site_page_width,
+        # Motion
+        account_motion=_resolve_request_motion(),
+        motion_is_override=get_user_setting_override("reduce_motion") in MOTION_MODES,
+        site_motion=_site_motion(),
         # Dashboard layout
         dashboard_order=get_dashboard_order(),
         dashboard_hidden=get_user_setting("dashboard_hidden", default=[]) or [],
@@ -385,6 +425,46 @@ def save_site_page_width():
     if user is not None:
         delete_user_setting("page_width", user_id=user["id"])
     return jsonify({"success": True, "pageWidth": width})
+
+
+@auth_bp.route("/api/account/motion", methods=["POST"])
+def account_save_motion():
+    """Save (or clear) the current user's personal motion override."""
+    user = current_user()
+    if user is None:
+        return jsonify({"error": "unauthorized"}), 401
+
+    body = request.get_json(silent=True) or {}
+
+    if body.get("useSiteDefault"):
+        delete_user_setting("reduce_motion", user_id=user["id"])
+        return jsonify({"success": True, "reduceMotion": _site_motion(), "override": False})
+
+    mode = (body.get("reduceMotion") or "").strip()
+    if mode not in MOTION_MODES:
+        return jsonify({"success": False, "error": "Unknown motion setting"}), 400
+
+    if not set_user_setting("reduce_motion", mode, user_id=user["id"]):
+        return jsonify({"success": False, "error": "Could not save motion setting"}), 500
+    return jsonify({"success": True, "reduceMotion": mode, "override": True})
+
+
+# The site default; "/api/config/" is owner-only in core.auth.
+@auth_bp.route("/api/config/motion", methods=["POST"])
+def save_site_motion():
+    """Save the site-default motion setting."""
+    body = request.get_json(silent=True) or {}
+    mode = (body.get("reduceMotion") or "").strip()
+    if mode not in MOTION_MODES:
+        return jsonify({"success": False, "error": "Unknown motion setting"}), 400
+
+    if not set_setting("REDUCE_MOTION", mode):
+        return jsonify({"success": False, "error": "Could not save motion setting"}), 500
+    # As with page width: the owner follows the new default.
+    user = current_user()
+    if user is not None:
+        delete_user_setting("reduce_motion", user_id=user["id"])
+    return jsonify({"success": True, "reduceMotion": mode})
 
 
 @auth_bp.route("/api/account/dashboard", methods=["POST"])

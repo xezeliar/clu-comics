@@ -276,6 +276,7 @@
     function dlRow(row, n, len) {
       const li = el('li', 'list-group-item dl-row' + (row.quiet ? ' dl-quiet' : ''));
       li.dataset.row = row.key;
+      li.dataset.flipKey = row.key;
       const act = el('div', 'dl-act');
       if (row.g === 'wait') {
         li.draggable = true;
@@ -406,15 +407,20 @@
       CLU.setCount(document.getElementById('downloadsCount'), { total: dlItems.length,
         shown: dlFilter ? shown : undefined, noun: 'downloads', one: 'download' });
 
-      root.replaceChildren();
-      if (dlDown || empty) return;
-      DL_GROUPS.forEach(([g, label]) => {
-        if (dlOf(g).length && (!dlFilter || dlFilter === g)) root.appendChild(dlGroup(g, label));
+      // CLU.flip (clu-motion.js) slides rows whose place changed and fades in
+      // new ones; a poll where nothing moved animates nothing.
+      CLU.flip(root, () => {
+        root.replaceChildren();
+        if (dlDown || empty) return;
+        DL_GROUPS.forEach(([g, label]) => {
+          if (dlOf(g).length && (!dlFilter || dlFilter === g)) root.appendChild(dlGroup(g, label));
+        });
+        if (!root.children.length) {
+          root.appendChild(CLU.noMatches({ noun: 'downloads', filtered: true, compact: true,
+            onClear: () => { dlFilter = ''; renderDownloads(); } }));
+        }
       });
-      if (!root.children.length) {
-        root.appendChild(CLU.noMatches({ noun: 'downloads', filtered: true, compact: true,
-          onClear: () => { dlFilter = ''; renderDownloads(); } }));
-      }
+      if (dlDown || empty) return;
 
       if (!had) return;
       const q = s => root.querySelector(s);
