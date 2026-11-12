@@ -64,8 +64,27 @@ function loadDirectories(path) {
     directoryList.innerHTML = '<li class="list-group-item text-center text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading...</li>';
 
     fetch(`/list-directories?path=${encodeURIComponent(path)}`)
-        .then(response => response.json())
-        .then(data => {
+        .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+        .then(({ ok, status, data }) => {
+            if (!ok) {
+                // A mapped folder deleted outside CLU (or a stale mapping) must not
+                // leave the picker empty: start from the nearest folder that exists,
+                // else the default library.
+                const parent = path.replace(/\/+$/, '').replace(/\/[^/]*$/, '');
+                const fallback = (typeof defaultLibraryPath !== 'undefined') ? defaultLibraryPath : '';
+                if (status === 404 && parent && parent !== path) {
+                    loadDirectories(parent);
+                } else if (status === 403 && fallback && path !== fallback) {
+                    loadDirectories(fallback);
+                } else {
+                    directoryList.innerHTML = '';
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item text-danger';
+                    item.textContent = data.error || 'Error loading directories';
+                    directoryList.appendChild(item);
+                }
+                return;
+            }
             modalDirectoryData = data;
             currentModalFilter = 'all';
 
