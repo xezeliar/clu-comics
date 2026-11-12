@@ -10024,6 +10024,34 @@ def get_user_setting_override(key, user_id=None, default=None):
         return default
 
 
+def get_user_setting_overrides(keys, user_id=None):
+    """{key: value} for those of ``keys`` this user has overridden, in one
+    query -- the appearance prefs are read on every render. Undecodable rows
+    are left out, as if unset."""
+    import json
+
+    keys = list(keys)
+    out = {}
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return out
+            rows = conn.execute(
+                f"SELECT key, value FROM user_settings WHERE user_id = ? "
+                f"AND key IN ({', '.join('?' * len(keys))})",
+                (_resolve_user_id(user_id), *keys),
+            ).fetchall()
+    except Exception as e:
+        app_logger.error(f"Failed to get user setting overrides: {e}")
+        return out
+    for row in rows:
+        try:
+            out[row["key"]] = json.loads(row["value"])
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
 def get_user_setting(key, default=None, user_id=None):
     """Resolve ``key`` for a user: personal override, else site default, else
     ``default``.

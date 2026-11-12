@@ -4967,6 +4967,7 @@ def update_index_on_create(path):
 # too, and the theme template globals are injected by routes/auth.py. Re-bound
 # here because other modules already read app.DARK_BOOTSWATCH_THEMES.
 from core.themes import BOOTSWATCH_THEMES, DARK_THEMES as DARK_BOOTSWATCH_THEMES  # noqa: E402,F401
+from core.themes import appearance_catalog, normalize_appearance  # noqa: E402
 
 
 @app.context_processor
@@ -7028,18 +7029,25 @@ def save_styling_config():
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        set_user_preference(
-            "bootstrap_theme",
-            data.get("bootstrapTheme", "default"),
-            category="personalization",
-        )
-        app.config["BOOTSTRAP_THEME"] = data.get("bootstrapTheme", "default")
+        from routes.auth import THEME_PREFS, parse_appearance_payload
+
+        appearance, error = parse_appearance_payload(data)
+        if error:
+            return jsonify({"success": False, "error": error}), 400
+        set_user_preference("bootstrap_theme", appearance["theme"], category="personalization")
+        set_setting("THEME_MODE", appearance["mode"])
+        set_setting("THEME_LIGHT", appearance["light"])
+        set_setting("THEME_DARK", appearance["dark"])
+        set_setting("THEME_OLED", appearance["oled"])
+        set_setting("THEME_ACCENT", appearance["accent"])
+        app.config["BOOTSTRAP_THEME"] = appearance["theme"]
         # Setting the site default also resets the owner to follow it. Without
         # this, an owner who had picked a personal theme on /account would set
         # the default here and see nothing change, because their own override
         # still wins.
         try:
-            delete_user_setting("bootstrap_theme")
+            for pref in THEME_PREFS.values():
+                delete_user_setting(pref)
         except Exception as e:
             app_logger.debug(f"Could not clear own theme override: {e}")
         return jsonify({"success": True, "message": "Styling settings saved"})
@@ -7222,6 +7230,13 @@ def config_page():
         flaresolverrEnabled=st["FLARESOLVERR_ENABLED"],
         enableDebugLogging=st["ENABLE_DEBUG_LOGGING"],
         bootstrapTheme=get_user_preference("bootstrap_theme", default="default"),
+        # The site-default Appearance panel (routes/auth.py).
+        site_appearance=normalize_appearance({
+            "theme": get_user_preference("bootstrap_theme", default="default"),
+            "mode": st["THEME_MODE"], "light": st["THEME_LIGHT"], "dark": st["THEME_DARK"],
+            "oled": st["THEME_OLED"], "accent": st["THEME_ACCENT"],
+        }),
+        appearance_catalog=appearance_catalog(),
         pageWidth=st["PAGE_WIDTH"],
         reduceMotion=st["REDUCE_MOTION"],
         timezone=get_user_preference("timezone", default="UTC"),

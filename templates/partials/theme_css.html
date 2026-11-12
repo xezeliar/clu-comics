@@ -1,15 +1,46 @@
 {# The theme's stylesheets: Bootswatch, stock Bootstrap, or stock Bootstrap
    plus a local theme (core/themes.py LOCAL_THEMES). Shared by base.html and
-   login.html, which render outside each other. #}
+   login.html, which render outside each other.
+
+   theme_slots is [(theme, media)]: one theme, or in Follow my device the light
+   and the dark one, each linked under its prefers-color-scheme so the browser
+   switches with no reload. #}
 {% if theme_stylesheets is defined %}
-{% set _theme_css = theme_stylesheets(bootstrap_theme|default('default')) %}
+{% set _slots = theme_slots|default([(bootstrap_theme|default('default'), none)]) %}
 {% else %}
 {# No auth_bp context processor (a bare Jinja env): stock Bootstrap, the
    "default" theme's core.themes.DEFAULT_BOOTSTRAP_CSS (pinned by a test). #}
-{% set _theme_css = ('https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css', ()) %}
+{% set _slots = [] %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
 {% endif %}
-<link href="{{ _theme_css[0] }}" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-{% for _local_css in _theme_css[1] %}
-<link href="{{ url_for('static', filename=_local_css) }}" rel="stylesheet">
+{% for _theme, _media in _slots %}
+{% set _theme_css = theme_stylesheets(_theme) %}
+<link href="{{ _theme_css[0] }}" rel="stylesheet"{% if _media %} media="{{ _media }}"{% endif %}>
 {% endfor %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+{% for _theme, _media in _slots %}
+{% for _local_css in theme_stylesheets(_theme)[1] %}
+<link href="{{ url_for('static', filename=_local_css) }}" rel="stylesheet"{% if _media %} media="{{ _media }}"{% endif %}>
+{% endfor %}
+{% endfor %}
+{% if theme_head_css %}
+{# True black and the accent: core/themes.py appearance_css, built only from
+   validated values. #}
+<style id="clu-appearance">{{ theme_head_css|safe }}</style>
+{% endif %}
+{% if theme_follow %}
+{# Blocking on purpose: Bootstrap's own controls read data-bs-theme, and the
+   server cannot know the device's scheme. The dark slot is always a dark
+   theme and the light slot a light one (normalize_appearance). #}
+<script>
+(function () {
+  var q = window.matchMedia('(prefers-color-scheme: dark)'), html = document.documentElement;
+  function apply() {
+    if (q.matches) html.setAttribute('data-bs-theme', 'dark');
+    else html.removeAttribute('data-bs-theme');
+  }
+  apply();
+  if (q.addEventListener) q.addEventListener('change', apply);
+})();
+</script>
+{% endif %}

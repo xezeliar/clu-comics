@@ -1,0 +1,136 @@
+{# The Appearance panel: theme tiles in groups, Follow my device, True black,
+   the accent, and a small CLU page previewing all of it. Shared by /account
+   (per-user, with its own Save and the two per-user switches) and /config
+   (the site default, saved by the Personalization tab's Save).
+   static/js/clu-appearance.js drives it; tiles are drawn from each theme's
+   palette (core/themes.py appearance_catalog), never from screenshots.
+
+   Params (pass via {% with %}):
+     ap_id        element id prefix (the two pages must not collide)
+     ap_state     {theme, mode, light, dark, oled, accent[, publisher_dots, cover_tilt]}
+     ap_catalog   core.themes.appearance_catalog()
+     ap_per_user  true on /account: the switches, Save, Undo, site default
+     ap_site_name the site default's name, for "Use site default (...)"
+     ap_override  true when the user has a theme of their own (Undo of a save
+                  that started from the site default goes back to following it)
+#}
+{% set _id = ap_id|default('appearance') %}
+{% set _themes = ap_catalog.themes %}
+{% set _cur = ap_state.theme if ap_state.mode == 'one' else (ap_state.dark if _themes[ap_state.theme].dark else ap_state.light) %}
+{% macro tile(t) -%}
+{%- set p = _themes[t] -%}
+<button type="button" class="clu-ap-tile" role="radio" data-theme="{{ t }}"
+  aria-checked="{{ 'true' if t == _cur else 'false' }}" tabindex="{{ 0 if t == _cur else -1 }}">
+  <span class="clu-ap-mini" data-t="{{ t }}" aria-hidden="true"
+    style="--t-bg:{{ p.page }};--t-fg:{{ p.ink }};--t-em:{{ p.emphasis }};--t-mu:{{ p.muted }};--t-pr:{{ p.primary }};--t-nav:{{ p.nav }}">
+    <i class="n"></i><i class="b"><i class="c"></i><i class="l"><i></i><i></i><i></i></i></i>
+    <i class="ok"><i class="bi bi-check-lg"></i></i>
+  </span>
+  <span class="clu-ap-nm">{{ p.label }}<span class="visually-hidden">{{ ', dark' if p.dark else ', light' }}</span></span>
+</button>
+{%- endmacro %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/clu-appearance.css') }}">
+<div class="clu-ap" id="{{ _id }}" data-per-user="{{ 'true' if ap_per_user else 'false' }}"
+  data-override="{{ 'true' if ap_override else 'false' }}">
+  <script type="application/json" class="clu-ap-data">{{ {'catalog': ap_catalog, 'state': ap_state}|tojson }}</script>
+  <div class="clu-ap-set">
+    <section class="clu-ap-sec" aria-labelledby="{{ _id }}-h">
+      <div class="clu-ap-hd">
+        <h3 class="h6 mb-0" id="{{ _id }}-h">Theme</h3>
+        <div class="btn-group btn-group-sm" role="radiogroup" aria-labelledby="{{ _id }}-h">
+          <button type="button" class="btn btn-outline-secondary" role="radio" data-mode="one"
+            aria-checked="{{ 'true' if ap_state.mode == 'one' else 'false' }}">One theme</button>
+          <button type="button" class="btn btn-outline-secondary" role="radio" data-mode="follow"
+            aria-checked="{{ 'true' if ap_state.mode == 'follow' else 'false' }}">Follow my device</button>
+        </div>
+      </div>
+      <div class="clu-ap-follow"{% if ap_state.mode != 'follow' %} hidden{% endif %}>
+        <p class="small text-muted mb-2">Choose a theme for each. CLU switches when your device does.</p>
+        <div class="clu-ap-slots">
+          {% for slot in ('light', 'dark') %}
+          <button type="button" class="clu-ap-slot" data-slot="{{ slot }}" aria-pressed="false">
+            <span class="clu-ap-chip" aria-hidden="true"></span>
+            <span><small>When my device is {{ slot }}</small><b class="clu-ap-slot-name">{{ _themes[ap_state[slot]].label }}</b></span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="clu-ap-gal" role="radiogroup" aria-label="Theme">
+        {% for name, ids in ap_catalog.groups %}
+        <div class="clu-ap-grp">
+          <p>{{ name }}</p>
+          <div class="clu-ap-tiles">{% for t in ids %}{{ tile(t) }}{% endfor %}</div>
+        </div>
+        {% endfor %}
+        <details class="clu-ap-more"{% if _cur in ap_catalog.more %} open{% endif %}>
+          <summary>More Bootswatch themes ({{ ap_catalog.more|length }})</summary>
+          <div class="clu-ap-tiles">{% for t in ap_catalog.more %}{{ tile(t) }}{% endfor %}</div>
+        </details>
+      </div>
+    </section>
+
+    <div class="form-check form-switch clu-ap-sw">
+      <input class="form-check-input" type="checkbox" role="switch" id="{{ _id }}-oled" data-k="oled"
+        aria-describedby="{{ _id }}-oled-note"{% if ap_state.oled %} checked{% endif %}>
+      <label class="form-check-label" for="{{ _id }}-oled">True black</label>
+      <small class="d-block text-muted" id="{{ _id }}-oled-note">Pure black pages. Saves battery on OLED screens.</small>
+    </div>
+
+    <section class="clu-ap-sec" aria-labelledby="{{ _id }}-acc-h">
+      <h3 class="h6 mb-0" id="{{ _id }}-acc-h">Accent <span class="fw-normal text-muted">· replaces the theme's navbar and button colour</span></h3>
+      <div class="clu-ap-acc" role="radiogroup" aria-labelledby="{{ _id }}-acc-h">
+        {% for colour, label in ap_catalog.accents %}
+        <button type="button" class="clu-ap-dot{{ '' if colour else ' th' }}" role="radio" data-accent="{{ colour }}"
+          aria-checked="{{ 'true' if ap_state.accent == colour else 'false' }}" aria-label="{{ label }}" title="{{ label }}"
+          tabindex="{{ 0 if ap_state.accent == colour else -1 }}"{% if colour %} style="--a:{{ colour }}"{% endif %}><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+        {% endfor %}
+        <span class="clu-ap-acc-name small text-muted" aria-hidden="true"></span>
+      </div>
+    </section>
+
+    {% if ap_per_user %}
+    <div class="form-check form-switch clu-ap-sw">
+      <input class="form-check-input" type="checkbox" role="switch" id="{{ _id }}-pubs" data-k="publisher_dots"
+        aria-describedby="{{ _id }}-pubs-note"{% if ap_state.publisher_dots %} checked{% endif %}>
+      <label class="form-check-label" for="{{ _id }}-pubs">Publisher colours</label>
+      <small class="d-block text-muted" id="{{ _id }}-pubs-note">A dot in the publisher's colour beside its name on cards.</small>
+    </div>
+    <div class="form-check form-switch clu-ap-sw">
+      <input class="form-check-input" type="checkbox" role="switch" id="{{ _id }}-tilt" data-k="cover_tilt"
+        aria-describedby="{{ _id }}-tilt-note"{% if ap_state.cover_tilt %} checked{% endif %}>
+      <label class="form-check-label" for="{{ _id }}-tilt">Tilt covers under the pointer</label>
+      <small class="d-block text-muted" id="{{ _id }}-tilt-note">Desktop only. Off when Reduce motion is on.</small>
+    </div>
+    <div class="clu-ap-ft">
+      <button type="button" class="btn btn-primary" data-act="save" disabled>Save</button>
+      <button type="button" class="btn btn-outline-secondary" data-act="discard" hidden>Discard changes</button>
+      <button type="button" class="btn btn-link" data-act="site-default">Use site default
+        <span class="text-muted">({{ ap_site_name }})</span></button>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="clu-ap-pv">
+    <div class="clu-ap-pvh"><b class="clu-ap-pv-name"></b><span class="clu-ap-pv-slot"></span></div>
+    <div class="clu-tp" role="img" aria-label="Preview">
+      <div class="clu-tp-nav"><b>CLU</b><span class="on">Library</span><span>Pull List</span><span>Downloads</span></div>
+      <div class="clu-tp-body">
+        <div class="clu-tp-h"><span class="clu-tp-t">Library</span><p><b>4,132</b> series · <b>2,691</b> missing · <u>Wanted</u></p></div>
+        <div class="clu-tp-bar"><span class="clu-tp-q"><i class="bi bi-search" aria-hidden="true"></i>Search series…</span>
+          <span class="clu-tp-f"><span>All</span><span class="on">Unread</span><span>Read</span></span></div>
+        <div class="clu-tp-g">
+          {% for name, pub, colour, c1, c2 in [('Night Courier', 'Image', '#111111', '#14213d', '#7a2f5a'),
+                                              ('Iron Lanterns', 'Marvel', '#e62429', '#2a9d8f', '#264653'),
+                                              ('Blue Harbor', 'DC', '#0476f2', '#e85d75', '#3a2d6b'),
+                                              ('Paper Saints', 'BOOM!', '#f26b21', '#f4a261', '#9b2226')] %}
+          <div><span class="clu-tp-cover" style="--c1:{{ c1 }};--c2:{{ c2 }}"></span>
+            <div class="clu-tp-ct">{{ name }}</div>
+            <div class="clu-tp-cm"><i class="clu-tp-pub" style="--p:{{ colour }}"></i>{{ pub }}</div></div>
+          {% endfor %}
+        </div>
+        <div class="clu-tp-row"><span class="clu-tp-btn pr">Subscribe</span><span class="clu-tp-btn">Refresh</span>
+          <span class="clu-tp-err">1 failed</span><span class="clu-tp-toast"><i class="bi bi-check-lg" aria-hidden="true"></i>Saved</span></div>
+      </div>
+    </div>
+  </div>
+</div>

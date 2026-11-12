@@ -115,6 +115,13 @@ SETTINGS_SCHEMA = {
     "LIBRARY_HEALTH_RECHECK_DAYS": _s("library_health_recheck_days", _I, 90, "system"),
     # appearance
     "BOOTSTRAP_THEME": _s("bootstrap_theme", _S, "default", "personalization"),
+    # The rest of the site-default appearance (core/themes.py
+    # normalize_appearance); users override all of it on /account. Never in an ini.
+    "THEME_MODE": _s("theme_mode", _S, "one", "personalization"),
+    "THEME_LIGHT": _s("theme_light", _S, "default", "personalization"),
+    "THEME_DARK": _s("theme_dark", _S, "darkly", "personalization"),
+    "THEME_OLED": _s("theme_oled", _B, False, "personalization"),
+    "THEME_ACCENT": _s("theme_accent", _S, "", "personalization"),
     # Site-default page width (core/page_width.py); users override it on
     # /account. Never in an ini.
     "PAGE_WIDTH": _s("page_width", _S, "auto", "personalization"),

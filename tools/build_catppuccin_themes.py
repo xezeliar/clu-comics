@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Write the four Catppuccin palette stylesheets (static/css/themes/).
+"""Write the palette stylesheets of the four Catppuccin flavours and of the
+themes derived from core/themes.py PALETTES (static/css/themes/).
 
-Each flavour is two files: its palette, written here, and the shared rules in
+Each theme is two files: its palette, written here, and the shared rules in
 static/css/themes/catppuccin.css, written by hand. The rules only ever read
---ctp-* variables, so the flavours cannot drift apart.
+--ctp-* variables, so the themes cannot drift apart.
 
 Usage:  python tools/build_catppuccin_themes.py           # write the files
         python tools/build_catppuccin_themes.py --check   # exit 1 if stale
@@ -34,6 +35,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "static", "css", "themes")
+if ROOT not in sys.path:  # run as a script
+    sys.path.insert(0, ROOT)
+from core import themes  # noqa: E402
 
 PALETTE = {
     "latte": {
@@ -227,6 +231,57 @@ def _svg_url(svg):
     return 'url("data:image/svg+xml,' + encoded + '")'
 
 
+_CLOSE_PATH = ("M.293.293a1 1 0 0 1 1.414 0L8 6.586 14.293.293a1 1 0 1 1 1.414 1.414L9.414 "
+               "8l6.293 6.293a1 1 0 0 1-1.414 1.414L8 9.414l-6.293 6.293a1 1 0 0 1-1.414-1.414L6.586 "
+               "8 .293 1.707a1 1 0 0 1 0-1.414")
+
+
+def _icons(on_fill, on_primary, text, focus, nav_text):
+    """The SVG variables: icons drawn in a colour CSS cannot pass into a
+    data: URL. ``on_fill`` is the text on a role fill, ``on_primary`` the
+    text on the primary fill (form marks sit on it), ``nav_text`` the
+    navbar's."""
+    def close(colour):
+        return _svg_url("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' "
+                        f"fill='{colour}'><path d='{_CLOSE_PATH}'/></svg>")
+    return [
+        # The close X on an accent fill, drawn in that fill's text colour.
+        "    --ctp-close-on-fill: " + close(on_fill) + ";",
+        "    --ctp-close-on-primary: " + close(on_primary) + ";",
+        "    --ctp-select-chevron: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' "
+            f"stroke='{text}' stroke-linecap='round' stroke-linejoin='round' "
+            "stroke-width='2' d='m2 5 6 6 6-6'/></svg>") + ";",
+        "    --ctp-switch-focus: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
+            f"<circle r='3' fill='{focus}'/></svg>") + ";",
+        # Form check marks, drawn like any text on the primary fill.
+        "    --ctp-check-mark: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path fill='none' "
+            f"stroke='{on_primary}' stroke-linecap='round' stroke-linejoin='round' "
+            "stroke-width='3' d='m6 10 3 3 6-6'/></svg>") + ";",
+        "    --ctp-check-indeterminate: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path fill='none' "
+            f"stroke='{on_primary}' stroke-linecap='round' stroke-linejoin='round' "
+            "stroke-width='3' d='M6 10h8'/></svg>") + ";",
+        "    --ctp-radio-dot: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
+            f"<circle r='2' fill='{on_primary}'/></svg>") + ";",
+        "    --ctp-switch-on: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
+            f"<circle r='3' fill='{on_primary}'/></svg>") + ";",
+        "    --ctp-toggler-icon: " + _svg_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><path "
+            f"stroke='{nav_text}' stroke-linecap='round' stroke-miterlimit='10' "
+            "stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/></svg>") + ";",
+    ]
+
+
+def _var(name, value, note=""):
+    r, g, b = _rgb(value)
+    return f"    --ctp-{name}: {value}; --ctp-{name}-rgb: {r}, {g}, {b};{note}"
+
+
 def render(flavour):
     p = PALETTE[flavour]
     dark = DARK[flavour]
@@ -239,21 +294,20 @@ def render(flavour):
         "",
     ]
     for name, value in p.items():
-        r, g, b = _rgb(value)
-        lines.append(f"    --ctp-{name}: {value}; --ctp-{name}-rgb: {r}, {g}, {b};")
+        lines.append(_var(name, value))
 
     lines += ["", "    /* Bootstrap roles. */"]
     for role, colour in ROLES.items():
         value = role_colour(p, colour, dark)
-        r, g, b = _rgb(value)
         note = "" if value == p[colour] else f"  /* {colour}, deepened to read on every surface */"
-        lines.append(f"    --ctp-{role}: {value}; --ctp-{role}-rgb: {r}, {g}, {b};{note}")
+        lines.append(_var(role, value, note))
         if role in ALERT_ROLES:
             lines.append(f"    --ctp-{role}-emphasis: {emphasis_colour(p, value, dark)};")
     lines.append(f"    --ctp-muted: var(--ctp-{muted_colour(p)});")
-    secondary = secondary_fill(p)
-    r, g, b = _rgb(p[secondary])
-    lines.append(f"    --ctp-secondary: {p[secondary]}; --ctp-secondary-rgb: {r}, {g}, {b};")
+    lines.append(_var("secondary", p[secondary_fill(p)]))
+    # Catppuccin's primary is a pastel carrying base, like every other role.
+    lines.append("    --ctp-primary-text: var(--ctp-primary); --ctp-primary-text-rgb: var(--ctp-primary-rgb);")
+    lines.append("    --ctp-on-primary: var(--ctp-base);")
 
     lines += [
         "",
@@ -270,50 +324,155 @@ def render(flavour):
         f"--ctp-on-dark-rgb: var(--ctp-{on_dark(dark)}-rgb);",
         f"    --ctp-dark-fill: var(--ctp-{dark_fill(dark)}); "
         f"--ctp-dark-fill-rgb: var(--ctp-{dark_fill(dark)}-rgb);",
-        # The close X on an accent fill, drawn in base like the text there.
-        "    --ctp-close-on-fill: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' "
-            f"fill='{p['base']}'><path d='M.293.293a1 1 0 0 1 1.414 0L8 6.586 "
-            "14.293.293a1 1 0 1 1 1.414 1.414L9.414 8l6.293 6.293a1 1 0 0 1-1.414 "
-            "1.414L8 9.414l-6.293 6.293a1 1 0 0 1-1.414-1.414L6.586 8 .293 1.707a1 "
-            "1 0 0 1 0-1.414'/></svg>") + ";",
-        "    --ctp-select-chevron: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' "
-            f"stroke='{p['text']}' stroke-linecap='round' stroke-linejoin='round' "
-            "stroke-width='2' d='m2 5 6 6 6-6'/></svg>") + ";",
-        "    --ctp-switch-focus: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
-            f"<circle r='3' fill='{p['lavender']}'/></svg>") + ";",
-        # Form check marks, drawn in base like any text on an accent fill.
-        "    --ctp-check-mark: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path fill='none' "
-            f"stroke='{p['base']}' stroke-linecap='round' stroke-linejoin='round' "
-            "stroke-width='3' d='m6 10 3 3 6-6'/></svg>") + ";",
-        "    --ctp-check-indeterminate: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path fill='none' "
-            f"stroke='{p['base']}' stroke-linecap='round' stroke-linejoin='round' "
-            "stroke-width='3' d='M6 10h8'/></svg>") + ";",
-        "    --ctp-radio-dot: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
-            f"<circle r='2' fill='{p['base']}'/></svg>") + ";",
-        "    --ctp-switch-on: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'>"
-            f"<circle r='3' fill='{p['base']}'/></svg>") + ";",
-        "    --ctp-toggler-icon: " + _svg_url(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'><path "
-            f"stroke='{p['text']}' stroke-linecap='round' stroke-miterlimit='10' "
-            "stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/></svg>") + ";",
-        "}",
+        # The header: a crust bar with text, as in the Catppuccin ports.
+        "    --ctp-nav-bg: var(--ctp-crust); --ctp-nav-text: var(--ctp-text);",
+        "    --ctp-nav-muted: var(--ctp-subtext1); --ctp-nav-rule: 1px solid var(--ctp-surface0);",
+    ]
+    lines += _icons(p["base"], p["base"], p["text"], p["lavender"], p["text"])
+    lines += ["}", ""]
+    return "\n".join(lines)
+
+
+# ── The themes derived from a design palette (core.themes.PALETTES) ────────
+# The palette has ten colours; the rules read Catppuccin's names. Surfaces are
+# mixed from page, raised and rule, each backed off until body text reads on
+# it; role colours are the palette's, moved only where one falls short on a
+# surface the palette does not name (cards, headers). Primary is a fill that
+# carries white text, so it gets a separate text side, the same hue stepped
+# toward the ink until it reads.
+WARNING_SEED = {True: "#e0af68", False: "#8a5a00"}
+
+# Comic texture and line, read by comic.css (and comic-ink.css, for the themes
+# with a frame). Noir's is all palette.
+COMIC = {
+    "newsprint": {
+        "paper": "radial-gradient(rgb(60 45 20 / 0.09) 0.6px, transparent 0.9px)", "paper-size": "5px 5px",
+        "title": "none", "panel": "var(--ctp-surface0)",
+    },
+    "pop-art": {
+        "paper": "radial-gradient(rgb(215 0 26 / 0.09) 1.1px, transparent 1.4px)", "paper-size": "7px 7px",
+        "tone": "none", "tone-size": "auto", "frame": "2px solid var(--ctp-text)",
+        "shadow": "3px 3px 0 var(--ctp-text)", "title": "none",
+        "panel": "var(--ctp-text)", "corner": "2px",
+    },
+    "manga": {
+        "paper": "none", "paper-size": "auto",
+        "tone": "radial-gradient(rgb(0 0 0 / 0.14) 0.7px, transparent 1px)", "tone-size": "4px 4px",
+        "frame": "1.5px solid var(--ctp-text)", "shadow": "none",
+        "title": "repeating-conic-gradient(from 0deg at 92% 60%, rgb(0 0 0 / 0.06) 0 1.5deg, "
+                 "transparent 1.5deg 6deg)",
+        "panel": "var(--ctp-text)", "corner": "2px",
+    },
+}
+NAV_RULE = {"noir": "2px solid var(--ctp-primary)", "pop-art": "3px solid var(--ctp-text)"}
+
+
+def _surface(start, end, share, ink):
+    """``start`` moved up to ``share`` of the way to ``end``, less where body
+    text would no longer read on it."""
+    for step in range(round(share * 100), -1, -5):
+        value = themes.toward(start, end, step / 100)
+        if contrast(ink, value) >= MIN_CONTRAST:
+            return value
+    return start
+
+
+def derive(theme_id):
+    """{name: hex} in Catppuccin's vocabulary for a design palette."""
+    pal = themes.PALETTES[theme_id]
+    dark = themes.is_dark_theme(theme_id)
+    ink = pal["ink"]
+    # Pop Art and Manga rule in ink; their surfaces are a grey of it (comic.css
+    # draws the inked lines).
+    rule = (pal["rule"] if contrast(ink, pal["rule"]) >= MIN_CONTRAST
+            else themes.toward(pal["raised"], pal["rule"], 0.15))
+    crust = (themes.toward(pal["page"], "#000000", 0.25) if dark
+             else _surface(pal["raised"], rule, 0.25, ink))
+    p = {"base": pal["page"], "mantle": pal["raised"], "crust": crust, "text": ink}
+    p["surface0"] = _surface(pal["raised"], rule, 0.5, ink)
+    p["surface1"] = _surface(pal["raised"], rule, 1.0, ink)
+    p["surface2"] = themes.toward(p["surface1"], ink, 0.2)
+    sign = +1 if dark else -1
+    surfaces = backgrounds(p)
+    p["muted"] = readable(pal["muted"], surfaces, sign)
+    p["lavender"] = readable(pal["link"], surfaces, sign)
+    p["primary"] = pal["primary"]
+    p["primary-text"] = readable(
+        themes.accent_text_side(pal["primary"], pal["page"], pal["emphasis"]), surfaces, sign)
+    p["link"] = p["lavender"]
+    p["link-hover"] = readable(themes.toward(p["link"], pal["emphasis"], 0.3), surfaces, sign)
+    p["success"] = readable(pal["success"], surfaces, sign)
+    p["danger"] = readable(pal["error"], surfaces, sign)
+    # Noir has one red: its information colour is a grey.
+    p["info"] = p["muted"] if theme_id == "noir" else p["link"]
+    p["warning"] = readable(WARNING_SEED[dark], surfaces, sign)
+    p["secondary"] = p[secondary_fill(p)]
+    p["nav"] = pal.get("nav", pal["primary"])
+    return p
+
+
+def render_derived(theme_id):
+    p = derive(theme_id)
+    dark = themes.is_dark_theme(theme_id)
+    lines = [
+        f"/* {themes.DERIVED_THEMES[theme_id]}: palette for static/css/themes/catppuccin.css.",
+        " * GENERATED by tools/build_catppuccin_themes.py from core/themes.py PALETTES --",
+        " * edit those, not this. */",
+        "",
+        ":root {",
+        f"    color-scheme: {'dark' if dark else 'light'};",
         "",
     ]
+    for name in ("base", "mantle", "crust", "text", "surface0", "surface1", "surface2", "lavender"):
+        lines.append(_var(name, p[name]))
+    # One muted colour serves every label and placeholder.
+    for name in ("subtext0", "subtext1", "overlay0", "overlay1", "overlay2"):
+        lines.append(_var(name, p["muted"]))
+
+    lines += ["", "    /* Bootstrap roles. */"]
+    for role in ("primary", "success", "info", "warning", "danger", "link", "link-hover"):
+        lines.append(_var(role, p[role]))
+        if role in ALERT_ROLES:
+            text_side = p["primary-text"] if role == "primary" else p[role]
+            lines.append(f"    --ctp-{role}-emphasis: {emphasis_colour(p, text_side, dark)};")
+    lines.append(_var("primary-text", p["primary-text"]))
+    lines.append("    --ctp-on-primary: #ffffff;")
+    lines.append("    --ctp-code: var(--ctp-primary-text);")
+    lines.append("    --ctp-muted: var(--ctp-subtext0);")
+    lines.append(_var("secondary", p["secondary"]))
+
+    lines += [
+        "",
+        f"    --ctp-white-text: {'var(--ctp-text)' if dark else '#ffffff'};",
+        f"    --ctp-color-scheme: {'dark' if dark else 'light'};",
+        "    --ctp-raised: var(--ctp-mantle); --ctp-raised-rgb: var(--ctp-mantle-rgb);",
+        f"    --ctp-on-dark: var(--ctp-{'text' if dark else 'base'}); "
+        f"--ctp-on-dark-rgb: var(--ctp-{'text' if dark else 'base'}-rgb);",
+        f"    --ctp-dark-fill: var(--ctp-{'crust' if dark else 'text'}); "
+        f"--ctp-dark-fill-rgb: var(--ctp-{'crust' if dark else 'text'}-rgb);",
+        # The header is the primary fill (Noir: black) with white text.
+        f"    --ctp-nav-bg: {p['nav']}; --ctp-nav-text: #ffffff;",
+        "    --ctp-nav-muted: rgba(255, 255, 255, 0.85); "
+        f"--ctp-nav-rule: {NAV_RULE.get(theme_id, 'none')};",
+    ]
+    lines += _icons(p["base"], "#ffffff", p["text"], p["lavender"], "#ffffff")
+    if theme_id in COMIC:
+        lines += ["", "    /* Texture and line, for comic.css. */"]
+        lines += [f"    --comic-{name}: {value};" for name, value in COMIC[theme_id].items()]
+    lines += ["}", ""]
     return "\n".join(lines)
 
 
 def outputs():
-    return {
+    out = {
         os.path.join(OUT_DIR, f"catppuccin-{flavour}.css"): render(flavour)
         for flavour in PALETTE
     }
+    out.update({
+        os.path.join(OUT_DIR, f"{theme_id}.css"): render_derived(theme_id)
+        for theme_id in themes.DERIVED_THEMES
+    })
+    return out
 
 
 def main(argv):

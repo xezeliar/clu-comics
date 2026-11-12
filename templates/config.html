@@ -1948,18 +1948,19 @@
                 <div class="clu-settings-panel mb-4">
                     <h2 class="h4">Default Theme</h2>
                     <p class="text-muted">
-                        The theme for users who haven't picked their own. Themes provided by
-                        <a href="https://bootswatch.com/" target="_blank">Bootswatch</a>, plus
-                        <a href="https://github.com/morhetz/gruvbox" target="_blank">Gruvbox</a> and
-                        <a href="https://catppuccin.com/" target="_blank">Catppuccin</a>.
+                        The theme for users who haven't picked their own; Save applies it. Themes from
+                        <a href="https://bootswatch.com/" target="_blank">Bootswatch</a>,
+                        <a href="https://github.com/morhetz/gruvbox" target="_blank">Gruvbox</a>,
+                        <a href="https://catppuccin.com/" target="_blank">Catppuccin</a> and the editor palettes they are named for.
                         To change only your own theme, go to
                         <a href="{{ url_for('auth.account') }}#appearance">My Account &rarr; Appearance</a>.
                     </p>
 
-                    {% with select_id='bootstrapTheme',
-                            selected_theme=bootstrapTheme|default('default'),
-                            preview_note='Save settings to apply this theme.' %}
-                    {% include 'partials/theme_picker.html' %}
+                    {% with ap_id='siteAppearance',
+                            ap_state=site_appearance,
+                            ap_catalog=appearance_catalog,
+                            ap_per_user=false %}
+                    {% include 'partials/appearance_panel.html' %}
                     {% endwith %}
                 </div>
 
@@ -2319,6 +2320,7 @@
 <script src="{{ url_for('static', filename='js/clu-rename-preview.js') }}?v={{ range(1000, 9999) | random }}"></script>
 <script src="{{ url_for('static', filename='js/clu-streaming.js') }}?v={{ range(1000, 9999) | random }}"></script>
 <script src="{{ url_for('static', filename='js/clu-personalization.js') }}?v={{ range(1000, 9999) | random }}"></script>
+<script src="{{ url_for('static', filename='js/clu-appearance.js') }}?v={{ range(1000, 9999) | random }}"></script>
 <script src="{{ url_for('static', filename='js/database_panel.js') }}?v={{ range(1000, 9999) | random }}"></script>
 <script>
     // The Komga schedule time is stored as UTC, like every other schedule time.
@@ -2757,7 +2759,9 @@
     // Readers for the Personalization sections (personalizationSections).
 
     function readStylingSettings() {
-        return { bootstrapTheme: document.getElementById('bootstrapTheme')?.value || 'darkly' };
+        // The Appearance panel; the site default has no per-user switches.
+        const { publisherDots, coverTilt, ...site } = CLU.appearancePayload('siteAppearance');
+        return site;
     }
 
     // The width is applied server-side, so a change shows after a reload.
@@ -3540,13 +3544,9 @@
         previewElement.textContent = CLU.movePreviewText(patternInput.value, collectCleanupConfig());
     }
 
-    // Theme preview lives in static/js/clu-personalization.js (shared with /account).
+    // The Appearance panel lives in static/js/clu-appearance.js (shared with /account).
     document.addEventListener('DOMContentLoaded', function () {
-        CLU.initThemePreview({
-            selectId: 'bootstrapTheme',
-            imgId: 'themePreviewImg',
-            nameId: 'themePreviewName'
-        });
+        CLU.initAppearance('siteAppearance');
     });
 </script>
 

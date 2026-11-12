@@ -1,6 +1,8 @@
 /*
  * Catppuccin — the rules shared by all four flavours, on top of stock
- * Bootstrap 5.3.8.
+ * Bootstrap 5.3.8. The themes derived from core/themes.py PALETTES (Nord,
+ * Dracula, ..., the comic themes) use them too, with palette files in the same
+ * vocabulary from the same generator.
  *
  * Every colour here is a --ctp-* variable. Each flavour's palette file
  * (catppuccin-latte.css, -frappe, -macchiato, -mocha) defines them and is
@@ -17,7 +19,11 @@
  *
  * Unlike Gruvbox, one shade serves both the fill and the text side of a role
  * (the palette is built for it; Latte's light accents are deepened by the
- * generator), so .bg-x and .text-x can share Bootstrap's --bs-x-rgb.
+ * generator), so .bg-x and .text-x can share Bootstrap's --bs-x-rgb. Primary
+ * is the exception: a derived theme's primary (and any accent) is a deep fill
+ * carrying white, so it has --ctp-on-primary for the text on it and
+ * --ctp-primary-text for its text side. A Catppuccin flavour sets them to base
+ * and primary.
  */
 
 /* ── Bootstrap variables ─────────────────────────────────────────────────── */
@@ -112,6 +118,7 @@ body {
 /* Bootstrap already reads .text-primary etc. from --bs-x-rgb above. These are
    the ones it hardcodes, or that mean something else on a dark page. */
 .text-muted     { color: var(--ctp-muted) !important; }
+.text-primary   { color: rgba(var(--ctp-primary-text-rgb), var(--bs-text-opacity, 1)) !important; }
 .text-secondary { color: rgba(var(--ctp-subtext1-rgb), var(--bs-text-opacity, 1)) !important; }
 /* Light text for surfaces that are dark on every theme (the reader's chrome,
    the bulk-action bars); on a dark flavour that is just the text colour. */
@@ -123,15 +130,15 @@ body {
 
 /* On an accent fill the text is base, whatever the template asked for --
    "bg-success text-white" and "bg-warning text-dark" both. */
-.bg-primary.text-white, .bg-success.text-white, .bg-info.text-white,
+.bg-success.text-white, .bg-info.text-white,
 .bg-warning.text-white, .bg-danger.text-white,
-.bg-primary.text-dark, .bg-success.text-dark, .bg-info.text-dark,
+.bg-success.text-dark, .bg-info.text-dark,
 .bg-warning.text-dark, .bg-danger.text-dark,
-.badge.bg-primary, .badge.bg-success, .badge.bg-info,
+.badge.bg-success, .badge.bg-info,
 .badge.bg-warning, .badge.bg-danger,
-.text-bg-primary, .text-bg-success, .text-bg-info,
+.text-bg-success, .text-bg-info,
 .text-bg-warning, .text-bg-danger,
-.card.bg-primary, .card.bg-success, .card.bg-info,
+.card.bg-success, .card.bg-info,
 .card.bg-warning, .card.bg-danger {
     color: var(--ctp-base) !important;
     /* .card-body sets its own colour from this, past the !important above
@@ -139,15 +146,24 @@ body {
     --bs-card-color: var(--ctp-base);
     --bs-heading-color: var(--ctp-base);   /* an <h5> count inside the card */
 }
+.bg-primary.text-white, .bg-primary.text-dark, .badge.bg-primary,
+.text-bg-primary, .card.bg-primary {
+    color: var(--ctp-on-primary) !important;
+    --bs-card-color: var(--ctp-on-primary);
+    --bs-heading-color: var(--ctp-on-primary);
+}
 /* A child's own .text-white inside the fill ("card-header bg-primary
    text-white" > icon) would otherwise be the light text colour on a pastel.
    Not in the navbar: it is "bg-primary" but painted crust (Components). */
-.bg-primary:not(.navbar) .text-white, .bg-success:not(.navbar) .text-white,
+.bg-success:not(.navbar) .text-white,
 .bg-info:not(.navbar) .text-white, .bg-warning:not(.navbar) .text-white,
 .bg-danger:not(.navbar) .text-white,
-.text-bg-primary .text-white, .text-bg-success .text-white, .text-bg-info .text-white,
+.text-bg-success .text-white, .text-bg-info .text-white,
 .text-bg-warning .text-white, .text-bg-danger .text-white {
     color: var(--ctp-base) !important;
+}
+.bg-primary:not(.navbar) .text-white, .text-bg-primary .text-white {
+    color: var(--ctp-on-primary) !important;
 }
 /* The close X on a fill: base too. Bootstrap draws it black at half opacity,
    and .btn-close-white (or the dark flavours' data-bs-theme) turns it white,
@@ -161,6 +177,9 @@ body {
     --bs-btn-close-filter: none;
     --bs-btn-close-opacity: 1;
     --bs-btn-close-hover-opacity: 1;
+}
+.bg-primary:not(.navbar) .btn-close, .text-bg-primary .btn-close {
+    --bs-btn-close-bg: var(--ctp-close-on-primary);
 }
 .text-bg-secondary, .text-bg-light,
 .badge.bg-secondary, .badge.bg-light,
@@ -193,7 +212,11 @@ body {
     --bs-btn-disabled-border-color: var(--ctp-btn-fill);
     --bs-btn-disabled-opacity: 0.55;
 }
-.btn-primary { --ctp-btn-fill: var(--ctp-primary); --bs-btn-focus-shadow-rgb: var(--ctp-primary-rgb); }
+.btn-primary {
+    --ctp-btn-fill: var(--ctp-primary); --bs-btn-focus-shadow-rgb: var(--ctp-primary-rgb);
+    --bs-btn-color: var(--ctp-on-primary); --bs-btn-hover-color: var(--ctp-on-primary);
+    --bs-btn-active-color: var(--ctp-on-primary); --bs-btn-disabled-color: var(--ctp-on-primary);
+}
 .btn-success { --ctp-btn-fill: var(--ctp-success); --bs-btn-focus-shadow-rgb: var(--ctp-success-rgb); }
 .btn-info    { --ctp-btn-fill: var(--ctp-info);    --bs-btn-focus-shadow-rgb: var(--ctp-info-rgb); }
 .btn-warning { --ctp-btn-fill: var(--ctp-warning); --bs-btn-focus-shadow-rgb: var(--ctp-warning-rgb); }
@@ -248,7 +271,7 @@ body {
     --bs-btn-disabled-color: var(--ctp-btn-fill);
     --bs-btn-disabled-border-color: var(--ctp-btn-fill);
 }
-.btn-outline-primary { --ctp-btn-fill: var(--ctp-primary); --bs-btn-focus-shadow-rgb: var(--ctp-primary-rgb); }
+.btn-outline-primary { --ctp-btn-fill: var(--ctp-primary-text); --bs-btn-focus-shadow-rgb: var(--ctp-primary-rgb); }
 .btn-outline-success { --ctp-btn-fill: var(--ctp-success); --bs-btn-focus-shadow-rgb: var(--ctp-success-rgb); }
 .btn-outline-info    { --ctp-btn-fill: var(--ctp-info);    --bs-btn-focus-shadow-rgb: var(--ctp-info-rgb); }
 .btn-outline-warning { --ctp-btn-fill: var(--ctp-warning); --bs-btn-focus-shadow-rgb: var(--ctp-warning-rgb); }
@@ -291,15 +314,16 @@ body {
 }
 
 /* ── Components ──────────────────────────────────────────────────────────── */
-/* The header is "bg-primary navbar-dark": a crust bar with text, as in the
-   Catppuccin ports, rather than a mauve slab. Bootstrap sets these on
-   .navbar[data-bs-theme=dark], which outranks a bare .navbar. */
+/* The header is "bg-primary navbar-dark", painted --ctp-nav-bg: a crust bar
+   with text on a Catppuccin flavour, as in the Catppuccin ports, rather than
+   a mauve slab; the primary fill with white text on a derived theme. Bootstrap
+   sets these on .navbar[data-bs-theme=dark], which outranks a bare .navbar. */
 .navbar, .navbar[data-bs-theme] {
-    --bs-navbar-color: var(--ctp-subtext1);
-    --bs-navbar-hover-color: var(--ctp-text);
-    --bs-navbar-active-color: var(--ctp-text);
-    --bs-navbar-brand-color: var(--ctp-text);
-    --bs-navbar-brand-hover-color: var(--ctp-text);
+    --bs-navbar-color: var(--ctp-nav-muted);
+    --bs-navbar-hover-color: var(--ctp-nav-text);
+    --bs-navbar-active-color: var(--ctp-nav-text);
+    --bs-navbar-brand-color: var(--ctp-nav-text);
+    --bs-navbar-brand-hover-color: var(--ctp-nav-text);
     --bs-navbar-toggler-border-color: var(--ctp-surface1);
     --bs-navbar-toggler-icon-bg: var(--ctp-toggler-icon);
 }
@@ -309,8 +333,8 @@ body {
     --bs-navbar-toggler-icon-bg: var(--ctp-toggler-icon);
 }
 .navbar.bg-primary, .navbar.bg-dark, .navbar.bg-body-tertiary, .navbar.bg-light {
-    background-color: var(--ctp-crust) !important;
-    border-bottom: 1px solid var(--ctp-surface0);
+    background-color: var(--ctp-nav-bg) !important;
+    border-bottom: var(--ctp-nav-rule);
 }
 
 .card {
@@ -333,7 +357,7 @@ body {
     --bs-dropdown-link-color: var(--ctp-text);
     --bs-dropdown-link-hover-color: var(--ctp-text);
     --bs-dropdown-link-hover-bg: var(--ctp-surface0);
-    --bs-dropdown-link-active-color: var(--ctp-base);
+    --bs-dropdown-link-active-color: var(--ctp-on-primary);
     --bs-dropdown-link-active-bg: var(--ctp-primary);
     --bs-dropdown-header-color: var(--ctp-muted);
     --bs-dropdown-divider-bg: var(--ctp-surface1);
@@ -347,7 +371,7 @@ body {
     --bs-list-group-action-active-bg: var(--ctp-surface1);
     --bs-list-group-active-bg: var(--ctp-primary);
     --bs-list-group-active-border-color: var(--ctp-primary);
-    --bs-list-group-active-color: var(--ctp-base);
+    --bs-list-group-active-color: var(--ctp-on-primary);
 }
 .nav-tabs {
     --bs-nav-tabs-border-color: var(--ctp-surface1);
@@ -362,7 +386,7 @@ body {
 }
 .nav-pills {
     --bs-nav-pills-link-active-bg: var(--ctp-primary);
-    --bs-nav-pills-link-active-color: var(--ctp-base);
+    --bs-nav-pills-link-active-color: var(--ctp-on-primary);
 }
 .pagination {
     --bs-pagination-color: var(--ctp-link);
@@ -374,7 +398,7 @@ body {
     --bs-pagination-focus-color: var(--ctp-link-hover);
     --bs-pagination-focus-bg: var(--ctp-surface0);
     --bs-pagination-focus-box-shadow: 0 0 0 0.25rem rgba(var(--ctp-lavender-rgb), 0.25);
-    --bs-pagination-active-color: var(--ctp-base);
+    --bs-pagination-active-color: var(--ctp-on-primary);
     --bs-pagination-active-bg: var(--ctp-primary);
     --bs-pagination-active-border-color: var(--ctp-primary);
     --bs-pagination-disabled-color: var(--ctp-overlay0);
@@ -384,7 +408,7 @@ body {
 .progress, .progress-stacked {
     --bs-progress-bg: var(--ctp-surface0);
     --bs-progress-bar-bg: var(--ctp-primary);
-    --bs-progress-bar-color: var(--ctp-base);
+    --bs-progress-bar-color: var(--ctp-on-primary);
 }
 .accordion {
     --bs-accordion-bg: var(--ctp-mantle);

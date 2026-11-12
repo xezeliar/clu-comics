@@ -162,7 +162,10 @@ class TestLocalThemes:
             assert local_stylesheets(theme_id), theme_id
             for css in local_stylesheets(theme_id):
                 assert os.path.isfile(os.path.join(static, css)), css
-            assert os.path.isfile(os.path.join(static, spec["preview"])), spec["preview"]
+            # A preview image is optional: the Appearance panel draws its tiles
+            # from the palette, and only the setup wizard's picker uses one.
+            if spec.get("preview"):
+                assert os.path.isfile(os.path.join(static, spec["preview"])), spec["preview"]
 
     def test_every_local_theme_has_year_in_review_colours(self):
         """wrapped.py falls back to the default palette for a theme it does
@@ -295,10 +298,12 @@ class TestCatppuccin:
         used = set(re.findall(r"var\(--(ctp-[a-z0-9-]+)\)", rules))
         # Set inside the rules themselves (per-component fills)
         local = set(re.findall(r"--(ctp-[a-z0-9-]+)\s*:", rules))
-        for flavour in self.FLAVOURS:
-            with open(os.path.join(static, f"catppuccin-{flavour}.css"), encoding="utf-8") as fh:
+        from core.themes import DERIVED_THEMES
+        palettes = [f"catppuccin-{f}" for f in self.FLAVOURS] + list(DERIVED_THEMES)
+        for name in palettes:
+            with open(os.path.join(static, f"{name}.css"), encoding="utf-8") as fh:
                 defined = set(re.findall(r"--(ctp-[a-z0-9-]+)\s*:", fh.read()))
-            assert used - local - defined == set(), flavour
+            assert used - local - defined == set(), name
 
     def test_role_colours_read_on_every_surface(self):
         """Each role is text on the page, cards and headers (base, mantle,
@@ -455,8 +460,132 @@ class TestCatppuccin:
         """The navbar is data-bs-theme="dark" on every theme, so a rule keyed
         on it would leak dark styling into Latte's header."""
         static = os.path.join(os.path.dirname(TEMPLATE_DIR), "static", "css", "themes")
-        with open(os.path.join(static, "catppuccin.css"), encoding="utf-8") as fh:
-            rules = fh.read()
         import re
-        rules = re.sub(r"/\*.*?\*/", "", rules, flags=re.S)
-        assert 'data-bs-theme="dark"' not in rules and "data-bs-theme=dark" not in rules
+        for name in ("catppuccin.css", "comic.css", "comic-ink.css"):
+            with open(os.path.join(static, name), encoding="utf-8") as fh:
+                rules = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+            assert 'data-bs-theme="dark"' not in rules and "data-bs-theme=dark" not in rules, name
+
+
+NEW_THEMES = ("nord", "dracula", "tokyo-night", "rose-pine", "everforest", "one-dark",
+              "solarized-dark", "solarized-light", "kanagawa", "newsprint", "noir",
+              "pop-art", "manga")
+
+
+class TestDerivedThemes:
+    """The 13 themes mapped from a ten-colour palette onto catppuccin.css."""
+
+    _tool = staticmethod(TestCatppuccin._tool)
+
+    def test_ids_and_kinds(self):
+        from core.themes import COMIC_THEMES, DERIVED_THEMES
+        assert set(DERIVED_THEMES) == set(NEW_THEMES)
+        assert set(NEW_THEMES) <= THEME_IDS
+        light = {"solarized-light", "newsprint", "pop-art", "manga"}
+        for t in NEW_THEMES:
+            assert is_dark_theme(t) == (t not in light), t
+        assert COMIC_THEMES == ("newsprint", "noir", "pop-art", "manga")
+
+    def test_stylesheets_in_order(self):
+        from core.themes import local_stylesheets
+        assert local_stylesheets("nord") == ("css/themes/nord.css", "css/themes/catppuccin.css")
+        assert local_stylesheets("newsprint")[-1] == "css/themes/comic.css"
+        assert local_stylesheets("manga")[-2:] == ("css/themes/comic.css", "css/themes/comic-ink.css")
+
+    def test_roles_read_on_every_surface(self):
+        tool = self._tool()
+        for t in NEW_THEMES:
+            p = tool.derive(t)
+            for role in ("text", "muted", "link", "success", "danger", "warning", "primary-text"):
+                for bg in ("base", "mantle", "crust"):
+                    assert tool.contrast(p[role], p[bg]) >= 4.5, (t, role, bg)
+            # Fills carry white text.
+            assert tool.contrast("#ffffff", p["primary"]) >= 4.5, t
+            assert tool.contrast("#ffffff", p["nav"]) >= 4.5, t
+
+    def test_tiles_draw_from_the_same_palette(self):
+        from core.themes import appearance_catalog
+        cat = appearance_catalog()
+        grouped = [t for _, ids in cat["groups"] for t in ids] + list(cat["more"])
+        assert sorted(grouped) == sorted(THEME_ORDER)
+        assert [n for n, _ in cat["groups"]] == ["Light", "Dark", "Comic"]
+        for t in THEME_ORDER:
+            assert cat["themes"][t]["dark"] == is_dark_theme(t), t
+
+
+class TestAppearance:
+
+    def test_accent_swatches_carry_white_text(self):
+        from core.themes import ACCENT_COLOURS, contrast
+        for colour in ACCENT_COLOURS:
+            assert contrast("#ffffff", colour) >= 4.5, colour
+
+    @pytest.mark.parametrize("page,ink", [("#ffffff", "#212529"), ("#000000", "#e0e0e0"),
+                                          ("#2e3440", "#d8dee9"), ("#fdf6e3", "#586e75")])
+    def test_accent_text_side_reads_on_the_page(self, page, ink):
+        from core.themes import ACCENT_COLOURS, accent_text_side, contrast
+        for colour in ACCENT_COLOURS:
+            assert contrast(accent_text_side(colour, page, ink), page) >= 4.5, (colour, page)
+
+    def test_normalize_rejects_junk(self):
+        from core.themes import APPEARANCE_DEFAULTS, normalize_appearance
+        got = normalize_appearance({"theme": "nope", "mode": "x", "light": "darkly",
+                                    "dark": "flatly", "oled": "yes", "accent": "red;}"})
+        assert got == APPEARANCE_DEFAULTS
+
+    def test_css_is_empty_by_default(self):
+        from core.themes import APPEARANCE_DEFAULTS, appearance_css
+        assert appearance_css(dict(APPEARANCE_DEFAULTS)) == ""
+
+    def test_true_black_only_on_dark_themes(self):
+        from core.themes import APPEARANCE_DEFAULTS, appearance_css
+        dark = appearance_css(dict(APPEARANCE_DEFAULTS, theme="nord", oled=True))
+        assert "--bs-body-bg:#000000" in dark
+        assert appearance_css(dict(APPEARANCE_DEFAULTS, theme="flatly", oled=True)) == ""
+
+    def test_follow_wraps_each_slot_in_its_media(self):
+        from core.themes import APPEARANCE_DEFAULTS, appearance_css
+        css = appearance_css(dict(APPEARANCE_DEFAULTS, mode="follow", light="flatly",
+                                  dark="nord", oled=True, accent="#0f766e"))
+        light, dark = css.split("@media (prefers-color-scheme: dark)")
+        assert light.startswith("@media (prefers-color-scheme: light)")
+        assert "#000000" not in light and "--bs-body-bg:#000000" in dark
+        assert "#0f766e" in light and "#0f766e" in dark
+
+    def test_partial_links_both_slots_in_follow_mode(self):
+        from flask import Flask
+        from core.themes import theme_stylesheets
+        app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        with app.test_request_context():
+            html = app.jinja_env.get_template("partials/theme_css.html").render(
+                theme_stylesheets=theme_stylesheets, theme_follow=True,
+                theme_slots=[("flatly", "(prefers-color-scheme: light)"),
+                             ("nord", "(prefers-color-scheme: dark)")],
+                theme_head_css="x{}")
+        assert 'flatly/bootstrap.min.css" rel="stylesheet" media="(prefers-color-scheme: light)"' in html
+        assert 'nord.css" rel="stylesheet" media="(prefers-color-scheme: dark)"' in html
+        assert '<style id="clu-appearance">x{}</style>' in html
+        assert "matchMedia" in html
+
+    def _panel(self, per_user, **state):
+        from flask import Flask
+        from core.themes import APPEARANCE_DEFAULTS, appearance_catalog
+        app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        with app.test_request_context():
+            return app.jinja_env.get_template("partials/appearance_panel.html").render(
+                ap_id="t", ap_state=dict(APPEARANCE_DEFAULTS, publisher_dots=True,
+                                         cover_tilt=True, **state),
+                ap_catalog=appearance_catalog(), ap_per_user=per_user, ap_site_name="Default")
+
+    def test_panel_checks_the_current_tile(self):
+        import re
+        html = self._panel(False, theme="manga")
+        for t in THEME_ORDER:
+            assert f'data-theme="{t}"' in html
+        assert re.findall(r'data-theme="([^"]+)"\s+aria-checked="true"', html) == ["manga"]
+
+    def test_switches_only_per_user(self):
+        assert 'data-k="cover_tilt"' not in self._panel(False)
+        assert 'data-act="save"' not in self._panel(False)
+        html = self._panel(True)
+        assert 'data-k="publisher_dots"' in html and 'data-k="cover_tilt"' in html
