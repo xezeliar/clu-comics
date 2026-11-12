@@ -46,6 +46,7 @@ from core.database import (
     count_files_recursive,
     get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin,
     set_directory_has_thumbnail,
+    get_first_indexed_times, get_new_arrival_counts, mark_series_visited,
 )
 
 collection_bp = Blueprint('collection', __name__)
@@ -498,6 +499,10 @@ def api_browse():
         # Cached art for every listed folder in one query; only folders the
         # index flags as having art but which are not cached touch the disk.
         cached_art = folder_art.get_art_batch([d['path'] for d in directories])
+        # "New issue arrived" sticker per folder, for this user. Opening a
+        # folder is a visit, so this one's own count is cleared here.
+        new_counts = get_new_arrival_counts([d['path'] for d in directories])
+        mark_series_visited(path)
 
         processed_directories = []
         for d in directories:
@@ -506,7 +511,8 @@ def api_browse():
                 'has_thumbnail': d.get('has_thumbnail', False),
                 'has_files': None,
                 'folder_count': None,
-                'file_count': None
+                'file_count': None,
+                'new_count': new_counts.get(d['path'], 0),
             }
 
             # core.folder_art, not a local lookup: the indexer sets
@@ -700,6 +706,9 @@ def api_scan_directory():
         # re-added below. delete_file_index_entry, NOT forget_deleted_path --
         # clearing reading-list mappings here would wipe every match under this
         # folder every time someone rescans it.
+        # Not an arrival either: files already indexed keep their time, so
+        # only a file the rescan finds for the first time reads as new.
+        arrived = get_first_indexed_times(path)
         delete_file_index_entry(path)
 
         dir_count = 0
@@ -754,7 +763,8 @@ def api_scan_directory():
                     path=full_path,
                     entry_type='file',
                     parent=root,
-                    size=size
+                    size=size,
+                    first_indexed_at=arrived.get(full_path),
                 )
                 file_count += 1
 

@@ -832,6 +832,51 @@ body.collection-select-mode {
     margin-left: 0;
 }
 
+/* "New issue arrived" sticker (folder cards). Fixed colours, like the issue
+   sticker, because it sits on cover art: 94% white, dark ink, thin outline.
+   Above the hover-revealed To Read button in the same corner, and out of the
+   way while that button is in use. */
+.new-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgb(255 255 255 / 94%);
+    color: #212529;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.5;
+    outline: 1px solid rgb(0 0 0 / 65%);
+    z-index: 11;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.new-badge.gone,
+.thumbnail-container:hover .new-badge,
+.thumbnail-container:focus-within .new-badge {
+    opacity: 0;
+    transform: scale(0.85);
+}
+
+/* The selection checkbox uses the top-left corner. */
+body.collection-select-mode .new-badge {
+    display: none;
+}
+
+.file-grid.view-text .new-badge {
+    position: static;
+    order: -1;
+    white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .new-badge {
+        transition: none;
+    }
+}
+
 /* Dashboard Section Styles */
 .dashboard-section {
     position: relative;

@@ -510,12 +510,17 @@ def convert_to_cbz(file_path):
             os.remove(file_path)
 
             # Invalidate browse cache for parent directory
-            from core.database import invalidate_browse_cache, delete_file_index_entry, add_file_index_entry
+            from core.database import (
+                invalidate_browse_cache, delete_file_index_entry, add_file_index_entry,
+                get_first_indexed_times,
+            )
             invalidate_browse_cache(parent_dir)
             app_logger.info(f"Invalidated browse cache for: {parent_dir}")
 
             # Update file index: remove old CBR entry and add new CBZ entry
             try:
+                # A conversion is not an arrival: keep the "new issue" time.
+                arrived = get_first_indexed_times(file_path).get(file_path)
                 delete_file_index_entry(file_path)
                 file_size = os.path.getsize(cbz_file_path) if os.path.exists(cbz_file_path) else None
                 add_file_index_entry(
@@ -523,7 +528,8 @@ def convert_to_cbz(file_path):
                     path=cbz_file_path,
                     entry_type='file',
                     size=file_size,
-                    parent=parent_dir
+                    parent=parent_dir,
+                    first_indexed_at=arrived,
                 )
                 # This is a RENAME wearing a delete's clothes, which is why it
                 # calls delete_file_index_entry and NOT forget_deleted_path:

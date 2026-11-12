@@ -525,6 +525,7 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
                         hasFiles: dir.has_files || false,
                         folderCount: dir.folder_count || 0,
                         fileCount: dir.file_count || 0,
+                        newCount: dir.new_count || 0,
                         metadataPending: hasPendingMetadata,
                         thumbnailPending: hasPendingThumbnail
                     });
@@ -1584,6 +1585,15 @@ async function loadContinueReading(preservePage = false) {
 /**
  * Render the current page of items.
  */
+/**
+ * Wording of the "New issue arrived" sticker: "New", "2 new" .. "9 new",
+ * then "9+ new".
+ */
+function newIssuesLabel(n) {
+    if (n === 1) return 'New';
+    return n > 9 ? '9+ new' : `${n} new`;
+}
+
 function renderPage() {
     // While a search or letter narrows the grid, the dashboard shelves above
     // it (Recently Added, Discover...) step aside so the results, or the
@@ -2044,8 +2054,24 @@ function renderGrid(items) {
                 img.style.display = 'none';
             }
 
+            // "New issue arrived" sticker. The card's text (its accessible
+            // name) ends with ", 2 new issues"; opening the folder clears it.
+            const newBadge = clone.querySelector('.new-badge');
+            if (newBadge && item.newCount > 0) {
+                newBadge.textContent = newIssuesLabel(item.newCount);
+                newBadge.hidden = false;
+                const srText = document.createElement('span');
+                srText.className = 'visually-hidden';
+                srText.textContent = `, ${item.newCount} new issue${item.newCount === 1 ? '' : 's'}`;
+                nameEl.appendChild(srText);
+            }
+
             // Handle click for folders
-            gridItem.onclick = () => loadDirectory(item.path);
+            gridItem.onclick = () => {
+                if (newBadge) newBadge.classList.add('gone');
+                item.newCount = 0;
+                loadDirectory(item.path);
+            };
 
             // Enable drag and drop for folders
             setupFolderDropZone(gridItem, item.path);

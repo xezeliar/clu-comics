@@ -71,3 +71,27 @@ runs the filename table through Python's `re` (the patterns are written in the
 subset both engines share, and the table was verified identical under node), and
 asserts the wiring above structurally — none of the three read-status defects is
 visible to a test that does not read the file.
+
+#### The "New issue arrived" sticker
+
+A folder card's top-left sticker ("New", "2 new" .. "9+ new"). **The arrival is
+`file_index.first_indexed_at`, recorded once per file**; per user there is only
+a `series_visits(user_id, folder_path)` row, written by `mark_series_visited`
+when that user opens the folder (`/api/browse`) or its series page. Counts are
+`get_new_arrival_counts` (direct children, `.cbz`/`.cbr`, newer than the visit
+or, with no visit, `_arrivals_floor`: the `new_arrivals_epoch` pref or the
+user's creation). The Pull List's "New arrivals" status uses the same rule.
+
+- Anything that indexes a new comic sets it, so a WATCH move needs no hook in
+  `monitor.py`: the file watcher indexes the file when it lands in a library.
+- **Anything that re-adds a row for a file that did not arrive must carry the
+  time over** (`add_file_index_entry(first_indexed_at=)`): the CBR→CBZ
+  conversion, the folder rescan and `save_file_index_to_db` do. A rename keeps
+  its row (`move_indexed_path`); `move_path_references` follows
+  `series_visits` on a folder move.
+- `previous_visited_at` moves only on a visit that found something new, so
+  `mark_series_visited`'s return (the arrived paths, passed to `series.html` as
+  `arrived_paths`) survives a reload.
+
+Tests: `tests/integration/test_new_arrivals.py`,
+`tests/routes/test_new_arrivals_routes.py`.
