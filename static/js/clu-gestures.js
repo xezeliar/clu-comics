@@ -2,8 +2,9 @@
  * clu-gestures.js: touch shortcuts. Every gesture here only opens something a
  * visible button already does (nothing is reachable by touch alone).
  *
- *   Long-press (450ms) or right-click a cover opens its "More actions" menu,
- *   the same one the round button on the card opens from the keyboard.
+ *   Long-press (450ms, finger or mouse) or right-click a cover opens its
+ *   "More actions" menu, the same one the round button on the card opens
+ *   from the keyboard.
  *
  *   Below 576px the card menu and the page header's More menu open as a
  *   bottom sheet: drag handle, scrim, drag down 80px or tap the scrim to
@@ -37,7 +38,10 @@
         pressed = null;
     }
     document.addEventListener('pointerdown', function (e) {
-        if (e.pointerType !== 'touch' || e.target.closest('button, a, input')) return;
+        // iOS sends no click after a long-press, so a guard still armed from the
+        // last one would swallow this tap (on a menu item, usually).
+        swallowClick = false;
+        if (e.button !== 0 || e.target.closest('button, a, input')) return;
         var card = e.target.closest('.grid-item');
         if (!card || !toggleOf(card)) return;
         release();
@@ -52,7 +56,7 @@
     document.addEventListener('pointermove', function (e) {
         if (timer && Math.hypot(e.clientX - origin.x, e.clientY - origin.y) > MOVE_PX) release();
     });
-    ['pointerup', 'pointercancel'].forEach(function (n) { document.addEventListener(n, release); });
+    ['pointerup', 'pointercancel', 'dragstart'].forEach(function (n) { document.addEventListener(n, release); });
     // The finger lifting after a long-press must not also open the comic.
     document.addEventListener('click', function (e) {
         if (!swallowClick) return;

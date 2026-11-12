@@ -848,6 +848,10 @@ a.clu-stat:focus-visible .clu-stat-value {
   transition: transform 0.12s ease-out;
 }
 .grid-item { -webkit-touch-callout: none; }
+/* The browser's own long-press on the cover (image drag, text selection) would
+   cancel the hold before it opens the menu. */
+.grid-item .thumbnail-container { -webkit-user-select: none; user-select: none; }
+.grid-item .thumbnail-container img { -webkit-user-drag: none; }
 @media (prefers-reduced-motion: reduce) {
   .grid-item.clu-pressing { transition: none; }
 }
