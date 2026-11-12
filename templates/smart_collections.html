@@ -157,7 +157,14 @@
     var img = el('img', 'img-fluid rounded mb-1');
     img.src = it.thumbnail_url; img.loading = 'lazy'; img.alt = '';
     a.appendChild(img);
-    a.appendChild(el('div', 'text-truncate', it.series ? it.series + (it.number ? ' #' + it.number : '') : it.name));
+    var title = el('div', 'text-truncate', it.series ? it.series + (it.number ? ' #' + it.number : '') : it.name);
+    a.appendChild(title);
+    // An issue whose folder is mapped to a series links to the series page.
+    if (it.series_url) {
+      var link = el('a', 'd-block text-truncate small', 'Series page');
+      link.href = it.series_url;
+      a.appendChild(link);
+    }
     a.appendChild(el('div', 'text-muted text-truncate', [it.publisher, it.year].filter(Boolean).join(' · ')));
     col.appendChild(a);
     return col;

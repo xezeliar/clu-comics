@@ -45,7 +45,7 @@ from core.database import (
     search_file_index, get_user_preference, get_files_recursive_paged,
     count_files_recursive,
     get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin,
-    set_directory_has_thumbnail,
+    set_directory_has_thumbnail, get_series_slugs_for_folders,
 )
 
 collection_bp = Blueprint('collection', __name__)
@@ -498,6 +498,8 @@ def api_browse():
         # Cached art for every listed folder in one query; only folders the
         # index flags as having art but which are not cached touch the disk.
         cached_art = folder_art.get_art_batch([d['path'] for d in directories])
+        # A folder mapped to a series links to its series page.
+        series_slugs = get_series_slugs_for_folders([d['path'] for d in directories])
 
         processed_directories = []
         for d in directories:
@@ -522,6 +524,10 @@ def api_browse():
             elif d.get('has_thumbnail'):
                 # Indexed flag is stale (art deleted since the last scan).
                 dir_info['has_thumbnail'] = False
+
+            if d['path'] in series_slugs:
+                dir_info['series_url'] = url_for(
+                    'series.series_view', slug=series_slugs[d['path']])
 
             processed_directories.append(dir_info)
 

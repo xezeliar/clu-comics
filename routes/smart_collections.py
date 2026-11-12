@@ -5,11 +5,14 @@ manage their own (``/api/smart-collections`` is in ``_READER_WRITE_PREFIXES``).
 The gap report is a Clerk feature like Wanted (``/gaps``, ``/api/gaps``).
 """
 
+import os
+
 from flask import Blueprint, jsonify, render_template, request, url_for
 
 from core import smart_collections as sc
 from core.app_logging import app_logger
 from core.auth import accessible_folder_prefixes, current_user
+from core.database import get_series_slugs_for_folders
 from core.gaps import get_gaps
 
 smart_collections_bp = Blueprint("smart_collections", __name__)
@@ -78,8 +81,13 @@ def api_issues(coll_id):
         offset, limit = 0, PAGE_SIZE
     items, total = sc.collection_issues(
         coll, offset, limit, accessible_folder_prefixes(current_user()))
+    # An issue in a folder mapped to a series links to its series page.
+    slugs = get_series_slugs_for_folders(
+        [os.path.dirname(it["path"]) for it in items])
     for it in items:
         it["thumbnail_url"] = url_for("get_thumbnail", path=it["path"])
+        slug = slugs.get(os.path.dirname(it["path"]))
+        it["series_url"] = url_for("series.series_view", slug=slug) if slug else None
     return jsonify({"success": True, "items": items, "total": total,
                     "offset": offset, "limit": limit})
 
