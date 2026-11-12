@@ -2344,6 +2344,9 @@ function attachScrollPinch(s) {
     let raf = 0;
 
     const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const midpoint = t => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    let mid = { x: 0, y: 0 };
+    let focus = { fx: 0, fy: 0 };  // the pinched spot, as a fraction of the column
 
     const apply = () => {
         raf = 0;
@@ -2351,19 +2354,28 @@ function attachScrollPinch(s) {
         const next = pending;
         pending = null;
         s.widthPct = next;
-        withScrollAnchor(s, () => { s.column.style.width = next + '%'; });
+        s.column.style.width = next + '%';
+        // Keep the spot under the fingers under the fingers: the strip grows
+        // around the pinch, not out of its top-left corner.
+        const box = s.column.getBoundingClientRect();
+        s.scroller.scrollLeft += box.left + focus.fx * box.width - mid.x;
+        s.scroller.scrollTop += box.top + focus.fy * box.height - mid.y;
     };
 
     s.onTouchStart = e => {
         if (e.touches.length === 2) {
             startDist = dist(e.touches);
             startWidth = s.widthPct;
+            mid = midpoint(e.touches);
+            const box = s.column.getBoundingClientRect();
+            focus = { fx: (mid.x - box.left) / box.width, fy: (mid.y - box.top) / box.height };
             s.pinching = true;
         }
     };
     s.onTouchMove = e => {
         if (!s.pinching || e.touches.length !== 2 || !startDist) return;
         e.preventDefault();  // no native scroll or zoom while two fingers are down
+        mid = midpoint(e.touches);
         const ratio = dist(e.touches) / startDist;
         pending = Math.max(SCROLL_PINCH_MIN, Math.min(SCROLL_PINCH_MAX, startWidth * ratio));
         if (!raf) raf = requestAnimationFrame(apply);
