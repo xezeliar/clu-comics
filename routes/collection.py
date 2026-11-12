@@ -247,7 +247,6 @@ def get_dashboard_sections(user_id=None):
 
 
 # =============================================================================
-
 # Pages
 # =============================================================================
 
@@ -498,6 +497,7 @@ def api_whats_new_dismiss():
     from core.database import set_user_setting
     from core.version import __version__
     return jsonify({"success": set_user_setting(WHATS_NEW_KEY, __version__)})
+
 
 def _has_series_sidecar(folder):
     """True when a folder holds a series.json or cvinfo.
