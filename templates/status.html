@@ -1,41 +1,33 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, select_field, result_count %}
+{% from 'partials/filters.html' import toolbar, filter_bar, select_field, result_count %}
 
 {% block title %}Download Status{% endblock %}
 
 {% block content %}
 <style>
-  /* Row actions are real buttons (keyboard, screen readers); this keeps them
-     icon-sized in the table. */
-  .status-action {
-    padding: 0.125rem 0.375rem;
-    font-size: 1.1em;
-    line-height: 1;
-  }
-  #downloads-table td:first-child {
-    overflow-wrap: anywhere;
-    min-width: 10rem;
-  }
-  #downloads-table .status-progress {
-    min-width: 5rem;
-  }
-  /* Phone: provider and bytes are already hidden; tighter cells let filename,
-     progress, status and actions fit without a sideways scroll. */
+  /* Downloads: one list, grouped by what you can do (see the script below). */
+  .dl-g { margin-bottom: 1rem; }
+  .dl-g > header { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; min-height: 2rem; margin-bottom: .35rem; }
+  .dl-g h3 { margin: 0 auto 0 0; font-size: .9375rem; font-weight: 600; }
+  .dl-g h3 span { font-weight: 400; color: var(--bs-secondary-color); }
+  .dl-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; }
+  .dl-row.dl-drag { background: var(--bs-tertiary-bg); }
+  .dl-row.dl-quiet .dl-name { font-weight: 400; color: var(--bs-secondary-color); }
+  .dl-main { flex: 1 1 12rem; min-width: 0; }
+  .dl-name { font-size: .875rem; font-weight: 500; overflow-wrap: anywhere; }
+  .dl-prog { flex: 0 0 11rem; display: flex; align-items: center; gap: .5rem; font-size: .8125rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+  .dl-prog .progress { flex: 1 1 0; min-width: 3rem; height: .375rem; }
+  .dl-act { display: flex; flex-wrap: wrap; gap: .3rem; margin-left: auto; justify-content: flex-end; }
+  .dl-grip { cursor: grab; color: var(--bs-secondary-color); }
+  .dl-n { min-width: 1.1rem; font-size: .8125rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+  /* Phone: progress gets its own line, the drag handle goes (the arrows
+     reorder), and every control is a 44px target. */
   @media (max-width: 575.98px) {
-    #downloads-table {
-      font-size: 0.875rem;
-    }
-    #downloads-table > :not(caption) > * > * {
-      padding: 0.375rem 0.25rem;
-    }
-    #downloads-table td:first-child {
-      min-width: 7rem;
-    }
-    #downloads-table .status-progress {
-      min-width: 3.5rem;
-    }
+    .dl-prog { order: 3; flex-basis: 100%; }
+    .dl-grip, .dl-lbl { display: none; }
+    #downloads-pane .btn-sm { min-height: 2.75rem; min-width: 2.75rem; }
   }
 </style>
 
@@ -45,13 +37,7 @@
       <li class="nav-item" role="presentation">
         <button class="nav-link active" id="downloads-tab" data-bs-toggle="tab" data-bs-target="#downloads-pane"
                 type="button" role="tab" aria-controls="downloads-pane" aria-selected="true">
-          <i class="bi bi-download me-1"></i>Active Downloads
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="queue-tab" data-bs-toggle="tab" data-bs-target="#queue-pane"
-                type="button" role="tab" aria-controls="queue-pane" aria-selected="false">
-          <i class="bi bi-cloud-arrow-down me-1"></i>Queue
+          <i class="bi bi-download me-1"></i>Downloads
         </button>
       </li>
       <li class="nav-item" role="presentation">
@@ -64,50 +50,34 @@
 
     <div class="tab-content">
       <div class="tab-pane fade show active" id="downloads-pane" role="tabpanel" aria-labelledby="downloads-tab">
-        {#- Hidden until the table has a row: over the empty state its count
-            read "0 downloads" beside two disabled buttons. -#}
+        {#- Hidden until there is a row: over the empty state its count read
+            "0 downloads". -#}
         {% call toolbar('Download list', id='downloads-toolbar', classes='d-none') %}
           <div class="clu-toolbar-row">
+            {{ filter_bar('dl-filter', [('', 'All')], aria_label='Show') }}
             <div class="clu-toolbar-end">
               {{ result_count('downloadsCount', 0, 'downloads', one='download') }}
-              <button type="button" id="clear-downloads-btn" class="btn btn-sm btn-outline-secondary" disabled>
-                <i class="bi bi-check2-all me-1" aria-hidden="true"></i>Clear completed and cancelled
-              </button>
-              <button type="button" id="clear-errors-btn" class="btn btn-sm btn-outline-secondary" disabled>
-                <i class="bi bi-x-circle me-1" aria-hidden="true"></i>Clear failed
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="dl-pause" data-a="pause">
+                <i class="bi bi-pause-fill" aria-hidden="true"></i><span class="dl-lbl ms-1">Pause queue</span>
               </button>
             </div>
           </div>
         {% endcall %}
-        {# Shown by fetchStatus() when no store has a row: an empty table header
-           reads as "still loading", not as "nothing is running". The same box
-           reports a status endpoint that cannot be reached. #}
+        {#- Shown on an empty page while paused: the only control left. -#}
+        <div class="mb-3 d-none" id="dl-resume-bar">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-a="pause">
+            <i class="bi bi-play-fill me-1" aria-hidden="true"></i>Resume queue
+          </button>
+        </div>
+        <div class="alert alert-secondary small d-none" id="dl-paused-note">
+          Queue paused. Downloads already running finish; nothing waiting starts. Usenet and DC++ jobs are not affected.
+        </div>
+        <div class="alert alert-warning small d-none" id="dl-client-down"></div>
         {{ empty_state('Nothing is downloading',
                        'Downloads you queue from Wanted, Releases or a series page show up here.',
                        'bi-cloud-check', id='downloads-empty', hidden=True) }}
-        <div class="table-responsive" id="downloads-table-wrap" style="display: none;">
-        <table class="table table-striped" id="downloads-table">
-          <thead>
-            <tr>
-              <th>Filename</th>
-              <th class="d-none d-md-table-cell">Provider</th>
-              <th>Progress</th>
-              <th class="d-none d-md-table-cell">Downloaded</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      <div class="tab-pane fade" id="queue-pane" role="tabpanel" aria-labelledby="queue-tab">
-        <p class="text-muted small mb-2">
-          CLU's own download queue. Reorder queued items, pause, remove or retry. Usenet and DC++ jobs stay under Active Downloads.
-        </p>
-        {% include 'partials/download_queue_pane.html' %}
+        <div id="dl-groups"></div>
+        <div class="visually-hidden" role="status" id="dl-live"></div>
       </div>
 
       <div class="tab-pane fade" id="runs-pane" role="tabpanel" aria-labelledby="runs-tab">
@@ -136,447 +106,497 @@
       </div>
     </div>
   </div>
+  <div class="modal fade" id="dlCancelModal" tabindex="-1" aria-labelledby="dlCancelTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="dlCancelTitle">Cancel this download?</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-0"><span id="dlCancelName" class="font-monospace"></span> stops now and its partial file is deleted. This can't be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Keep downloading</button>
+          <button type="button" class="btn btn-danger" id="dlCancelConfirm">Cancel download</button>
+        </div>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
     <script>
-    // Provider/client icon definitions, keyed by provider or client_type.
-    const providerMap = {
-      pixeldrain:   { icon: 'bi-cloud-arrow-down', color: 'text-primary',  label: 'Pixeldrain' },
-      mega:         { img: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/mega-nz.png', label: 'Mega' },
-      getcomics:    { icon: 'bi-download',         color: 'text-success',  label: 'GetComics' },
-      comicbookplus:{ icon: 'bi-book',             color: 'text-info',     label: 'CBP' },
-      sabnzbd:      { icon: 'bi-hdd-network',      color: 'text-warning',  label: 'SABnzbd' },
-      nzbget:       { icon: 'bi-cloud-download',   color: 'text-info',     label: 'NZBGet' },
-      airdcpp:      { icon: 'bi-diagram-3',        color: 'text-primary',  label: 'AirDC++' },
+    // ── Downloads ─────────────────────────────────────────────────────────
+    // One list over three stores: CLU's own queue (/api/download-queue, which
+    // classifies api.py's download_progress) and the Usenet and DC++ clients'
+    // job lists. Rows are grouped by what you can do with them, not by where
+    // they came from. Every server value is set through textContent.
+    const DL = {
+      state: "{{ url_for('download_queue.api_state') }}",
+      pause: "{{ url_for('download_queue.api_pause') }}",
+      reorder: "{{ url_for('download_queue.api_reorder') }}",
+      remove: "{{ url_for('download_queue.api_remove', download_id='ID') }}",
+      cancel: "{{ request.script_root }}/cancel_download/ID",
+      retry: "{{ request.script_root }}/retry_download/ID",
+      dismiss: "{{ request.script_root }}/dismiss_download/ID",
+      clear: "{{ request.script_root }}/clear_downloads",
+      clearFailed: "{{ request.script_root }}/clear_failed_downloads",
+      clientClear: "{{ url_for('download_clients.clear_client_downloads') }}",
+      usenet: "{{ url_for('download_clients.list_usenet_downloads') }}",
+      usenetDismiss: "{{ url_for('download_clients.dismiss_usenet_download', download_id='ID') }}",
+      dcpp: "{{ url_for('download_clients.list_dcpp_downloads') }}",
+      dcppDismiss: "{{ url_for('download_clients.dismiss_dcpp_download', download_id='ID') }}",
     };
+    const PROVIDER_LABELS_DL = {
+      pixeldrain: 'Pixeldrain', mega: 'Mega', getcomics: 'GetComics', comicbookplus: 'ComicBookPlus',
+      sabnzbd: 'SABnzbd', nzbget: 'NZBGet', airdcpp: 'AirDC++',
+    };
+    // Needs attention first, so a failure is never below a long queue.
+    const DL_GROUPS = [['attn', 'Needs attention'], ['active', 'Downloading'], ['wait', 'Waiting'], ['done', 'Finished']];
+    const DL_WAIT_SHOWN = 50;
 
-    const mb = bytes => (bytes / (1024 * 1024)).toFixed(2);
+    let dlItems = [];          // the rows, every group
+    let dlDown = false;        // the queue itself could not be read
+    let dlPaused = false;
+    let dlFilter = '';
+    let dlShowDone = false;    // Finished starts collapsed under All
+    let dlShowAllWait = false;
+    let dlDragging = false;
 
-    // Countdown for a download waiting out its auto-retry backoff. The seconds
-    // come from the server (details.retry_in) so the figure can't drift with a
-    // browser clock that disagrees with the container's.
+    const dlUrl = (tpl, id) => tpl.replace('ID', encodeURIComponent(id));
+    const mb = bytes => (bytes / (1024 * 1024)).toFixed(1);
+    const dlOf = g => dlItems.filter(i => i.g === g);
+    const dlSay = text => { document.getElementById('dl-live').textContent = text; };
+
     function formatCountdown(seconds) {
       const total = Math.max(0, Math.round(seconds || 0));
-      const mins = Math.floor(total / 60);
-      const secs = total % 60;
-      return `${mins}m ${String(secs).padStart(2, '0')}s`;
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
     }
 
-    // A row action. The table is rebuilt every second, so each button carries a
-    // stable key (action + download) that fetchStatus() uses to put keyboard
-    // focus back on it after the rebuild.
-    function actionButton(icon, colorClass, label, rowKey) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `btn btn-link status-action ${colorClass}`;
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
-      btn.dataset.focusKey = `${label}|${rowKey}`;
-      const i = document.createElement('i');
-      i.className = `bi ${icon}`;
-      i.setAttribute('aria-hidden', 'true');
-      btn.appendChild(i);
-      return btn;
-    }
-
-    // Shared cell builders so direct and Usenet rows render identically.
-    // Provider and byte counts are the first to go on a narrow screen: the
-    // filename, progress, status and actions are what a phone check needs.
-    function providerCell(providerKey) {
-      const td = document.createElement('td');
-      td.className = 'd-none d-md-table-cell';
-      const prov = providerMap[providerKey];
-      if (prov && prov.img) {
-        td.innerHTML = `<img src="${prov.img}" alt="${prov.label}" title="${prov.label}" style="width:18px;height:18px;vertical-align:text-bottom;"> <small>${prov.label}</small>`;
-      } else if (prov) {
-        td.innerHTML = `<i class="bi ${prov.icon} ${prov.color}" title="${prov.label}"></i> <small>${prov.label}</small>`;
-      } else {
-        td.innerHTML = '<i class="bi bi-hourglass-split text-muted" title="Pending" role="img" aria-label="Pending"></i>';
-      }
-      return td;
-    }
-
-    function progressCell(progress) {
-      const pct = Math.max(0, Math.min(100, Math.round(progress || 0)));
-      const td = document.createElement('td');
-      td.className = 'status-progress';
-      const progressBar = document.createElement('div');
-      progressBar.className = 'progress';
-      const progressInner = document.createElement('div');
-      progressInner.className = 'progress-bar';
-      progressInner.style.width = pct + '%';
-      progressInner.setAttribute('aria-valuenow', pct);
-      progressInner.setAttribute('aria-valuemin', '0');
-      progressInner.setAttribute('aria-valuemax', '100');
-      progressInner.textContent = pct + '%';
-      progressBar.appendChild(progressInner);
-      td.appendChild(progressBar);
-      return td;
-    }
-
-    function bytesCell(downloaded, total) {
-      const td = document.createElement('td');
-      td.className = 'd-none d-md-table-cell text-nowrap';
-      if (total && downloaded) {
-        td.textContent = `${mb(downloaded)} MB / ${mb(total)} MB`;
-      } else {
-        td.textContent = '—';
-      }
-      return td;
-    }
-
-    function statusCell(text, cssClass, title) {
-      const td = document.createElement('td');
-      td.textContent = text;
-      if (cssClass) td.className = cssClass;
-      if (title) td.title = title;
-      return td;
-    }
-
-    function filenameCell(filename) {
-      const td = document.createElement('td');
-      td.textContent = filename ? filename.split('/').pop() : 'N/A';
-      return td;
-    }
-
-    // Map a managed-client job's status/stage to a display label + styling.
-    // Shared by Usenet (SABnzbd/NZBGet) and DC++ (AirDC++), which report the
-    // same status vocabulary.
-    function clientStatusDisplay(job) {
-      switch (job.status) {
-        case 'complete':
-          return { text: 'Complete', cssClass: 'text-success' };
-        case 'complete_no_move':
-          return { text: 'Complete (import pending)', cssClass: 'text-warning',
-                   title: 'Finished at the client but CLU could not move the file into WATCH' };
-        case 'failed':
-          return { text: 'Failed', cssClass: 'text-danger fw-bold', title: job.error || 'Download failed at client' };
-        default:
-          return { text: job.stage || 'Downloading', cssClass: '' };
-      }
-    }
-
-    // A Cloudflare-blocked download carries the original GetComics link in
-    // `manual_url` (set by api.py's challenge branch and preserved across
-    // mirror failover). Only http(s) links are offered: the value ends up in an
-    // anchor, and a javascript:/data: URL there would be a script-injection
-    // vector if the field were ever fed from somewhere less trustworthy.
+    // A Cloudflare-blocked download carries the source page in manual_url.
+    // Only http(s) links are offered: the value ends up in an anchor's href.
     function manualDownloadUrl(details) {
       const url = details && details.manual_url;
       if (typeof url !== 'string') return null;
       return /^https?:\/\//i.test(url.trim()) ? url.trim() : null;
     }
 
-    // Link button that opens the source page so the user can clear the
-    // challenge in a real browser and download the file by hand.
-    function manualDownloadLink(url) {
+    function manualDownloadLink(url, name) {
       const a = document.createElement('a');
       a.href = url;            // set as a property, never interpolated into HTML
       a.target = '_blank';
       a.rel = 'noopener';
-      a.className = 'btn btn-sm btn-warning me-2';
-      a.title = 'Cloudflare blocked the automatic download — open the source page and download it manually';
-      a.innerHTML = '<i class="bi bi-box-arrow-up-right me-1"></i>Download manually';
+      a.className = 'btn btn-sm btn-outline-warning';
+      a.dataset.a = 'manual';
+      a.textContent = 'Download manually';
+      a.setAttribute('aria-label', `Download manually ${name}`);
       return a;
     }
 
-    // Render direct (api.py) download rows into the table body.
-    function renderDirectRows(tbody, data) {
-      for (const [downloadId, details] of Object.entries(data)) {
-        const downloadKey = 'direct:' + downloadId;
-            const tr = document.createElement('tr');
-            tr.appendChild(filenameCell(details.filename));
-            tr.appendChild(providerCell(details.provider));
-            tr.appendChild(progressCell(details.progress));
-            tr.appendChild(bytesCell(details.bytes_downloaded, details.bytes_total));
-
-            // Status
-            let statusClass = '';
-            // api.py's status codes, in words. An unknown code is shown as-is.
-            const DIRECT_STATUS_TEXT = {
-              queued: 'Queued', in_progress: 'Downloading', complete: 'Complete',
-              error: 'Failed', cancelled: 'Cancelled',
-            };
-            let statusText = DIRECT_STATUS_TEXT[details.status] || details.status;
-            let statusTitle = details.error;
-            if (details.status === 'error') {
-              statusClass = 'text-danger fw-bold';
-              if (manualDownloadUrl(details)) {
-                // Cloudflare: the mirror answered with a managed challenge, which
-                // no automated client can pass. Say so plainly instead of leaving
-                // the user staring at a bare "error" they can't act on — the
-                // Actions column carries the link that does work.
-                statusText = 'Blocked by Cloudflare';
-                statusClass = 'text-warning fw-bold';
-                statusTitle = 'This mirror is protected by a Cloudflare challenge '
-                            + 'that cannot be bypassed automatically. Use the link '
-                            + 'in Actions to download it in your browser.';
-              }
-            } else if (details.status === 'complete') {
-              statusClass = 'text-success';
-            } else if (details.status === 'cancelled') {
-              statusClass = 'text-warning';
-            } else if (details.status === 'retry_pending') {
-              // Failed, but CLU is going to try again on its own. Show the wait
-              // and which attempt is coming; the last error stays on the hover
-              // title so it's still inspectable.
-              statusClass = 'text-warning';
-              statusText = `Retrying in ${formatCountdown(details.retry_in)}`
-                         + ` (${details.retry_count} of ${details.retry_max})`;
-            }
-            tr.appendChild(statusCell(statusText, statusClass, statusTitle));
-
-            // Actions cell (Cancel/Retry buttons)
-            const tdActions = document.createElement('td');
-
-            // A pending retry is still in flight — offer Cancel, not Retry.
-            if (details.status === 'in_progress' || details.status === 'queued'
-                || details.status === 'retry_pending') {
-              // Cancel button for in-progress downloads
-              const cancelIcon = actionButton('bi-x-circle', 'text-danger', 'Cancel download', downloadKey);
-              cancelIcon.addEventListener('click', () => {
-                showConfirmToast('Are you sure you want to cancel this download?', () => {
-                  // The worker stops cooperatively — it may take a chunk or a
-                  // stalled read to notice — so refresh rather than assume.
-                  fetch(`/cancel_download/${downloadId}`, { method: 'POST' })
-                    .then(response => response.json().then(data => {
-                      if (!response.ok) throw new Error(data.error || 'Cancel failed');
-                      return data;
-                    }))
-                    .then(data => {
-                      CLU.toast('Download cancelled', 'success');
-                      fetchStatus();
-                    })
-                    .catch(error => {
-                      CLU.toast(error.message || 'Error cancelling download', 'error');
-                    });
-                });
-              });
-              tdActions.appendChild(cancelIcon);
-            } else if (details.status === 'error') {
-              // Cloudflare failures come first: retrying is pointless there, so
-              // lead with the link that actually gets the file.
-              const manualUrl = manualDownloadUrl(details);
-              if (manualUrl) {
-                tdActions.appendChild(manualDownloadLink(manualUrl));
-              }
-
-              // Retry button for error status
-              const retryIcon = actionButton('bi-arrow-clockwise', 'text-primary', 'Retry download', downloadKey);
-              retryIcon.addEventListener('click', () => {
-                showConfirmToast('Are you sure you want to retry this download?', () => {
-                  fetch(`/retry_download/${downloadId}`, { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                      console.log(data.message);
-                      CLU.toast('Download retried', 'success');
-                      // Refresh the table to show updated status
-                      fetchStatus();
-                    })
-                    .catch(error => {
-                      console.error('Error retrying download:', error);
-                      CLU.toast('Error retrying download', 'error');
-                    });
-                });
-              });
-              tdActions.appendChild(retryIcon);
-
-              // Dismiss button for error status
-              const dismissIcon = actionButton('bi-trash', 'text-muted', 'Dismiss failed download', downloadKey);
-              dismissIcon.addEventListener('click', () => {
-                showConfirmToast('Remove this failed download?', () => {
-                  fetch(`/dismiss_download/${downloadId}`, { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                      CLU.toast('Download dismissed', 'success');
-                      fetchStatus();
-                    })
-                    .catch(error => {
-                      CLU.toast('Error dismissing download', 'error');
-                    });
-                });
-              });
-              tdActions.appendChild(dismissIcon);
-            } else {
-              // No action buttons for completed/cancelled downloads
-              tdActions.textContent = '';
-            }
-            tr.appendChild(tdActions);
-
-            tbody.appendChild(tr);
-      }
+    function bytesText(done, total) {
+      return total && done ? `${mb(done)} of ${mb(total)} MB` : '';
     }
 
-    // Render externally-managed client rows (Usenet SABnzbd/NZBGet, DC++
-    // AirDC++). Cancel/retry belong in the user's own client, not here, so the
-    // only action offered is dismissing a job CLU can no longer resolve.
-    function renderClientRows(tbody, downloads, dismissUrl) {
-      for (const job of downloads) {
-        const downloadKey = 'client:' + (job.download_id || job.filename);
-        const tr = document.createElement('tr');
-        if (job.untracked) tr.className = 'text-muted';
-        tr.appendChild(filenameCell(job.filename));
-        tr.appendChild(providerCell(job.client_type));
-        const isDone = job.status === 'complete' || job.status === 'complete_no_move';
-        tr.appendChild(progressCell(isDone ? 100 : job.percent));
-        tr.appendChild(bytesCell(job.bytes_downloaded, job.bytes_total));
-
-        if (job.untracked) {
-          // Queued directly in the client, not by CLU. Shown so the panel
-          // matches the client's real queue, but CLU has no idea what series
-          // or issue it is and must never move its files.
-          tr.appendChild(statusCell('Not tracked by CLU', 'text-muted fst-italic',
-            'Queued directly in the client — CLU will not import this'));
-          tr.appendChild(document.createElement('td'));
-          tbody.appendChild(tr);
-          continue;
-        }
-
-        const disp = clientStatusDisplay(job);
-        tr.appendChild(statusCell(disp.text, disp.cssClass, disp.title));
-
-        // Only unresolved jobs are dismissable: a clean completion clears
-        // itself, while a failure or an unimported file is waiting on a human.
-        const tdActions = document.createElement('td');
-        const needsAck = job.status === 'failed' || job.status === 'complete_no_move';
-        if (dismissUrl && needsAck && job.download_id) {
-          const dismissIcon = actionButton('bi-trash', 'text-muted', 'Dismiss this download', downloadKey);
-          dismissIcon.addEventListener('click', () => {
-            showConfirmToast('Remove this download from the list?', () => {
-              fetch(dismissUrl(job.download_id), { method: 'POST' })
-                .then(response => response.json())
-                .then(() => {
-                  CLU.toast('Download dismissed', 'success');
-                  fetchStatus();
-                })
-                .catch(() => CLU.toast('Error dismissing download', 'error'));
-            });
-          });
-          tdActions.appendChild(dismissIcon);
-        }
-        tr.appendChild(tdActions);
-        tbody.appendChild(tr);
-      }
-    }
-
-    // A managed-client endpoint may 404/500 when that source is unconfigured —
-    // never let it break the poll.
-    function fetchClientDownloads(url, signal) {
-      return fetch(url, { signal })
-        .then(r => r.ok ? r.json() : { success: false })
-        .then(d => (d && d.success && Array.isArray(d.downloads)) ? d.downloads : [])
-        .catch(() => []);
-    }
-
-    // Which empty message is up, so a 1s poll does not rewrite it every tick.
-    let emptyMode = null;
-
-    // Nothing in any store: say so instead of showing a bare table header. A
-    // status endpoint that cannot be reached is not "nothing running", so it
-    // gets its own message rather than an empty list (it keeps retrying).
-    function showEmpty(mode) {
-      const box = document.getElementById('downloads-empty');
-      document.getElementById('downloads-table-wrap').style.display = mode ? 'none' : '';
-      box.style.display = mode ? '' : 'none';
-      if (mode === emptyMode) return;
-      emptyMode = mode;
-      if (!mode) return;
-      const unreachable = mode === 'unreachable';
-      box.querySelector('.clu-empty-title').textContent = unreachable
-        ? 'Could not reach the download queue'
-        : 'Nothing is downloading';
-      box.querySelector('.clu-empty-text').textContent = unreachable
-        ? 'CLU did not answer the status request. This page keeps trying every second.'
-        : 'Downloads you queue from Wanted, Releases or a series page show up here.';
-      box.querySelector('.clu-empty-icon').className = 'bi clu-empty-icon ' +
-        (unreachable ? 'bi-wifi-off' : 'bi-cloud-check');
-    }
-
-    // Fetch direct (api.py), Usenet and DC++ download statuses and rebuild the table.
-    function fetchStatus(signal) {
-      const direct = fetch('/download_status_all', { signal })
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-        .catch(err => { if (err.name === 'AbortError') throw err; return null; });
-      const usenet = fetchClientDownloads('/api/usenet/downloads', signal);
-      const dcpp = fetchClientDownloads('/api/dcpp/downloads', signal);
-      return Promise.all([direct, usenet, dcpp]).then(([data, usenetDownloads, dcppDownloads]) => {
-        const tbody = document.querySelector('#downloads-table tbody');
-        // The rebuild below would drop keyboard focus every second.
-        const focusKey = tbody.contains(document.activeElement)
-          ? document.activeElement.dataset.focusKey : null;
-        tbody.innerHTML = ''; // Clear previous rows.
-        renderDirectRows(tbody, data || {});
-        renderClientRows(tbody, usenetDownloads);
-        renderClientRows(tbody, dcppDownloads,
-          id => `/api/dcpp/downloads/${encodeURIComponent(id)}/dismiss`);
-        if (focusKey) {
-          const again = tbody.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
-          if (again) again.focus();
-        }
-        const hasRows = tbody.rows.length > 0;
-        CLU.setCount(document.getElementById('downloadsCount'),
-          { total: tbody.rows.length, noun: 'downloads', one: 'download' });
-        document.getElementById('clear-downloads-btn').disabled = !hasRows;
-        document.getElementById('clear-errors-btn').disabled = !hasRows;
-        document.getElementById('downloads-toolbar').classList.toggle('d-none', !hasRows);
-        showEmpty(hasRows ? null : (data === null ? 'unreachable' : 'idle'));
-      }).catch(err => { if (err.name !== 'AbortError') throw err; });
-    }
-
-    // Both clear buttons act on the whole table, and the table is fed by two
-    // independent stores: api.py's download_progress (the in-process HTTP
-    // downloads) and the managed clients' own job stores (Usenet, DC++).
-    // /clear_downloads only ever knew about the first, which is what made
-    // "Clear Completed" look broken -- every row it left behind still read
-    // "Complete" or "Complete (import pending)".
-    function clearDownloads(directUrl, bucket, successMsg) {
-      const direct = fetch(directUrl, { method: 'POST' })
-        .then(r => r.ok).catch(() => false);
-      const clients = fetch('/api/download-clients/downloads/clear', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bucket })
-      }).then(r => r.ok).catch(() => false);
-
-      // Settled rather than all-or-nothing: one store failing must not hide
-      // the rows the other one did clear, and the table is refreshed either
-      // way so the user sees what actually happened.
-      return Promise.all([direct, clients]).then(([directOk, clientsOk]) => {
-        if (directOk && clientsOk) {
-          CLU.toast(successMsg, 'success');
-        } else if (directOk || clientsOk) {
-          CLU.toast('Some downloads could not be cleared', 'warning');
+    // CLU's own downloads, from build_view's four lists.
+    function queueRows(view) {
+      const rows = [];
+      const base = (r, g) => ({ key: 'q:' + r.id, id: r.id, g, clu: true, name: r.name,
+                               prov: PROVIDER_LABELS_DL[r.provider] || r.provider || '' });
+      view.active.forEach(r => {
+        const row = base(r, 'active');
+        if (r.status === 'retry_pending') {
+          // A retry in progress keeps its last error beside the countdown.
+          row.sub = `Retrying in ${formatCountdown(r.retry_in)} (attempt ${r.retry_count} of ${r.retry_max})`;
+          if (r.error) row.err = `Last error: ${r.error}`;
         } else {
-          CLU.toast('Error clearing downloads', 'error');
+          row.pct = Math.max(0, Math.min(100, Math.round(r.progress || 0)));
+          row.sub = bytesText(r.bytes_downloaded, r.bytes_total);
         }
-        fetchStatus();
+        rows.push(row);
+      });
+      view.queued.forEach(r => rows.push(base(r, 'wait')));
+      view.failed.forEach(r => {
+        const row = base(r, 'attn');
+        row.manual = manualDownloadUrl(r);
+        // Blocked by Cloudflare keeps its own wording and offers no Retry.
+        row.err = row.manual ? 'Blocked by Cloudflare' : (r.error ? `Failed: ${r.error}` : 'Failed');
+        rows.push(row);
+      });
+      view.history.forEach(r => {
+        const row = base(r, 'done');
+        row.sub = r.status === 'complete' ? 'Complete' : 'Cancelled';
+        rows.push(row);
+      });
+      return rows;
+    }
+
+    // Usenet / DC++ jobs: no Cancel, Retry or handle; those belong in the client.
+    function clientRows(jobs, kind) {
+      return jobs.map(job => {
+        const row = { key: `c:${kind}:${job.download_id || job.filename}`, id: job.download_id, kind,
+                      name: (job.filename || '').split('/').pop() || 'Unnamed job',
+                      prov: PROVIDER_LABELS_DL[job.client_type] || job.client_type || '' };
+        if (job.untracked) {
+          return Object.assign(row, { g: 'active', quiet: true, sub: 'Not tracked by CLU',
+                                      pct: Math.round(job.percent || 0) });
+        }
+        if (job.status === 'failed') {
+          return Object.assign(row, { g: 'attn', err: `Failed: ${job.error || 'the download failed at the client'}` });
+        }
+        if (job.status === 'complete_no_move') {
+          return Object.assign(row, { g: 'attn', err: 'Downloaded, but CLU could not move it into the watch folder' });
+        }
+        if (job.status === 'complete') return Object.assign(row, { g: 'done', sub: 'Complete' });
+        return Object.assign(row, { g: 'active', pct: Math.round(job.percent || 0),
+          sub: [job.stage || 'Downloading', bytesText(job.bytes_downloaded, job.bytes_total)].filter(Boolean).join(' · ') });
       });
     }
 
-    // Event listener for the Clear Completed/Cancelled Downloads button.
-    document.getElementById('clear-downloads-btn').addEventListener('click', function() {
-      // The import-pending case is spelled out: clearing one drops CLU's only
-      // record that the file finished at the client but never reached WATCH.
-      showConfirmToast(
-        'This will clear all completed and cancelled downloads, including any '
-        + 'marked "Complete (import pending)". Continue?',
-        () => clearDownloads('/clear_downloads', 'completed', 'Downloads cleared'));
+    function dlButton(a, row, label, opts) {
+      const o = opts || {};
+      const b = el('button', `btn btn-sm ${o.cls || 'btn-outline-secondary'}`);
+      b.type = 'button';
+      b.dataset.a = a;
+      if (row) b.dataset.key = row.key;
+      b.setAttribute('aria-label', row ? `${label} ${row.name}` : label);
+      if (o.icon) {
+        const i = el('i', `bi ${o.icon}`);
+        i.setAttribute('aria-hidden', 'true');
+        b.appendChild(i);
+        b.title = label;
+      } else {
+        b.textContent = label;
+      }
+      if (o.disabled) b.disabled = true;
+      return b;
+    }
+
+    function dlRow(row, n, len) {
+      const li = el('li', 'list-group-item dl-row' + (row.quiet ? ' dl-quiet' : ''));
+      li.dataset.row = row.key;
+      const act = el('div', 'dl-act');
+      if (row.g === 'wait') {
+        li.draggable = true;
+        const grip = el('i', 'bi bi-grip-vertical dl-grip');
+        grip.setAttribute('aria-hidden', 'true');
+        li.appendChild(grip);
+        const num = el('span', 'dl-n', String(n + 1));
+        num.setAttribute('aria-hidden', 'true');
+        li.appendChild(num);
+        act.appendChild(dlButton('up', row, 'Move up', { icon: 'bi-arrow-up', disabled: n === 0 }));
+        act.appendChild(dlButton('down', row, 'Move down', { icon: 'bi-arrow-down', disabled: n === len - 1 }));
+        act.appendChild(dlButton('remove', row, 'Remove', { cls: 'btn-outline-danger' }));
+      } else if (row.g === 'active' && row.clu) {
+        act.appendChild(dlButton('cancel', row, 'Cancel', { cls: 'btn-outline-danger' }));
+      } else if (row.g === 'attn') {
+        if (row.manual) act.appendChild(manualDownloadLink(row.manual, row.name));
+        else if (row.clu) act.appendChild(dlButton('retry', row, 'Retry', { cls: 'btn-outline-primary' }));
+        if (row.clu || row.id) act.appendChild(dlButton('dismiss', row, 'Dismiss'));
+      }
+
+      const main = el('div', 'dl-main');
+      main.appendChild(el('div', 'dl-name font-monospace', row.name));
+      let sub = row.sub;
+      if (row.g === 'wait') sub = dlPaused ? 'Held while the queue is paused' : (n === 0 ? 'Starts next' : 'Waiting');
+      const subText = [row.prov, sub].filter(Boolean).join(' · ');
+      if (subText) main.appendChild(el('div', 'small text-body-secondary', subText));
+      if (row.err) main.appendChild(el('div', 'small text-danger', row.err));
+      li.appendChild(main);
+
+      if (row.pct != null) {
+        const prog = el('div', 'dl-prog');
+        const bar = el('div', 'progress');
+        bar.setAttribute('role', 'progressbar');
+        bar.setAttribute('aria-label', row.name);
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-valuenow', row.pct);
+        bar.setAttribute('aria-valuetext', `Downloading ${row.pct}%`);
+        const fill = el('div', 'progress-bar');
+        fill.style.width = row.pct + '%';
+        bar.appendChild(fill);
+        prog.appendChild(bar);
+        prog.appendChild(el('span', null, row.pct + '%'));
+        li.appendChild(prog);
+      }
+      if (act.children.length) li.appendChild(act);
+      return li;
+    }
+
+    function dlGroup(g, label) {
+      const list = dlOf(g);
+      const section = el('section', 'dl-g');
+      section.dataset.g = g;
+      const header = el('header');
+      const h = el('h3', null, label + ' ');
+      h.tabIndex = -1;
+      h.appendChild(el('span', null, CLU.formatCount(list.length)));
+      header.appendChild(h);
+      const collapsed = g === 'done' && !dlFilter && !dlShowDone;
+      if (g === 'attn') {
+        if (list.some(r => r.clu && !r.manual)) header.appendChild(dlButton('retryall', null, 'Retry all'));
+        header.appendChild(dlButton('dismissall', null, 'Dismiss all'));
+      } else if (g === 'done') {
+        if (!dlFilter) {
+          const t = dlButton('fin', null, collapsed ? 'Show' : 'Hide');
+          t.setAttribute('aria-label', `${collapsed ? 'Show' : 'Hide'} finished downloads`);
+          t.setAttribute('aria-expanded', String(!collapsed));
+          header.appendChild(t);
+        }
+        const c = dlButton('clear', null, 'Clear');
+        c.setAttribute('aria-label', 'Clear finished downloads');
+        header.appendChild(c);
+      }
+      section.appendChild(header);
+      if (collapsed) return section;
+
+      const ul = el(g === 'wait' ? 'ol' : 'ul', 'list-group');
+      const shown = g === 'wait' && !dlShowAllWait ? list.slice(0, DL_WAIT_SHOWN) : list;
+      shown.forEach((r, n) => ul.appendChild(dlRow(r, n, list.length)));
+      section.appendChild(ul);
+      if (shown.length < list.length) {
+        const more = dlButton('waitall', null, `Show all ${CLU.formatCount(list.length)}`);
+        more.classList.add('mt-2');
+        section.appendChild(more);
+      }
+      return section;
+    }
+
+    function renderDownloads() {
+      if (dlDragging) return;
+      const root = document.getElementById('dl-groups');
+      // After any action, keyboard focus stays put: the same control, else the
+      // row's other control, else the next row's same action, else the heading.
+      const fa = document.activeElement;
+      const had = root.contains(fa);
+      const d = had ? Object.assign({}, fa.dataset) : {};
+      const fr = had && fa.closest('[data-row]');
+      const fg = had && fa.closest('[data-g]');
+      const pos = fr ? Array.prototype.indexOf.call(fr.parentNode.children, fr) : 0;
+      const fgk = fg && fg.dataset.g;
+
+      const empty = !dlDown && !dlItems.length;
+      document.getElementById('downloads-toolbar').classList.toggle('d-none', dlDown || empty);
+      document.getElementById('dl-resume-bar').classList.toggle('d-none', !(empty && dlPaused));
+      document.getElementById('dl-paused-note').classList.toggle('d-none', dlDown || !dlPaused);
+      const pauseBtn = document.getElementById('dl-pause');
+      pauseBtn.querySelector('i').className = 'bi ' + (dlPaused ? 'bi-play-fill' : 'bi-pause-fill');
+      pauseBtn.querySelector('.dl-lbl').textContent = dlPaused ? 'Resume queue' : 'Pause queue';
+      pauseBtn.setAttribute('aria-label', dlPaused ? 'Resume queue' : 'Pause queue');
+
+      // Unreachable is never shown as empty.
+      const box = document.getElementById('downloads-empty');
+      box.style.display = (dlDown || empty) ? '' : 'none';
+      box.querySelector('.clu-empty-title').textContent = dlDown
+        ? 'Could not reach the download queue' : 'Nothing is downloading';
+      box.querySelector('.clu-empty-text').textContent = dlDown
+        ? 'CLU keeps trying every few seconds. This does not mean nothing is downloading.'
+        : 'Downloads you queue from Wanted, Releases or a series page show up here.';
+      box.querySelector('.clu-empty-icon').className = 'bi clu-empty-icon ' + (dlDown ? 'bi-wifi-off' : 'bi-cloud-check');
+
+      const options = [{ value: '', label: 'All', count: dlItems.length }];
+      DL_GROUPS.forEach(([g, label]) => {
+        const n = dlOf(g).length;
+        if (n || dlFilter === g) options.push({ value: g, label, count: n });
+      });
+      CLU.renderFilterOptions(document.getElementById('dl-filter'), options, dlFilter);
+      const shown = dlFilter ? dlOf(dlFilter).length : dlItems.length;
+      CLU.setCount(document.getElementById('downloadsCount'), { total: dlItems.length,
+        shown: dlFilter ? shown : undefined, noun: 'downloads', one: 'download' });
+
+      root.replaceChildren();
+      if (dlDown || empty) return;
+      DL_GROUPS.forEach(([g, label]) => {
+        if (dlOf(g).length && (!dlFilter || dlFilter === g)) root.appendChild(dlGroup(g, label));
+      });
+      if (!root.children.length) {
+        root.appendChild(CLU.noMatches({ noun: 'downloads', filtered: true, compact: true,
+          onClear: () => { dlFilter = ''; renderDownloads(); } }));
+      }
+
+      if (!had) return;
+      const q = s => root.querySelector(s);
+      const firstOn = list => Array.prototype.find.call(list, x => !x.disabled);
+      const same = d.a && q(`[data-a="${d.a}"]${d.key ? `[data-key="${CSS.escape(d.key)}"]` : ''}`);
+      const stay = d.key && q(`[data-row="${CSS.escape(d.key)}"]`);
+      const rows = fgk ? root.querySelectorAll(`[data-g="${fgk}"] [data-row]`) : [];
+      const next = rows[Math.min(pos, rows.length - 1)];
+      const target = [same, stay && firstOn(stay.querySelectorAll('[data-a]')),
+        next && next.querySelector(`[data-a="${d.a}"]`), next && firstOn(next.querySelectorAll('[data-a]')),
+        fgk && q(`[data-g="${fgk}"] h3`)].find(x => x && !x.disabled);
+      if (target) target.focus();
+    }
+
+    function fetchClientJobs(url, signal) {
+      return fetch(url, { signal })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && d.success && Array.isArray(d.downloads)) ? d.downloads : null)
+        .catch(err => { if (err.name === 'AbortError') throw err; return null; });
+    }
+
+    function refreshDownloads(signal) {
+      const queue = fetch(DL.state, { signal })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => (d && d.success) ? d : null)
+        .catch(err => { if (err.name === 'AbortError') throw err; return null; });
+      return Promise.all([queue, fetchClientJobs(DL.usenet, signal), fetchClientJobs(DL.dcpp, signal)])
+        .then(([view, usenet, dcpp]) => {
+          dlDown = !view;
+          if (view) {
+            dlPaused = !!view.paused;
+            dlItems = queueRows(view).concat(clientRows(usenet || [], 'usenet'), clientRows(dcpp || [], 'dcpp'));
+          }
+          // One client unreadable: say which, above the list, without hiding the rest.
+          const downNames = [usenet ? null : 'Usenet', dcpp ? null : 'DC++'].filter(Boolean);
+          const line = document.getElementById('dl-client-down');
+          line.textContent = downNames.length && view ? `Could not read the ${downNames.join(' or ')} downloads.` : '';
+          line.classList.toggle('d-none', !(downNames.length && view));
+          renderDownloads();
+        })
+        .catch(err => { if (err.name !== 'AbortError') throw err; });
+    }
+
+    // POST/DELETE an endpoint; true when it answered 2xx. An error is toasted.
+    function dlCall(url, method, body) {
+      return fetch(url, { method: method || 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: body ? JSON.stringify(body) : undefined })
+        .then(r => r.json().catch(() => ({})).then(d => {
+          if (!r.ok) CLU.toast(d.error || 'That did not work', 'error');
+          return r.ok;
+        }))
+        .catch(() => { CLU.toast('Could not reach CLU', 'error'); return false; });
+    }
+
+    function dismissUrl(row) {
+      return row.clu ? dlUrl(DL.dismiss, row.id) : dlUrl(row.kind === 'usenet' ? DL.usenetDismiss : DL.dcppDismiss, row.id);
+    }
+
+    // Moves a waiting row k places and saves the order the downloads start in.
+    function moveWaiting(row, k) {
+      const ids = dlOf('wait').map(r => r.id);
+      const n = ids.indexOf(row.id);
+      if (n < 0 || n + k < 0 || n + k >= ids.length) return Promise.resolve();
+      [ids[n], ids[n + k]] = [ids[n + k], ids[n]];
+      return dlCall(DL.reorder, 'POST', { order: ids }).then(ok => {
+        if (ok) dlSay(`${row.name} is now ${n + k + 1} of ${ids.length}.`);
+      });
+    }
+
+    // There is no Undo: the server forgets the entry, so nothing could put it
+    // back. Remove, Dismiss and Clear act at once; Cancel asks first, because
+    // it also deletes a running download's partial file.
+    function confirmCancel(row) {
+      const el = document.getElementById('dlCancelModal');
+      const yes = document.getElementById('dlCancelConfirm');
+      document.getElementById('dlCancelName').textContent = row.name;
+      const modal = bootstrap.Modal.getOrCreateInstance(el);
+      return new Promise(resolve => {
+        let ok = false;
+        const onYes = () => { ok = true; modal.hide(); };
+        yes.addEventListener('click', onYes, { once: true });
+        el.addEventListener('hidden.bs.modal', () => {
+          yes.removeEventListener('click', onYes);
+          resolve(ok);
+        }, { once: true });
+        modal.show();
+      });
+    }
+
+    const DL_ACTIONS = {
+      pause: () => dlCall(DL.pause, 'POST', { paused: !dlPaused }).then(ok => {
+        if (ok) dlSay(dlPaused ? 'Queue resumed.' : 'Queue paused.');
+      }),
+      fin: () => { dlShowDone = !dlShowDone; },
+      waitall: () => { dlShowAllWait = true; },
+      up: row => moveWaiting(row, -1),
+      down: row => moveWaiting(row, 1),
+      cancel: row => confirmCancel(row).then(yes => yes && dlCall(dlUrl(DL.cancel, row.id)).then(ok => {
+        if (ok) CLU.toast(`${row.name} cancelled.`, 'success');
+      })),
+      remove: row => dlCall(dlUrl(DL.remove, row.id), 'DELETE').then(ok => {
+        if (ok) CLU.toast(`${row.name} removed from the queue.`, 'success');
+      }),
+      retry: row => dlCall(dlUrl(DL.retry, row.id)).then(ok => { if (ok) CLU.toast(`${row.name} is back in the queue.`, 'success'); }),
+      dismiss: row => dlCall(dismissUrl(row)).then(ok => { if (ok) CLU.toast(`${row.name} dismissed.`, 'success'); }),
+      retryall: () => {
+        const rows = dlOf('attn').filter(r => r.clu && !r.manual);
+        return Promise.all(rows.map(r => dlCall(dlUrl(DL.retry, r.id)))).then(oks => {
+          const n = oks.filter(Boolean).length;
+          if (n) CLU.toast(`${n} back in the queue.`, 'success');
+        });
+      },
+      dismissall: () => {
+        // CLU's failures in one call; each client row through its own dismiss.
+        const calls = [dlCall(DL.clearFailed)].concat(
+          dlOf('attn').filter(r => !r.clu && r.id).map(r => dlCall(dismissUrl(r))));
+        return Promise.all(calls).then(oks => {
+          CLU.toast(oks.every(Boolean) ? 'Needs attention cleared.' : 'Some downloads could not be dismissed',
+                    oks.every(Boolean) ? 'success' : 'warning');
+        });
+      },
+      // Clear covers both stores: CLU's /clear_downloads and the clients'
+      // clear. The 'finished' bucket is a clean completion only, so a job
+      // that could not be imported stays under Needs attention.
+      clear: () => Promise.all([dlCall(DL.clear), dlCall(DL.clientClear, 'POST', { bucket: 'finished' })])
+        .then(([a, b]) => {
+          if (a && b) CLU.toast('Finished downloads cleared.', 'success');
+          else if (a || b) CLU.toast('Some downloads could not be cleared', 'warning');
+        }),
+    };
+
+    const dlPane = document.getElementById('downloads-pane');
+    dlPane.addEventListener('click', e => {
+      const b = e.target.closest('button[data-a]');
+      if (!b || b.disabled || !DL_ACTIONS[b.dataset.a]) return;
+      const row = b.dataset.key ? dlItems.find(r => r.key === b.dataset.key) : null;
+      if (b.dataset.key && !row) return;
+      const done = DL_ACTIONS[b.dataset.a](row);
+      // Server actions redraw from a fresh read; the local toggles redraw now.
+      if (done && done.then) done.then(() => refreshDownloads()); else renderDownloads();
     });
 
-    // Event listener for the Clear Failed Downloads button.
-    document.getElementById('clear-errors-btn').addEventListener('click', function() {
-      showConfirmToast('This will clear all failed downloads. Continue?',
-        () => clearDownloads('/clear_failed_downloads', 'failed',
-                             'Failed downloads cleared'));
+    CLU.filterBar(document.getElementById('dl-filter'), {
+      onChange: value => { dlFilter = value; renderDownloads(); },
     });
 
-    // Which tab is showing. The 1s download poll only does work on its own tab.
+    // Pointer devices can also drag a waiting row. The list does not redraw
+    // from a poll while a row is being dragged.
+    let dlDragRow = null;
+    dlPane.addEventListener('dragstart', e => {
+      dlDragRow = e.target.closest('[data-g="wait"] [data-row]');
+      if (!dlDragRow) return;
+      dlDragging = true;
+      dlDragRow.classList.add('dl-drag');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    dlPane.addEventListener('dragover', e => {
+      const over = e.target.closest('[data-g="wait"] [data-row]');
+      if (!dlDragRow || !over) return;
+      e.preventDefault();
+      if (over !== dlDragRow) {
+        const after = e.clientY > over.getBoundingClientRect().top + over.offsetHeight / 2;
+        over.parentNode.insertBefore(dlDragRow, after ? over.nextSibling : over);
+      }
+    });
+    dlPane.addEventListener('dragend', () => {
+      if (!dlDragRow) return;
+      const keys = Array.prototype.map.call(dlDragRow.parentNode.children, n => n.dataset.row);
+      const ids = keys.map(k => (dlItems.find(r => r.key === k) || {}).id).filter(Boolean);
+      const moved = dlItems.find(r => r.key === dlDragRow.dataset.row);
+      const at = keys.indexOf(dlDragRow.dataset.row) + 1;
+      dlDragRow = null;
+      dlDragging = false;
+      dlCall(DL.reorder, 'POST', { order: ids }).then(ok => {
+        if (ok && moved) dlSay(`${moved.name} is now ${at} of ${dlOf('wait').length}.`);
+        return refreshDownloads();
+      });
+    });
+
+    // Which tab is showing. The 2s downloads poll only does work on its own tab.
     let activeStatusTab = 'downloads';
-
-    // Poll the status endpoint every second (guarded: no overlap, self-aborts).
-    CLU.startPoll(signal => activeStatusTab === 'downloads' ? fetchStatus(signal) : null, 1000);
+    CLU.startPoll(signal => (activeStatusTab === 'downloads' && !dlDragging) ? refreshDownloads(signal) : null, 2000);
 
     // ── Scheduled Runs ────────────────────────────────────────────────────
     // Reports written by core/download_runs.py. Every value from the server is
@@ -894,57 +914,6 @@
       if (localStorage.getItem('clu.status.tab') === 'runs' || location.hash === '#runs') {
         bootstrap.Tab.getOrCreateInstance(document.getElementById('runs-tab')).show();
       }
-      if (location.hash === '#queue') {
-        bootstrap.Tab.getOrCreateInstance(document.getElementById('queue-tab')).show();
-      }
     } catch (e) { }
-
-    // Confirmation toast with Yes/No buttons
-    function showConfirmToast(message, callback) {
-        const container = CLU.toastContainer();
-
-        const toastId = 'confirm-toast-' + Date.now();
-        const toastHtml = `
-            <div id="${toastId}" class="toast border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="toast-header">
-                    <i class="bi bi-question-circle-fill text-warning me-2"></i>
-                    <strong class="me-auto">Confirm</strong>
-                    <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-                <div class="toast-body">
-                    <p class="mb-3">${message}</p>
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-danger btn-sm confirm-yes">Yes</button>
-                        <button type="button" class="btn btn-secondary btn-sm confirm-no">No</button>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        container.insertAdjacentHTML('beforeend', toastHtml);
-        const toastElement = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastElement, {
-            autohide: false // Don't auto-hide confirmation toasts
-        });
-
-        // Add event listeners for Yes/No buttons
-        toastElement.querySelector('.confirm-yes').addEventListener('click', () => {
-            callback();
-            toast.hide();
-        });
-
-        toastElement.querySelector('.confirm-no').addEventListener('click', () => {
-            toast.hide();
-        });
-
-        toast.show();
-
-        // Remove from DOM after hiding
-        toastElement.addEventListener('hidden.bs.toast', () => {
-            toastElement.remove();
-        });
-
-        return toast;
-    }
     </script>
 {% endblock %}

@@ -248,7 +248,7 @@ def test_count_is_never_repeated_or_shown_beside_an_empty_state():
     # Download Status: no "0 downloads" over "Nothing is downloading".
     status = _read("templates/status.html")
     assert "toolbar('Download list', id='downloads-toolbar', classes='d-none')" in status
-    assert "getElementById('downloads-toolbar').classList.toggle('d-none', !hasRows)" in status
+    assert "getElementById('downloads-toolbar').classList.toggle('d-none', dlDown || empty)" in status
     # Source Wall: no "0 items" before a library is picked.
     assert 'class="clu-toolbar-end d-none" id="swCountEnd"' in _read("templates/source_wall.html")
     # Collection: the sticky bar says where you are; the toolbar says how many.

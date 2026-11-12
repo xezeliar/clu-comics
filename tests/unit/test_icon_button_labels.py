@@ -62,11 +62,12 @@ def test_status_row_actions_are_buttons():
     status = (ROOT / "templates" / "status.html").read_text(encoding="utf-8")
     # Clickable <i> icons cannot be reached from the keyboard.
     assert "action-icon" not in status
-    assert "function actionButton(" in status and "btn.setAttribute('aria-label', label)" in status
-    # The table is rebuilt every second; focus must survive it.
-    assert "dataset.focusKey" in status and "again.focus()" in status
-    # Narrow screens drop provider and byte counts rather than scroll sideways.
-    assert status.count("d-none d-md-table-cell") >= 4
+    assert "function dlButton(" in status
+    assert "b.setAttribute('aria-label', row ? `${label} ${row.name}` : label)" in status
+    # The list redraws every two seconds; focus must survive it.
+    assert "if (target) target.focus();" in status
+    # Phone: every control is a 44px target.
+    assert "#downloads-pane .btn-sm { min-height: 2.75rem; min-width: 2.75rem; }" in status
 
 
 def test_library_toolbar_is_one_row_on_desktop():

@@ -89,10 +89,12 @@ covers the other two in one call, and the page fires both.
   brings it back, so forgetting it in memory alone would put every cleared row
   back on the page after the next restart. A clean completion deleted its own
   row when it finished, so the delete is a no-op there.
-- **Usenet has no ledger and no per-row dismiss.** Its jobs are in memory only
-  and `_set_status` merely relabels, so before this nothing removed a Usenet row
-  at all — not even a clean `complete` — and the page passed no `dismissUrl` for
-  those rows. The bulk clear is currently the only way to remove one.
+- **Usenet has no ledger.** Its jobs are in memory only and `_set_status`
+  merely relabels, so nothing removes a Usenet row on its own, not even a clean
+  `complete`. `POST /api/usenet/downloads/<id>/dismiss` (`dismiss_usenet_job`)
+  forgets one finished job and refuses a running one; the bulk clear does the rest.
+- **The Downloads tab's Clear uses the `finished` bucket** (`complete` only):
+  `complete_no_move` sits under Needs attention there and leaves by Dismiss.
 - **Untracked DC++ bundles are never cleared.** They mirror AirDC++'s own queue
   out of `_bundle_snapshot`, not `dcpp_downloads`, and they are not CLU's to
   forget.

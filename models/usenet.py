@@ -408,6 +408,25 @@ def clear_usenet_jobs(statuses) -> int:
     return len(doomed)
 
 
+def dismiss_usenet_job(download_id: str):
+    """Forget one finished Usenet job. True, False if unknown, None if running.
+
+    A job still at the client is refused: forgetting it would stop the poller
+    importing it. In memory only, like ``clear_usenet_jobs``.
+    """
+    from core.download_utils import (CLIENT_COMPLETED_STATUSES,
+                                     CLIENT_FAILED_STATUSES)
+
+    with _jobs_lock:
+        job = usenet_downloads.get(download_id)
+        if job is None:
+            return False
+        if job.get("status") not in CLIENT_COMPLETED_STATUSES | CLIENT_FAILED_STATUSES:
+            return None
+        usenet_downloads.pop(download_id, None)
+    return True
+
+
 def _ensure_poller():
     """Start the completion poller thread if it isn't already running."""
     global _poller_thread

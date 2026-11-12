@@ -451,6 +451,25 @@ def list_usenet_downloads():
         return jsonify({"error": str(e)}), 500
 
 
+@download_clients_bp.route(
+    '/api/usenet/downloads/<download_id>/dismiss', methods=['POST']
+)
+def dismiss_usenet_download(download_id):
+    """Drop a finished Usenet job from the list. The DC++ dismiss's twin."""
+    try:
+        from models.usenet import dismiss_usenet_job
+
+        done = dismiss_usenet_job(download_id)
+        if done is None:
+            return jsonify({"error": "Only finished downloads can be dismissed"}), 400
+        if not done:
+            return jsonify({"error": "Download not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        app_logger.error(f"Error dismissing usenet download {download_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # The year coercion is shared with the GetComics search route, so it lives in
 # models/download_sources.py. Kept under the old private name here so the
 # existing call sites (and their tests) read unchanged.

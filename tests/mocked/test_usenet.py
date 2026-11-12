@@ -386,6 +386,31 @@ class TestClearUsenetJobs:
         assert "u1" in un.usenet_downloads
 
 
+class TestDismissUsenetJob:
+    """The per-row Dismiss on the Downloads tab; DC++ had one, Usenet did not."""
+
+    @pytest.fixture(autouse=True)
+    def _empty_store(self):
+        un.usenet_downloads.clear()
+        yield
+        un.usenet_downloads.clear()
+
+    @pytest.mark.parametrize("status", ["failed", "complete_no_move", "complete"])
+    def test_forgets_a_finished_job(self, status):
+        un.usenet_downloads["u1"] = {"status": status}
+        assert un.dismiss_usenet_job("u1") is True
+        assert "u1" not in un.usenet_downloads
+
+    def test_refuses_a_running_job(self):
+        # Forgetting it would stop the poller importing it.
+        un.usenet_downloads["u1"] = {"status": "downloading"}
+        assert un.dismiss_usenet_job("u1") is None
+        assert "u1" in un.usenet_downloads
+
+    def test_unknown_job(self):
+        assert un.dismiss_usenet_job("nope") is False
+
+
 class TestImportCompleted:
 
     def test_moves_comic_into_watch(self, tmp_path, monkeypatch):
