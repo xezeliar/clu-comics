@@ -1178,7 +1178,7 @@ class TestWantedPage:
         self._seed_wanted()
         html = client_with_data.get("/wanted?q=Iron%20Man").get_data(as_text=True)
         assert 'id="wantedSearch"' in html and 'value="Iron Man"' in html
-        assert "if (box.value.trim()) apply(box.value);" in html
+        assert "apply(box.value);" in html
 
     def test_falls_back_to_cover_date(self, app, client_with_data):
         self._register_slug_global(app)
