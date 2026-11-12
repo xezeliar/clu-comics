@@ -20,8 +20,11 @@
         {% if header_banner %}
         <div class="sh-banner" role="img" aria-label="Banner art for {{ series.name }}"
              style="background-image: url('{{ header_banner }}')"></div>
+        {% elif first_issue_image and header_focus is not none %}
+        <div class="sh-banner sh-banner-slice" id="shBanner" aria-hidden="true"
+             style="background-image: url('{{ first_issue_image }}'); background-position: center {{ header_focus }}%"></div>
         {% elif first_issue_image %}
-        <div class="sh-banner sh-banner-generated" aria-hidden="true"
+        <div class="sh-banner sh-banner-generated" id="shBanner" aria-hidden="true"
              style="--sh-banner-img: url('{{ first_issue_image }}')"></div>
         {% endif %}
         <div class="sh-body">
@@ -52,6 +55,11 @@
                             <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
                         </button>
                     {% elif slot == 'more' %}
+                        {% if first_issue_image and not header_banner %}
+                        <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#shHeaderModal">
+                            <i class="bi bi-crop me-2" aria-hidden="true"></i>Set header…
+                        </button></li>
+                        {% endif %}
                         {% if mapped_path %}
                         <li><button type="button" class="dropdown-item"
                             onclick="CLU.openSeriesJsonModal({{ mapped_path|tojson|forceescape }}, {{ series.name|tojson|forceescape }})"
@@ -966,6 +974,94 @@
 
 {% block scripts %}
 {{ super() }}
+{% if first_issue_image and not header_banner %}
+{#- Set header: drag the cover (or use the slider) to pick the slice the banner
+    shows. Saved per series; "Use blurred" goes back to the default. -#}
+<div class="modal fade" id="shHeaderModal" tabindex="-1" aria-labelledby="shHeaderModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title fs-5" id="shHeaderModalLabel">Set header</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-body-secondary small mb-2">Drag the image up or down to choose the part of the cover the banner shows.</p>
+        <div class="sh-banner sh-banner-slice sh-header-preview" id="shHeaderPreview"
+             style="background-image: url('{{ first_issue_image }}'); background-position: center {{ header_focus if header_focus is not none else 30 }}%"></div>
+        <label for="shHeaderFocus" class="form-label small mt-3 mb-1">Position</label>
+        <input type="range" class="form-range" id="shHeaderFocus" min="0" max="100" step="1"
+               value="{{ (header_focus if header_focus is not none else 30)|round|int }}" aria-describedby="shHeaderModalLabel">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary me-auto" id="shHeaderReset"{% if header_focus is none %} hidden{% endif %}>Use blurred</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="shHeaderSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const preview = document.getElementById('shHeaderPreview');
+    const range = document.getElementById('shHeaderFocus');
+    const banner = document.getElementById('shBanner');
+    const cover = {{ first_issue_image|tojson }};
+    const modal = document.getElementById('shHeaderModal');
+    const reset = document.getElementById('shHeaderReset');
+
+    function show(y) {
+      y = Math.max(0, Math.min(100, y));
+      range.value = Math.round(y);
+      preview.style.backgroundPosition = 'center ' + y + '%';
+    }
+    range.addEventListener('input', () => show(+range.value));
+
+    // Dragging down shows more of the top, so the position moves the other way.
+    let startY = null, startFocus = 0;
+    preview.addEventListener('pointerdown', e => {
+      startY = e.clientY; startFocus = +range.value;
+      preview.setPointerCapture(e.pointerId);
+    });
+    preview.addEventListener('pointermove', e => {
+      if (startY === null) return;
+      // The cover is 2:3, scaled to the preview's width: 100% is its whole
+      // overflow, so the image follows the pointer one pixel per pixel.
+      const overflow = preview.clientWidth * 1.5 - preview.clientHeight;
+      if (overflow > 0) show(startFocus - (e.clientY - startY) / overflow * 100);
+    });
+    ['pointerup', 'pointercancel'].forEach(t => preview.addEventListener(t, () => { startY = null; }));
+
+    function save(focus) {
+      fetch(`/api/series/${seriesData.id}/header`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ focus }),
+      })
+        .then(r => r.json().then(d => { if (!r.ok) throw new Error(d.error || 'Could not save the header'); return d; }))
+        .then(d => {
+          if (banner) {
+            if (d.focus === null) {
+              banner.className = 'sh-banner sh-banner-generated';
+              banner.removeAttribute('style');
+              banner.style.setProperty('--sh-banner-img', `url('${cover}')`);
+            } else {
+              banner.className = 'sh-banner sh-banner-slice';
+              banner.removeAttribute('style');
+              banner.style.backgroundImage = `url('${cover}')`;
+              banner.style.backgroundPosition = `center ${d.focus}%`;
+            }
+          }
+          reset.hidden = d.focus === null;
+          bootstrap.Modal.getOrCreateInstance(modal).hide();
+          CLU.toast(d.focus === null ? 'Header set to the blurred cover' : 'Header saved', 'success');
+        })
+        .catch(err => CLU.toast(err.message, 'error'));
+    }
+    document.getElementById('shHeaderSave').addEventListener('click', () => save(+range.value));
+    reset.addEventListener('click', () => save(null));
+  });
+</script>
+{% endif %}
 {% include 'partials/modal_series_json.html' %}
 <script src="{{ url_for('static', filename='js/clu-series-json.js') }}?v={{ range(1, 10000) | random }}"></script>
 <script>

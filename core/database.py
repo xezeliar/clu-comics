@@ -1317,6 +1317,11 @@ def _init_db_locked():
         if "cover_image" not in series_columns:
             c.execute("ALTER TABLE series ADD COLUMN cover_image TEXT")
             app_logger.info("Added cover_image column to series table")
+        # Series header banner: the vertical slice of the cover the user picked
+        # (0-100, CSS background-position y). NULL = the blurred cover.
+        if "header_focus" not in series_columns:
+            c.execute("ALTER TABLE series ADD COLUMN header_focus REAL DEFAULT NULL")
+            app_logger.info("Added header_focus column to series table")
         if "series_subscription" not in series_columns:
             c.execute("ALTER TABLE series ADD COLUMN series_subscription INTEGER DEFAULT NULL")
             app_logger.info("Added series_subscription column to series table")
@@ -14218,6 +14223,27 @@ def import_series_row(entry):
         return "updated" if existed else "inserted"
     finally:
         conn.close()
+
+
+def set_series_header_focus(series_id, focus):
+    """Store the banner slice (0-100) for a series, or None for the blurred cover.
+
+    Returns True when the series exists and was updated.
+    """
+    with db_conn() as conn:
+        if not conn:
+            return False
+        try:
+            cur = conn.execute(
+                "UPDATE series SET header_focus = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (focus, series_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            app_logger.error(f"Failed to set header focus for series {series_id}: {e}")
+            return False
 
 
 def update_series_desc(series_id, desc):
