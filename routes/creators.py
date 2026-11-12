@@ -4,6 +4,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, url_for
 
 from core import creators
 from core.auth import accessible_folder_prefixes, current_user
+from core.database import get_series_slugs_for_folders
 from core.metadata_normalize import strip_provider_ids
 
 creators_bp = Blueprint("creators", __name__)
@@ -43,8 +44,10 @@ def _issues(kinds, name):
         return jsonify({"success": False, "error": "Could not read issues"}), 500
     for i in issues:
         i["thumbnail_url"] = url_for("get_thumbnail", path=i["path"])
+    slug = get_series_slugs_for_folders([folder]).get(folder)
     return jsonify({"success": True, "issues": issues,
-                    "folder_href": url_for("collection.collection", path=folder)})
+                    "folder_href": url_for("collection.collection", path=folder),
+                    "series_href": url_for("series.series_view", slug=slug) if slug else None})
 
 
 @creators_bp.route("/creators")

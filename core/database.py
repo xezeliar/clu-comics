@@ -14310,6 +14310,33 @@ def get_series_mapping(series_id):
         return None
 
 
+def get_series_slugs_for_folders(folders):
+    """{folder: series page slug} for the folders mapped to a series.
+
+    A folder is a series once a series row's ``mapped_path`` names it exactly
+    (Subscribe or Change Location). Folders with no series are left out, so
+    callers show a Series page link only where one exists. One query per 500
+    folders; when two series claim a folder, the lower id wins.
+    """
+    from helpers.series_slug import generate_series_slug
+    folders = [f for f in dict.fromkeys(folders) if f]
+    slugs = {}
+    with db_conn() as conn:
+        if not conn:
+            return slugs
+        for i in range(0, len(folders), 500):
+            chunk = folders[i:i + 500]
+            rows = conn.execute(
+                "SELECT id, name, volume, mapped_path FROM series"
+                " WHERE mapped_path IN (" + ",".join("?" * len(chunk)) + ")"
+                " ORDER BY id DESC",
+                chunk,
+            ).fetchall()
+            for sid, name, volume, path in rows:
+                slugs[path] = generate_series_slug(name, sid, volume)
+    return slugs
+
+
 def get_series_by_id(series_id):
     """
     Get full series info by ID.

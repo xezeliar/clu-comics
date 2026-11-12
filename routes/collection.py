@@ -45,7 +45,7 @@ from core.database import (
     search_file_index, get_user_preference, get_files_recursive_paged,
     count_files_recursive,
     get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin,
-    set_directory_has_thumbnail,
+    set_directory_has_thumbnail, get_series_slugs_for_folders,
     get_first_indexed_times, get_new_arrival_counts, mark_series_visited,
 )
 
@@ -535,6 +535,8 @@ def api_browse():
         # folder is a visit, so this one's own count is cleared here.
         new_counts = get_new_arrival_counts([d['path'] for d in directories])
         mark_series_visited(path)
+        # A folder mapped to a series links to its series page.
+        series_slugs = get_series_slugs_for_folders([d['path'] for d in directories])
 
         processed_directories = []
         for d in directories:
@@ -560,6 +562,10 @@ def api_browse():
             elif d.get('has_thumbnail'):
                 # Indexed flag is stale (art deleted since the last scan).
                 dir_info['has_thumbnail'] = False
+
+            if d['path'] in series_slugs:
+                dir_info['series_url'] = url_for(
+                    'series.series_view', slug=series_slugs[d['path']])
 
             processed_directories.append(dir_info)
 

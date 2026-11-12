@@ -215,9 +215,17 @@
         const panel = el('li', 'person-panel');
         const head = el('div', 'person-panel-head');
         head.appendChild(el('strong', '', card.dataset.title + ' · ' + d.issues.length + ' issue' + (d.issues.length === 1 ? '' : 's')));
+        const links = el('span', 'text-nowrap');
+        // A folder mapped to a series also links to its series page.
+        if (d.series_href) {
+            const series = el('a', 'small me-3', 'Series page');
+            series.href = d.series_href;
+            links.appendChild(series);
+        }
         const open = el('a', 'small', 'Open folder');
         open.href = d.folder_href;
-        head.appendChild(open);
+        links.appendChild(open);
+        head.appendChild(links);
         panel.appendChild(head);
         const items = d.issues.map(i => ({ type: 'file', name: i.name, path: i.path, thumbnailUrl: i.thumbnail_url }));
         d.issues.forEach(i => {
