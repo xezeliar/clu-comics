@@ -303,6 +303,7 @@ class TestCbzUpdateComicinfo:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
+        assert data["provider"] == "manual"
         notes = data["comicinfo"].pop("Notes")
         assert notes.startswith("Metadata entered manually in CLU on ")
         assert data["comicinfo"] == {"Series": "Batman", "Title": "Year One"}
@@ -436,6 +437,29 @@ def _png(width, height):
     buf = io.BytesIO()
     Image.new("RGB", (width, height)).save(buf, format="PNG")
     return buf.getvalue()
+
+
+class TestCbzMetadataProvider:
+    """/cbz-metadata names the provider that tagged the file (from Notes)."""
+
+    def _make(self, tmp_path, xml):
+        path = str(tmp_path / "Prov 001.cbz")
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("p01.png", b"x")
+            if xml is not None:
+                zf.writestr("ComicInfo.xml", xml)
+        return path
+
+    def test_metron_notes(self, client, tmp_path):
+        path = self._make(tmp_path, "<ComicInfo><Series>S</Series>"
+                          "<Notes>Metadata from Metron. Issue ID: 1</Notes></ComicInfo>")
+        assert client.get("/cbz-metadata", query_string={"path": path}).get_json()["provider"] == "metron"
+
+    def test_unrecognised_notes_and_no_comicinfo(self, client, tmp_path):
+        path = self._make(tmp_path, "<ComicInfo><Series>S</Series><Notes>hello</Notes></ComicInfo>")
+        assert client.get("/cbz-metadata", query_string={"path": path}).get_json()["provider"] is None
+        path = self._make(tmp_path, None)
+        assert client.get("/cbz-metadata", query_string={"path": path}).get_json()["provider"] is None
 
 
 class TestCbzMetadataDimensions:
