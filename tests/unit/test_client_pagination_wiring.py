@@ -145,9 +145,11 @@ def test_reading_lists_page_is_wired():
     assert "createClientPager" not in js
     on_data = _between(js, "onData: data => {", "},")
     assert "grid.innerHTML = data.html" in on_data
-    # A swapped-in card needs its tick, tag fit and bookmark state again.
+    # A swapped-in card needs its tick and bookmark state again (cards no
+    # longer carry a tag row to fit), and the Show counts follow the page.
     init = _between(js, "function initListCards", "\n}\n")
-    for call in ("syncListCheckboxes()", "observeCardTags()", "loadWantToReadState()"):
+    assert "updateShowCounts(data.show_counts)" in on_data
+    for call in ("syncListCheckboxes()", "loadWantToReadState()"):
         assert call in init
 
 
