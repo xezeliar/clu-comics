@@ -6,7 +6,7 @@ links to ``/series/<slug>`` only for such folders.
 import os
 import time
 from unittest.mock import MagicMock, patch
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import quote
 
 import pytest
 
@@ -59,22 +59,15 @@ class TestBrowse:
         assert by_name["Batman"]["series_url"] == "/series/batman-v1-7"
         assert "series_url" not in by_name["Other"]
 
-    @patch("routes.collection.get_directory_children")
-    def test_sidecar_folder_carries_resolve_url(self, mock_children, client, db_connection, tmp_path):
-        root = str(tmp_path / "data")
-        sidecar, plain = os.path.join(root, "Saga"), os.path.join(root, "Other")
-        os.makedirs(sidecar)
-        os.makedirs(plain)
-        open(os.path.join(sidecar, "cvinfo"), "w").close()
-        mock_children.return_value = (
-            [{"name": "Saga", "path": sidecar, "has_thumbnail": False},
-             {"name": "Other", "path": plain, "has_thumbnail": False}], [])
-        with patch.dict("sys.modules", {"app": MagicMock(DATA_DIR=root)}):
-            dirs = client.get(f"/api/browse?path={root}").get_json()["directories"]
-        by_name = {d["name"]: d for d in dirs}
-        url = urlsplit(by_name["Saga"]["series_resolve_url"])
-        assert url.path == "/api/series/for-folder" and parse_qs(url.query)["path"] == [sidecar]
-        assert "series_resolve_url" not in by_name["Other"]
+    def test_browse_never_looks_for_sidecars(self):
+        # Sidecars are not indexed; a listing must not stat every folder.
+        # The folder menu asks /api/series/for-folder?check=1 when it opens.
+        here = os.path.dirname(__file__)
+        with open(os.path.join(here, "..", "..", "routes", "collection.py"), encoding="utf-8") as fh:
+            assert "series_for_folder" not in fh.read()
+        with open(os.path.join(here, "..", "..", "static", "js", "collection.js"), encoding="utf-8") as fh:
+            js = fh.read()
+        assert "show.bs.dropdown" in js and "'&check=1'" in js
 
 
 class TestSeriesForFolder:
@@ -90,6 +83,13 @@ class TestSeriesForFolder:
              patch("routes.series.metron.get_flask_api", return_value=None), \
              patch("models.comicvine_source.is_available", return_value=False):
             return client.get("/api/series/for-folder?path=" + quote(path))
+
+    def test_check_reports_a_sidecar_without_resolving(self, client, folder):
+        with patch("models.library_automap._resolve_identity") as resolve:
+            assert client.get("/api/series/for-folder?check=1&path=" + quote(folder)).get_json()["has_sidecar"] is False
+            open(os.path.join(folder, "series.json"), "w").close()
+            assert client.get("/api/series/for-folder?check=1&path=" + quote(folder)).get_json()["has_sidecar"] is True
+        resolve.assert_not_called()
 
     def test_mapped_folder_uses_its_series(self, client, db_connection, folder):
         _series(db_connection, 7, "Saga", 1, folder)

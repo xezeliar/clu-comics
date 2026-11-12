@@ -528,8 +528,7 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
                         newCount: dir.new_count || 0,
                         metadataPending: hasPendingMetadata,
                         thumbnailPending: hasPendingThumbnail,
-                        seriesUrl: dir.series_url || null,
-                        seriesResolveUrl: dir.series_resolve_url || null
+                        seriesUrl: dir.series_url || null
                     });
                     if (hasPendingMetadata) {
                         pendingMetadataPaths.push(itemPath);
@@ -1896,10 +1895,12 @@ function renderGrid(items) {
                         `;
                     } else {
                         // For folders with files, show full menu. A folder mapped
-                        // to a series links to its series page first.
-                        dropdownMenu.innerHTML = ((item.seriesUrl || item.seriesResolveUrl) ? `
-                        <li><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl || '#'}"><i class="bi bi-collection"></i> Series Page</a></li>
-                        <li><hr class="dropdown-divider"></li>` : '') + `
+                        // to a series links to its series page first; an unmapped
+                        // one shows the link once the menu finds a sidecar.
+                        const seriesHidden = item.seriesUrl ? '' : ' d-none folder-series-probe';
+                        dropdownMenu.innerHTML = `
+                        <li class="${seriesHidden}"><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl || '#'}"><i class="bi bi-collection"></i> Series Page</a></li>
+                        <li class="${seriesHidden}"><hr class="dropdown-divider"></li>` + `
                         <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-remove-custom-thumb" href="#"><i class="bi bi-x-square"></i> Remove Custom Thumbnail</a></li>
@@ -1915,13 +1916,29 @@ function renderGrid(items) {
                         `;
 
                         // Bind Generate Thumbnail action
-                        // A folder with a series.json/cvinfo but no mapped
-                        // series: ask the server which series page it names.
+                        // A folder not mapped to a series: look for a
+                        // series.json/cvinfo when the menu opens (sidecars are
+                        // not indexed, so browsing never touches the disk), and
+                        // on click ask the server which series page it names.
                         const seriesPageAction = dropdownMenu.querySelector('.folder-action-series-page');
                         if (seriesPageAction && !item.seriesUrl) {
+                            const resolveUrl = '/api/series/for-folder?path=' + encodeURIComponent(item.path);
+                            let probed = false;
+                            actionsDropdown.addEventListener('show.bs.dropdown', () => {
+                                if (probed) return;
+                                probed = true;
+                                fetch(resolveUrl + '&check=1')
+                                    .then(r => r.json())
+                                    .then(d => {
+                                        if (!d.has_sidecar) return;
+                                        dropdownMenu.querySelectorAll('.folder-series-probe')
+                                            .forEach(li => li.classList.remove('d-none'));
+                                    })
+                                    .catch(() => { probed = false; });
+                            });
                             seriesPageAction.addEventListener('click', (e) => {
                                 e.preventDefault();
-                                fetch(item.seriesResolveUrl)
+                                fetch(resolveUrl)
                                     .then(r => r.json())
                                     .then(d => {
                                         if (d.success && d.url) window.location.href = d.url;
