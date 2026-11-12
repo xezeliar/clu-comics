@@ -65,6 +65,9 @@ const READER_MODES = ['paged', 'scroll'];
 const READER_FITS = ['width', 'height'];
 let readerMode = 'paged';
 let readerFit = 'width';
+// readerTurn  'slide' today's page change | 'turn' hinged on the spine | 'none' cross-fade
+const READER_TURNS = ['slide', 'turn', 'none'];
+let readerTurn = 'slide';
 
 // Paged + fit-to-width. A portrait page is laid out by CSS to fit the window's
 // HEIGHT (that is what `max-height: 100%` does), so fitting its width is a
@@ -252,6 +255,7 @@ function loadReaderPrefs() {
             if (!data || !data.success) return;
             if (READER_MODES.includes(data.mode)) readerMode = data.mode;
             if (READER_FITS.includes(data.fit)) readerFit = data.fit;
+            if (READER_TURNS.includes(data.turn)) readerTurn = data.turn;
         })
         .catch(() => { /* keep whatever we had */ });
 }
@@ -261,7 +265,7 @@ function saveReaderPrefs() {
     fetch('/api/reader-prefs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: readerMode, fit: readerFit })
+        body: JSON.stringify({ mode: readerMode, fit: readerFit, turn: readerTurn })
     }).catch(err => console.error('Failed to save reader preferences:', err));
 }
 
@@ -294,6 +298,15 @@ function ensureReaderViewControls() {
         fitBtn.onclick = () => setReaderFit(readerFit === 'width' ? 'height' : 'width');
         controls.insertBefore(fitBtn, document.getElementById('pageSelector'));
     }
+    if (!document.getElementById('readerTurnBtn')) {
+        const turnBtn = document.createElement('button');
+        turnBtn.id = 'readerTurnBtn';
+        turnBtn.type = 'button';
+        turnBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
+        turnBtn.innerHTML = '<i class="bi bi-book text-light" aria-hidden="true"></i>';
+        turnBtn.onclick = () => setReaderTurn(READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]);
+        controls.insertBefore(turnBtn, document.getElementById('pageSelector'));
+    }
     updateReaderViewControls();
 }
 
@@ -307,6 +320,16 @@ function updateReaderViewControls() {
         modeBtn.setAttribute('aria-label', label);
         modeBtn.setAttribute('aria-pressed', scroll ? 'true' : 'false');
         modeBtn.classList.toggle('active', scroll);
+    }
+    const turnBtn = document.getElementById('readerTurnBtn');
+    if (turnBtn) {
+        const names = { slide: 'Slide', turn: 'Turn', none: 'None' };
+        const next = names[READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]];
+        const label = `Page turn: ${names[readerTurn]}. Switch to ${next}`;
+        turnBtn.title = label;
+        turnBtn.setAttribute('aria-label', label);
+        turnBtn.classList.toggle('active', readerTurn === 'turn');
+        turnBtn.style.display = readerMode === 'scroll' ? 'none' : '';
     }
     const fitBtn = document.getElementById('readerFitBtn');
     if (fitBtn) {
@@ -341,6 +364,48 @@ function setReaderMode(mode) {
     } finally {
         rebuildingReaderView = false;
     }
+}
+
+/** Change how a page change looks; rebuilds the pager on the same page. */
+function setReaderTurn(turn) {
+    if (!READER_TURNS.includes(turn) || turn === readerTurn) return;
+    readerTurn = turn;
+    saveReaderPrefs();
+    updateReaderViewControls();
+    if (!comicReaderSwiper || !currentComicPath || currentComicPageCount <= 0) return;
+    const index = getReaderCurrentIndex();
+    rebuildingReaderView = true;
+    try {
+        initializeComicReader(currentComicPageCount, index);
+    } finally {
+        rebuildingReaderView = false;
+    }
+}
+
+/**
+ * Swiper options for the page change. Turn: the leaving page hinges on its left
+ * (spine) edge with a shadow that darkens as it folds; Swiper drives it from the
+ * finger and finishes on release, and a tap plays it over 450ms. None, or reduced
+ * motion: a 150ms cross-fade. shortcut: a two-page spread keeps the slide, not a
+ * one-sheet turn; upgrade by grouping the pair into one slide.
+ */
+function pageTurnOptions() {
+    if (readerSpread) return {};
+    if (CLU.reducedMotion() || readerTurn === 'none') {
+        return { effect: 'fade', fadeEffect: { crossFade: true }, speed: 150 };
+    }
+    if (readerTurn !== 'turn') return {};
+    return {
+        effect: 'creative',
+        speed: 450,
+        creativeEffect: {
+            perspective: true,
+            limitProgress: 1,
+            shadowPerProgress: true,
+            prev: { shadow: true, origin: 'left center', translate: [0, 0, 1], rotate: [0, -100, 0] },
+            next: { translate: [0, 0, -1] },
+        },
+    };
 }
 
 /** Change what pages are fitted to (paged mode). */
@@ -721,6 +786,7 @@ function initializeComicReader(pageCount, startPage = 0) {
         direction: 'horizontal',
         loop: false,
         initialSlide: startPage,
+        ...pageTurnOptions(),
         // Spread: two slides per view, grouped in pairs after a lone cover that
         // is pushed to the right half by an offset of one slide width.
         ...(readerSpread ? {

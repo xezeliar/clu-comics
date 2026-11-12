@@ -39,6 +39,7 @@ from core.database import (
     get_user_preference,
     get_user_setting,
     get_user_setting_override,
+    get_user_setting_overrides,
     list_api_tokens,
     set_user_setting,
     update_last_login,
@@ -53,8 +54,14 @@ from core.page_width import (
 from core.settings import get_setting, set_setting
 from core.themes import (
     BOOTSWATCH_THEMES,
+    THEME_MODES,
+    ACCENT_COLOURS,
+    appearance_catalog,
+    appearance_css,
+    appearance_slots,
     is_dark_theme,
     is_valid_theme,
+    normalize_appearance,
     theme_display_name,
     theme_previews,
     theme_stylesheets,
@@ -63,8 +70,65 @@ from core.themes import (
 auth_bp = Blueprint("auth", __name__)
 
 
+# Appearance prefs: the theme set (a user overrides all of it or none of it,
+# so a personal theme never mixes with the site's mode) and the two per-user
+# switches, which have no site default.
+THEME_PREFS = {
+    "theme": "bootstrap_theme", "mode": "theme_mode", "light": "theme_light",
+    "dark": "theme_dark", "oled": "theme_oled", "accent": "theme_accent",
+}
+SWITCH_PREFS = {"publisher_dots": "publisher_dots", "cover_tilt": "cover_tilt"}
+
+
+def site_appearance():
+    """The site-default appearance (5s settings snapshot, no query).
+    ``app.config["BOOTSTRAP_THEME"]`` stays the site theme, as before."""
+    return normalize_appearance({
+        "theme": current_app.config.get("BOOTSTRAP_THEME", "default"),
+        "mode": get_setting("THEME_MODE"),
+        "light": get_setting("THEME_LIGHT"),
+        "dark": get_setting("THEME_DARK"),
+        "oled": get_setting("THEME_OLED"),
+        "accent": get_setting("THEME_ACCENT"),
+    })
+
+
+def _user_appearance(user_id=None):
+    """(appearance, is_override, switches) for a user: their own theme set if
+    they saved one, else the site's; publisher dots and cover tilt default on."""
+    rows = get_user_setting_overrides(
+        list(THEME_PREFS.values()) + list(SWITCH_PREFS.values()), user_id=user_id)
+    override = any(pref in rows for pref in THEME_PREFS.values())
+    appearance = (normalize_appearance({k: rows.get(pref) for k, pref in THEME_PREFS.items()})
+                  if override else site_appearance())
+    switches = {k: rows.get(pref) is not False for k, pref in SWITCH_PREFS.items()}
+    return appearance, override, switches
+
+
+def _resolve_request_appearance():
+    """This request's (appearance, switches), memoized on ``g`` like the
+    theme. A DB hiccup degrades to the site default, never a broken render."""
+    memo = getattr(g, "_clu_appearance", None)
+    if memo is not None:
+        return memo
+    switches = {k: True for k in SWITCH_PREFS}
+    try:
+        user = getattr(g, "current_user", None)
+        if user:
+            appearance, _, switches = _user_appearance(user["id"])
+        else:
+            appearance = site_appearance()
+    except Exception:
+        appearance = normalize_appearance(
+            {"theme": current_app.config.get("BOOTSTRAP_THEME", "default")})
+    g._clu_appearance = (appearance, switches)
+    return g._clu_appearance
+
+
 def _resolve_request_theme():
-    """The theme for this request: personal override, else the site default.
+    """The ONE theme for this request: the chosen theme, or in Follow my
+    device the dark one (the server cannot see the device; Wrapped relies on
+    this).
 
     ``app.config["BOOTSTRAP_THEME"]`` is the site default (loaded at startup by
     core.config.load_flask_config and kept live by /api/config/styling), so the
@@ -80,17 +144,8 @@ def _resolve_request_theme():
     if memo is not None:
         return memo
 
-    theme = None
-    try:
-        user = getattr(g, "current_user", None)
-        if user:
-            theme = get_user_setting_override("bootstrap_theme", user_id=user["id"])
-    except Exception:
-        # This runs on every render, including error pages — a DB hiccup here
-        # must degrade to the site default, not break the whole app.
-        theme = None
-
-    theme = theme or current_app.config.get("BOOTSTRAP_THEME", "default")
+    appearance, _ = _resolve_request_appearance()
+    theme = appearance["dark"] if appearance["mode"] == "follow" else appearance["theme"]
     g._clu_theme = theme
     return theme
 
@@ -170,9 +225,19 @@ def _resolve_request_motion():
 @auth_bp.app_context_processor
 def _inject_theme_assets():
     theme = _resolve_request_theme()
+    appearance, switches = _resolve_request_appearance()
+    follow = appearance["mode"] == "follow"
     return {
         "bootstrap_theme": theme,
-        "theme_is_dark": is_dark_theme(theme),
+        # In Follow my device the head script sets data-bs-theme instead.
+        "theme_is_dark": is_dark_theme(theme) and not follow,
+        # [(theme, media)]: what partials/theme_css.html links, and the inline
+        # <style> for True black and the accent.
+        "theme_slots": appearance_slots(appearance),
+        "theme_follow": follow,
+        "theme_head_css": appearance_css(appearance),
+        "appearance_publisher_dots": switches["publisher_dots"],
+        "appearance_cover_tilt": switches["cover_tilt"],
         "bootswatch_themes": BOOTSWATCH_THEMES,
         "theme_stylesheets": theme_stylesheets,
         "theme_display_name": theme_display_name,
@@ -262,6 +327,7 @@ def _reset_request_identity(exc=None):
     """
     g.pop("current_user", None)
     g.pop("_clu_theme", None)
+    g.pop("_clu_appearance", None)
     g.pop("_clu_page_width", None)
     g.pop("_clu_motion", None)
 
@@ -322,7 +388,10 @@ def account():
     )
 
     site_theme = get_user_preference("bootstrap_theme", default="default") or "default"
-    theme_override = get_user_setting_override("bootstrap_theme")
+    appearance, theme_is_override, switches = _user_appearance()
+    if not theme_is_override:
+        # The panel shows the stored site default, as the old picker did.
+        appearance = normalize_appearance(dict(appearance, theme=site_theme))
     site_page_width = _site_page_width()
     page_width_override = get_user_setting_override("page_width")
     if not is_valid_page_width(page_width_override):
@@ -334,8 +403,9 @@ def account():
         # this page renders standalone (the route tests build their own app).
         bootswatch_themes=BOOTSWATCH_THEMES,
         # Appearance
-        account_theme=theme_override or site_theme,
-        theme_is_override=theme_override is not None,
+        account_appearance=dict(appearance, **switches),
+        appearance_catalog=appearance_catalog(),
+        theme_is_override=theme_is_override,
         site_theme=site_theme,
         # Page width
         account_page_width=page_width_override or site_page_width,
@@ -360,9 +430,36 @@ def account():
 # tests/routes/test_rbac.py pins this.
 
 
+def parse_appearance_payload(body):
+    """(appearance, None) from an Appearance panel payload, or (None, error).
+
+    ``bootstrapTheme`` alone (the old picker) still works: the rest default.
+    Shared with /api/config/styling, which saves the site default."""
+    theme = (body.get("bootstrapTheme") or "").strip()
+    if not is_valid_theme(theme):
+        return None, "Unknown theme"
+    mode = body.get("mode", "one")
+    if mode not in THEME_MODES:
+        return None, "Unknown theme mode"
+    light = body.get("lightTheme", "default")
+    if not is_valid_theme(light) or is_dark_theme(light):
+        return None, "The light theme must be a light theme"
+    dark = body.get("darkTheme", "darkly")
+    if not is_dark_theme(dark):
+        return None, "The dark theme must be a dark theme"
+    oled = body.get("trueBlack", False)
+    accent = body.get("accent", "")
+    if not isinstance(oled, bool):
+        return None, "trueBlack must be true or false"
+    if accent and accent not in ACCENT_COLOURS:
+        return None, "Unknown accent"
+    return {"theme": theme, "mode": mode, "light": light, "dark": dark,
+            "oled": oled, "accent": accent}, None
+
+
 @auth_bp.route("/api/account/appearance", methods=["POST"])
 def account_save_appearance():
-    """Save (or clear) the current user's personal theme override."""
+    """Save (or clear) the current user's personal appearance."""
     user = current_user()
     if user is None:
         return jsonify({"error": "unauthorized"}), 401
@@ -370,19 +467,30 @@ def account_save_appearance():
     body = request.get_json(silent=True) or {}
 
     if body.get("useSiteDefault"):
-        delete_user_setting("bootstrap_theme", user_id=user["id"])
+        for pref in THEME_PREFS.values():
+            delete_user_setting(pref, user_id=user["id"])
         site = get_user_preference("bootstrap_theme", default="default") or "default"
         return jsonify({"success": True, "theme": site, "override": False})
 
-    theme = (body.get("bootstrapTheme") or "").strip()
-    if not is_valid_theme(theme):
-        return jsonify({"success": False, "error": "Unknown theme"}), 400
+    appearance, error = parse_appearance_payload(body)
+    if error:
+        return jsonify({"success": False, "error": error}), 400
+    switches = {}
+    for key, field in (("publisher_dots", "publisherDots"), ("cover_tilt", "coverTilt")):
+        if field in body:
+            if not isinstance(body[field], bool):
+                return jsonify({"success": False, "error": f"{field} must be true or false"}), 400
+            switches[SWITCH_PREFS[key]] = body[field]
 
     # Deliberately does NOT touch app.config["BOOTSTRAP_THEME"] — that is the
     # site default, which only the owner changes via /api/config/styling.
-    if not set_user_setting("bootstrap_theme", theme, user_id=user["id"]):
-        return jsonify({"success": False, "error": "Could not save theme"}), 500
-    return jsonify({"success": True, "theme": theme, "override": True})
+    writes = {THEME_PREFS[k]: v for k, v in appearance.items()}
+    writes.update(switches)
+    for pref, value in writes.items():
+        if not set_user_setting(pref, value, user_id=user["id"]):
+            return jsonify({"success": False, "error": "Could not save theme"}), 500
+    return jsonify({"success": True, "theme": appearance["theme"], "override": True,
+                    "appearance": appearance})
 
 
 @auth_bp.route("/api/account/page-width", methods=["POST"])

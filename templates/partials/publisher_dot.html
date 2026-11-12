@@ -1,0 +1,8 @@
+{#- Import with context: {% from "partials/publisher_dot.html" import publisher_dot with context %}.
+    A dot only for a publisher in core/publishers.py; the name is always written beside it. -#}
+{% macro publisher_dot(name) -%}
+{%- if publisher_color is defined and (appearance_publisher_dots is not defined or appearance_publisher_dots) -%}
+{%- set c = publisher_color(name) -%}
+{%- if c %}<span class="pub-dot" style="--pub: {{ c }}" aria-hidden="true"></span>{% endif -%}
+{%- endif -%}
+{%- endmacro %}

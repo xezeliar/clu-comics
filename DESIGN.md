@@ -162,6 +162,8 @@ The palette is borrowed: Bootstrap's semantic roles, filled in by whichever them
 
 **The Sticker Exception.** Fixed colours are allowed only where the background is cover art or the reader's black, never the themed page. If it can sit on `--bs-body-bg`, it uses a theme variable.
 
+**Publisher dots are a named exception to the Sticker Exception.** One fixed colour is allowed on the themed page: the publisher's house colour, from the fixed table in `core/publishers.py` (about a dozen houses; any other publisher gets no dot, never a hashed colour). Colour is identity, never the only signal: the name is always written beside the dot, and the dot carries a faint ring in the page ink so black and white houses show on every theme. The Appearance switch `appearance_publisher_dots` hides them.
+
 **The Fill-and-Text Rule.** Themes drive `.bg-x` and `.text-x` from one variable, and templates put white text on fills and coloured text on the page. Never key a rule on a bare `[data-bs-theme=dark]`: the navbar carries that attribute on every theme, Latte included. A page rule that truly must differ on dark themes uses `:root[data-bs-theme="dark"]`; local theme files never branch on it at all.
 
 **The Selection Rule.** Selected and drop-target covers use `--clu-select` (the theme primary pushed 30% toward `--bs-emphasis-color`, defined in `collection.css`), so a muted primary still marks a selection clearly and carries a white check.

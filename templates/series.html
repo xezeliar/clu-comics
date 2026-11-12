@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/publisher_dot.html' import publisher_dot with context %}
 
 {% block title %}{{ series.name }} - Series{% endblock %}
 
@@ -93,7 +94,7 @@
 
                 <p class="sh-meta small text-body-secondary mb-0">
                     {%- set sep = joiner(' · ') -%}
-                    {%- if series.publisher and series.publisher.name %}{{ sep() }}{{ series.publisher.name }}{% endif -%}
+                    {%- if series.publisher and series.publisher.name %}{{ sep() }}{{ publisher_dot(series.publisher.name) }}{{ series.publisher.name }}{% endif -%}
                     {%- if series.volume %}{{ sep() }}Vol. {{ series.volume }}{% endif -%}
                     {%- if series.year_began %}{{ sep() }}{{ series.year_began }} to {{ year_ended_label }}{% endif -%}
                     {%- if series.status %}{{ sep() }}{{ series.status }}{% endif %}

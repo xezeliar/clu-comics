@@ -172,13 +172,67 @@ class TestMultiUser:
         assert "prompt(" not in html
         assert "revokeTokenModal" in html
 
-    def test_theme_select_is_populated(self, client):
+    def test_appearance_panel_has_a_tile_per_theme(self, client):
+        from core.themes import THEME_ORDER
+
         _login(client, "reader", "readerpass")
         html = client.get("/account").get_data(as_text=True)
 
-        assert 'id="accountTheme"' in html
-        assert 'value="darkly"' in html
-        assert "Darkly (Dark)" in html
+        assert 'id="accountAppearance"' in html
+        for theme_id in THEME_ORDER:
+            assert f'data-theme="{theme_id}"' in html
+        # The per-user switches are on /account only.
+        assert 'data-k="publisher_dots"' in html
+        assert 'data-k="cover_tilt"' in html
+        assert "Desktop only. Off when Reduce motion is on." in html
+
+    # -- The full appearance ------------------------------------------------
+
+    def test_saves_the_whole_appearance(self, client):
+        _login(client, "reader", "readerpass")
+        resp = client.post("/api/account/appearance", json={
+            "bootstrapTheme": "nord", "mode": "follow", "lightTheme": "solarized-light",
+            "darkTheme": "noir", "trueBlack": True, "accent": "#0f766e",
+            "publisherDots": False, "coverTilt": False,
+        })
+
+        assert resp.status_code == 200
+        uid = _uid("reader")
+        stored = {k: get_user_setting_override(k, user_id=uid) for k in (
+            "bootstrap_theme", "theme_mode", "theme_light", "theme_dark",
+            "theme_oled", "theme_accent", "publisher_dots", "cover_tilt")}
+        assert stored == {
+            "bootstrap_theme": "nord", "theme_mode": "follow", "theme_light": "solarized-light",
+            "theme_dark": "noir", "theme_oled": True, "theme_accent": "#0f766e",
+            "publisher_dots": False, "cover_tilt": False,
+        }
+
+    @pytest.mark.parametrize("payload", [
+        {"mode": "sideways"},
+        {"lightTheme": "darkly"},          # a dark theme in the light slot
+        {"darkTheme": "flatly"},           # a light theme in the dark slot
+        {"accent": "red;}body{x:y"},        # written into an inline <style>
+        {"accent": "#123456"},             # not a swatch
+        {"trueBlack": "yes"},
+        {"publisherDots": "no"},
+    ])
+    def test_bad_appearance_rejected_and_not_stored(self, client, payload):
+        _login(client, "reader", "readerpass")
+        resp = client.post("/api/account/appearance", json={"bootstrapTheme": "nord", **payload})
+
+        assert resp.status_code == 400
+        assert get_user_setting_override("bootstrap_theme", user_id=_uid("reader")) is None
+
+    def test_site_default_clears_the_whole_theme_but_not_the_switches(self, client):
+        _login(client, "reader", "readerpass")
+        client.post("/api/account/appearance", json={
+            "bootstrapTheme": "nord", "mode": "follow", "trueBlack": True, "coverTilt": False})
+        client.post("/api/account/appearance", json={"useSiteDefault": True})
+
+        uid = _uid("reader")
+        for key in ("bootstrap_theme", "theme_mode", "theme_oled"):
+            assert get_user_setting_override(key, user_id=uid) is None
+        assert get_user_setting_override("cover_tilt", user_id=uid) is False
 
     def test_unauthenticated_gets_401(self, client):
         assert client.post("/api/account/appearance", json={"bootstrapTheme": "darkly"}).status_code == 401
@@ -262,18 +316,77 @@ class TestRenderedTheme:
         set_user_preference("bootstrap_theme", "flatly", category="personalization")
         yield
 
-    def test_override_selected_in_the_picker(self, client):
+    @staticmethod
+    def _checked_tile(html):
+        import re
+        return re.findall(r'data-theme="([^"]+)"\s+aria-checked="true"', html)
+
+    def test_override_selected_in_the_panel(self, client):
         set_user_setting("bootstrap_theme", "cyborg", user_id=_uid("reader"))
         _login(client, "reader", "readerpass")
         html = client.get("/account").get_data(as_text=True)
 
-        assert '<option value="cyborg" selected>' in html
+        assert self._checked_tile(html) == ["cyborg"]
 
     def test_site_default_selected_without_an_override(self, client):
         _login(client, "reader", "readerpass")
         html = client.get("/account").get_data(as_text=True)
 
-        assert '<option value="flatly" selected>' in html
+        assert self._checked_tile(html) == ["flatly"]
+
+    def test_follow_my_device_links_both_themes_by_scheme(self, client):
+        uid = _uid("reader")
+        set_user_setting("bootstrap_theme", "flatly", user_id=uid)
+        set_user_setting("theme_mode", "follow", user_id=uid)
+        set_user_setting("theme_light", "solarized-light", user_id=uid)
+        set_user_setting("theme_dark", "nord", user_id=uid)
+        _login(client, "reader", "readerpass")
+        html = client.get("/account").get_data(as_text=True)
+
+        assert ('/static/css/themes/solarized-light.css" rel="stylesheet" '
+                'media="(prefers-color-scheme: light)"') in html
+        assert '/static/css/themes/nord.css" rel="stylesheet" media="(prefers-color-scheme: dark)"' in html
+        # The device decides the scheme, in a blocking head script.
+        assert '<html lang="en">' in html
+        assert "matchMedia('(prefers-color-scheme: dark)')" in html
+
+    def test_true_black_and_accent_reach_the_head(self, client):
+        uid = _uid("reader")
+        set_user_setting("bootstrap_theme", "nord", user_id=uid)
+        set_user_setting("theme_oled", True, user_id=uid)
+        set_user_setting("theme_accent", "#be185d", user_id=uid)
+        _login(client, "reader", "readerpass")
+        html = client.get("/account").get_data(as_text=True)
+
+        style = html.split('<style id="clu-appearance">')[1].split("</style>")[0]
+        assert "--bs-body-bg:#000000" in style
+        assert "--bs-primary:#be185d" in style
+
+    def test_a_tampered_accent_never_reaches_the_head(self, client):
+        uid = _uid("reader")
+        set_user_setting("bootstrap_theme", "nord", user_id=uid)
+        set_user_setting("theme_accent", "red}</style><script>x()</script>", user_id=uid)
+        _login(client, "reader", "readerpass")
+        html = client.get("/account").get_data(as_text=True)
+
+        assert "<script>x()" not in html
+        assert 'id="clu-appearance"' not in html
+
+    def test_switch_globals_default_on_and_follow_the_user(self, client):
+        from flask import render_template_string
+
+        from routes.auth import _inject_theme_assets
+
+        _login(client, "reader", "readerpass")
+        client.post("/api/account/appearance", json={"bootstrapTheme": "nord", "coverTilt": False})
+        # Visible to every template, through the auth_bp context processor.
+        with client.application.test_request_context():
+            from flask import g
+            g.current_user = {"id": _uid("reader")}
+            ctx = _inject_theme_assets()
+            assert ctx["appearance_publisher_dots"] is True
+            assert ctx["appearance_cover_tilt"] is False
+            assert render_template_string("{{ appearance_cover_tilt }}") == "False"
 
     def test_local_theme_renders_the_dark_head(self, client):
         set_user_setting("bootstrap_theme", "gruvbox-dark", user_id=_uid("reader"))
@@ -301,9 +414,9 @@ class TestRenderedTheme:
 
         assert "(Catppuccin Frappé)" in html
 
-    def test_local_preview_honours_the_proxy_prefix(self, client):
-        """The preview must resolve like the stylesheet does, not hardcode
-        /static/ -- behind a subpath proxy that 404s."""
+    def test_local_stylesheets_honour_the_proxy_prefix(self, client):
+        """Stylesheets resolve through url_for, not a hardcoded /static/ --
+        behind a subpath proxy that 404s."""
         set_user_setting("bootstrap_theme", "gruvbox-dark", user_id=_uid("reader"))
         _login(client, "reader", "readerpass")
         # base_url's path becomes SCRIPT_NAME, as ProxyFix sets it in production.
@@ -311,8 +424,8 @@ class TestRenderedTheme:
             "/account", base_url="http://localhost/clu"
         ).get_data(as_text=True)
 
-        assert 'src="/clu/static/images/themes/gruvbox-dark.png"' in html
         assert "/clu/static/css/themes/gruvbox-dark.css" in html
+        assert "/clu/static/css/clu-appearance.css" in html
 
 
 # ---------------------------------------------------------------------------

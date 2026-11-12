@@ -292,4 +292,43 @@
     });
     counts.forEach(function (el) { io.observe(el); });
   });
+  /* Cover tilt: cover grids only, a fine hover pointer only, at most 6 degrees
+     each way, eased back over 0.35s on leave. One delegated listener; the card's
+     own 5px lift is untouched (it moves the card, the tilt turns the cover).
+     Off under reduced motion and when <body data-cover-tilt="off">. */
+  var TILT_MAX = 6;
+  var TILT_COVER = '.thumbnail-container, .person-cover, .dashboard-card-img-container';
+  var TILT_SKIP = '.view-text, .reader, #readerModal, [data-no-tilt]';
+  var fine = window.matchMedia ? window.matchMedia('(hover: hover) and (pointer: fine)') : null;
+  var tilted = null;
+
+  function tiltReset(el) {
+    if (!el) return;
+    el.style.transition = 'transform 350ms ' + ease();
+    el.style.transform = '';
+    var g = el.querySelector(':scope > .clu-glare');
+    if (g) g.style.opacity = '0';
+    setTimeout(function () { if (el !== tilted) el.style.transition = ''; }, 380);
+  }
+  document.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'touch' || !fine || !fine.matches || CLU.reducedMotion() ||
+        document.body.getAttribute('data-cover-tilt') === 'off') return;
+    var el = e.target.closest && e.target.closest(TILT_COVER);
+    if (el && el.closest(TILT_SKIP)) el = null;
+    if (el !== tilted) { tiltReset(tilted); tilted = el; }
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    var x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    el.style.transition = 'none';
+    el.style.transform = 'perspective(700px) rotateX(' + ((0.5 - y) * 2 * TILT_MAX).toFixed(2) +
+      'deg) rotateY(' + ((x - 0.5) * 2 * TILT_MAX).toFixed(2) + 'deg)';
+    var g = el.querySelector(':scope > .clu-glare');
+    if (!g) { g = document.createElement('span'); g.className = 'clu-glare'; g.setAttribute('aria-hidden', 'true'); el.appendChild(g); }
+    g.style.setProperty('--gx', (x * 100).toFixed(1) + '%');
+    g.style.setProperty('--gy', (y * 100).toFixed(1) + '%');
+    g.style.opacity = '1';
+  }, { passive: true });
+  document.addEventListener('pointerleave', function () { tiltReset(tilted); tilted = null; });
+  document.addEventListener('pointerout', function (e) { if (!e.relatedTarget) { tiltReset(tilted); tilted = null; } });
+
 })(window, document);

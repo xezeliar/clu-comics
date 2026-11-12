@@ -30,7 +30,7 @@ def users(db_connection, monkeypatch):
 class TestDefaults:
     def test_defaults_are_paged_and_fit_to_width(self, client):
         body = client.get("/api/reader-prefs").get_json()
-        assert body == {"success": True, "mode": "paged", "fit": "width"}
+        assert body == {"success": True, "mode": "paged", "fit": "width", "turn": "slide"}
 
     def test_schema_declares_both_settings(self):
         assert get_setting("READER_MODE") == "paged"
@@ -47,7 +47,7 @@ class TestSave:
     def test_round_trip(self, client):
         r = client.post("/api/reader-prefs", json={"mode": "scroll", "fit": "height"})
         assert r.status_code == 200
-        assert r.get_json() == {"success": True, "mode": "scroll", "fit": "height"}
+        assert r.get_json() == {"success": True, "mode": "scroll", "fit": "height", "turn": "slide"}
         again = client.get("/api/reader-prefs").get_json()
         assert (again["mode"], again["fit"]) == ("scroll", "height")
 
@@ -66,6 +66,7 @@ class TestSave:
         {"mode": None},
         {"mode": ["scroll"]},
         {"mode": "scroll", "fit": "nope"},
+        {"turn": "flip"},
     ])
     def test_invalid_value_is_400_and_writes_nothing(self, client, payload):
         r = client.post("/api/reader-prefs", json=payload)
@@ -114,3 +115,14 @@ class TestPerUser:
     def test_signed_out_is_refused(self, client, users):
         assert client.get("/api/reader-prefs").status_code in (302, 401, 403)
         assert client.post("/api/reader-prefs", json={"mode": "scroll"}).status_code in (302, 401, 403)
+
+
+class TestPageTurn:
+    def test_turn_round_trips_and_is_validated(self, client):
+        assert client.get("/api/reader-prefs").get_json()["turn"] == "slide"
+        body = client.post("/api/reader-prefs", json={"turn": "turn"}).get_json()
+        assert body["turn"] == "turn"
+        assert client.post("/api/reader-prefs", json={"turn": "none"}).get_json()["turn"] == "none"
+
+    def test_schema_default_is_slide(self):
+        assert get_setting("READER_PAGE_TURN") == "slide"
