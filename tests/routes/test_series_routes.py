@@ -1198,6 +1198,33 @@ class TestSeriesPageForceRefresh:
         assert "Summary edited on Metron" in resp.get_data(as_text=True)
 
     @patch("routes.series.metron")
+    def test_fresh_fetch_renders_httpurl_cover(self, mock_metron, app, client_with_data):
+        """Metron issue images are pydantic HttpUrl; a fresh fetch must still
+        render (tojson raised TypeError and the page redirected to releases)."""
+        from types import SimpleNamespace
+        from pydantic import HttpUrl
+
+        self._register_slug_global(app)
+        mock_api = MagicMock()
+        mock_api.series.return_value = _MetronSeries(
+            id=100, name="Batman", desc="", volume=2020, status="Ongoing",
+            issue_count=1, year_began=2020, year_end=None,
+        )
+        _real_client(mock_metron, mock_api)
+        mock_metron.is_connection_error.return_value = False
+        cover = HttpUrl("https://static.metron.cloud/media/issue/batman-1.jpg")
+        mock_metron.get_all_issues_for_series.return_value = [SimpleNamespace(
+            id=9001, number="1", name="One", issue_name="One",
+            cover_date="2020-01-01", store_date="2020-01-01",
+            image=cover, resource_url=None, cv_id=None,
+        )]
+
+        resp = client_with_data.get("/series/batman-v2020-100?refresh=1")
+
+        assert resp.status_code == 200
+        assert '"https://static.metron.cloud/media/issue/batman-1.jpg"' in resp.get_data(as_text=True)
+
+    @patch("routes.series.metron")
     def test_normal_load_keeps_the_cache(self, mock_metron, app, client_with_data):
         """Without ?refresh=1 the page serves the DB copy and touches neither
         Metron nor its cache."""
