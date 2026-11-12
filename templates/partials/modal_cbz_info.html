@@ -1,31 +1,37 @@
 <!-- CBZ Info Modal – shared partial (clu-cbz-info.js) -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/cbz-info.css') }}">
 <div class="modal fade" id="cbzInfoModal" tabindex="-1" aria-labelledby="cbzInfoModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="cbzInfoModalLabel">CBZ Information</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <!-- Navigation buttons (hidden until enabled by options) -->
-        <div id="cbzNavButtons" class="d-flex justify-content-between mb-3" style="display: none !important;">
-          <button type="button" id="cbzPrevBtn" class="btn btn-outline-primary" style="visibility: hidden;">
-            <i class="bi bi-arrow-left"></i> Prev
-          </button>
-          <button type="button" id="cbzNextBtn" class="btn btn-outline-primary" style="visibility: hidden;">
-            Next <i class="bi bi-arrow-right"></i>
-          </button>
+      <div class="modal-header ci-hd">
+        <div class="ci-id">
+          <h5 class="modal-title" id="cbzInfoModalLabel">CBZ Information</h5>
+          <p class="ci-sub mb-0" id="cbzInfoSub"></p>
+          <p class="ci-fn mb-0 font-monospace" id="cbzInfoFileName"></p>
         </div>
-        <div id="cbzInfoContent">
-          <div class="text-center">
-            <div class="spinner-border" role="status">
-              <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="mt-2">Loading CBZ information...</p>
+        <div class="ci-nav">
+          <!-- Prev / Next file (shown by clu-cbz-info.js when a file list is given) -->
+          <span id="cbzNavButtons" class="ci-nav-files d-none">
+            <button type="button" id="cbzPrevBtn" class="btn ci-ib" aria-label="Previous file" title="Previous file">
+              <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            </button>
+            <span class="ci-pos" id="cbzNavPos"></span>
+            <button type="button" id="cbzNextBtn" class="btn ci-ib" aria-label="Next file" title="Next file">
+              <i class="bi bi-chevron-right" aria-hidden="true"></i>
+            </button>
+          </span>
+          <button type="button" class="btn-close ci-x" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body" id="cbzInfoContent">
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
           </div>
+          <p class="mt-2">Loading CBZ information...</p>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer ci-ft" id="cbzInfoFooter">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
