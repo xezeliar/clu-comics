@@ -17,6 +17,7 @@ from core.database import (
     get_reading_lists_page,
     get_reading_list_matching_ids,
     count_reading_lists,
+    count_reading_lists_by_progress,
     READING_LIST_DEFAULT_SORT,
     get_reading_list,
     update_reading_list_entry_match,
@@ -108,12 +109,33 @@ READING_LIST_DEFAULT_PER_PAGE = DEFAULT_PER_PAGE
 READING_LIST_PER_PAGE_COOKIE = 'clu_per_page_reading_lists'
 
 
+_SOURCE_LABELS = {
+    reading_list_sync.GITHUB: 'GitHub CBL',
+    reading_list_sync.METRON_LIST: 'Metron reading list',
+    reading_list_sync.METRON_ARC: 'Metron arc',
+    reading_list_sync.COMICVINE_ARC: 'ComicVine arc',
+}
+
+
+def source_label(source):
+    """What a list's source is called on its card and its page: the
+    provider for an import, 'CBL file' for an upload, '' for a list made by
+    hand. parse_source keeps the four schemes in one place."""
+    if not source:
+        return ''
+    kind, _ = reading_list_sync.parse_source(source)
+    return _SOURCE_LABELS.get(kind, 'CBL file')
+
+
 def _reading_list_grid_args():
     """The grid's search, filter, sort and page from the query string.
     Anything the page does not offer falls back to its default."""
     args = request.args
     query = (args.get('q') or '').strip()
     tags = [t for t in args.getlist('tag') if t and t != 'all']
+    # Show: '', in-progress, not-started, finished (core.database ignores
+    # anything else, which is All).
+    show = (args.get('show') or '').strip()
     sort = args.get('sort') or READING_LIST_DEFAULT_SORT
     try:
         page = max(1, int(args.get('page', 1)))
@@ -123,7 +145,7 @@ def _reading_list_grid_args():
     per_page = per_page_from(args.get('per_page'),
                              request.cookies.get(READING_LIST_PER_PAGE_COOKIE),
                              default=READING_LIST_DEFAULT_PER_PAGE)
-    return query, tags, sort, page, per_page
+    return query, tags, show, sort, page, per_page
 
 
 @reading_lists_bp.route('/reading-lists')
@@ -135,22 +157,25 @@ def index():
     layer. The tag filter, sort and page come from the query string, and
     later changes fetch /api/reading-lists/page.
     """
-    query, tags, sort, page, per_page = _reading_list_grid_args()
+    query, tags, show, sort, page, per_page = _reading_list_grid_args()
     total_lists = count_reading_lists()
     all_tags = sorted(get_all_reading_list_tags(), key=lambda t: (t.lower(), t))
     # A tag no list carries any more would filter on something invisible.
     tags = [t for t in tags if t in all_tags]
     result = get_reading_lists_page(tags=tags, sort=sort, page=page, per_page=per_page,
-                                    query=query)
+                                    query=query, show=show)
     return render_template(
         'reading_lists.html',
         lists=result['lists'],
         grid=result,
         grid_query=query,
-        grid_filtered=bool(tags),
+        grid_filtered=bool(tags or show),
         total_lists=total_lists,
         all_tags=all_tags,
         active_tags=tags,
+        active_show=show,
+        source_label=source_label,
+        show_counts=count_reading_lists_by_progress(),
         active_sort=sort,
         page_sizes=READING_LIST_PAGE_SIZES,
         default_per_page=READING_LIST_DEFAULT_PER_PAGE,
@@ -164,11 +189,12 @@ def grid_page():
 
     Rendered from the same partial as the full page so the two cannot drift.
     """
-    query, tags, sort, page, per_page = _reading_list_grid_args()
+    query, tags, show, sort, page, per_page = _reading_list_grid_args()
     result = get_reading_lists_page(tags=tags, sort=sort, page=page, per_page=per_page,
-                                    query=query)
+                                    query=query, show=show)
     html = render_template('partials/reading_list_cards.html', lists=result['lists'],
-                           grid_query=query, grid_filtered=bool(tags))
+                           grid_query=query, grid_filtered=bool(tags or show),
+                           source_label=source_label)
     return jsonify({
         'success': True,
         'html': html,
@@ -176,6 +202,8 @@ def grid_page():
         # Every list, unnarrowed: the count's "of N" and Delete All. Sent with
         # each page so a create or delete since the page loaded is reflected.
         'all_total': count_reading_lists(),
+        # The Show filter's counts: reading moves them, so they travel too.
+        'show_counts': count_reading_lists_by_progress(),
         'page': result['page'],
         'per_page': result['per_page'],
         'total_pages': result['total_pages'],
@@ -186,8 +214,9 @@ def grid_page():
 def grid_ids():
     """Every list id matching the search and tag filter, on every page:
     "Select All"."""
-    query, tags, _sort, _page, _per_page = _reading_list_grid_args()
-    return jsonify({'success': True, 'ids': get_reading_list_matching_ids(tags, query=query)})
+    query, tags, show, _sort, _page, _per_page = _reading_list_grid_args()
+    return jsonify({'success': True,
+                    'ids': get_reading_list_matching_ids(tags, query=query, show=show)})
 
 @reading_lists_bp.route('/reading-lists/<int:list_id>')
 def view_list(list_id):
@@ -206,7 +235,8 @@ def view_list(list_id):
     libraries = get_libraries(enabled_only=True) or []
 
     return render_template('reading_list_view.html', reading_list=reading_list,
-                           syncable=syncable, libraries=libraries)
+                           syncable=syncable, libraries=libraries,
+                           source_label=source_label(reading_list.get('source')))
 
 def process_cbl_import(task_id, content, filename, source, rename_pattern=None):
     """Background worker to process CBL import."""

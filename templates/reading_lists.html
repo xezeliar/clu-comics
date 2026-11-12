@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, filter_bar, search_input, per_page_select, pager_nav, result_count %}
+{% from 'partials/filters.html' import toolbar, filter_bar, search_input, select_field, per_page_select, pager_nav, result_count %}
 {% block title %}Reading Lists{% endblock %}
 
 {% block extra_css %}
@@ -15,7 +15,10 @@ owner, so everything shows exactly as before. #}
 {% set _can_manage = (g.current_user.role if g.get('current_user') else 'owner') in ['clerk', 'owner'] %}
 <div>
     {% call(slot) page_header('Reading Lists', 'bi-journal-bookmark',
-                              subtitle='Discover and organize your comic journeys') %}
+                              subtitle='Discover and organize your comic journeys',
+                              stats=[{'value': show_counts['all'], 'label': 'lists'},
+                                     {'value': show_counts['in-progress'], 'label': 'in progress',
+                                      'id': 'rlInProgress'}]) %}
         {% if _can_manage %}
         {% if slot == 'actions' %}
             <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createListModal">
@@ -75,15 +78,22 @@ owner, so everything shows exactly as before. #}
     {% endif %}
     {% endwith %}
 
-    <!-- Sort and tag filter: the shared list toolbar (partials/filters.html) -->
+    <!-- Search, sort, Show and Tags: the shared list toolbar (partials/filters.html) -->
     {% if total_lists %}
     {% call toolbar('Sort and filter reading lists', id='rlFilters') %}
         <div class="clu-toolbar-row">
             {{ search_input('rlSearch', 'Search reading lists', value=grid_query) }}
+            {% call select_field('rlSort', 'Sort') %}
+                {%- for value, label in [('date-desc', 'Newest'), ('date-asc', 'Oldest'),
+                                         ('name-asc', 'Name A–Z'), ('name-desc', 'Name Z–A'),
+                                         ('progress-asc', 'Least read')] %}
+                <option value="{{ value }}"{% if value == active_sort %} selected{% endif %}>{{ label }}</option>
+                {%- endfor %}
+            {% endcall %}
             <div class="clu-toolbar-end">
-                {#- A search or tag that fits on one page reads "Showing 12 of 222";
+                {#- A search or filter that fits on one page reads "Showing 12 of 222";
                     a paged result reads "Showing 1–60 of 150" (the matching total). -#}
-                {%- set _narrowed = grid_query or active_tags -%}
+                {%- set _narrowed = grid_query or active_tags or active_show -%}
                 {{ result_count('rlCount', total_lists if (grid.total == 0 or (_narrowed and grid.total_pages == 1)) else grid.total,
                                 'reading lists', one='reading list',
                                 shown=grid.total if (grid.total == 0 or (_narrowed and grid.total_pages == 1)) else None,
@@ -93,12 +103,13 @@ owner, so everything shows exactly as before. #}
             </div>
         </div>
         <div class="clu-toolbar-row">
-            {{ filter_bar('rlSort', [
-                {'value': 'date-desc', 'label': 'Newest First', 'icon': 'bi-calendar3'},
-                {'value': 'date-asc', 'label': 'Oldest First', 'icon': 'bi-calendar3'},
-                {'value': 'name-asc', 'label': 'Name (A-Z)', 'icon': 'bi-sort-alpha-down'},
-                {'value': 'name-desc', 'label': 'Name (Z-A)', 'icon': 'bi-sort-alpha-up'},
-            ], active=active_sort, label='Sort') }}
+            {#- How far the viewer has read each list; counts from read_count. -#}
+            {{ filter_bar('rlShow', [
+                {'value': '', 'label': 'All', 'count': show_counts['all']},
+                {'value': 'in-progress', 'label': 'In progress', 'count': show_counts['in-progress']},
+                {'value': 'not-started', 'label': 'Not started', 'count': show_counts['not-started']},
+                {'value': 'finished', 'label': 'Finished', 'count': show_counts['finished']},
+            ], active=active_show, label='Show', toggle_off=True) }}
         </div>
         {% if all_tags|length > 0 %}
         {%- set _tag_opts = [('', 'All')] -%}

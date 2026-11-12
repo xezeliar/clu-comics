@@ -12521,8 +12521,30 @@ _READING_LIST_SORTS = {
     "date-asc": "rl.created_at ASC, rl.id ASC",
     "name-asc": "rl.name COLLATE NOCASE ASC, rl.id ASC",
     "name-desc": "rl.name COLLATE NOCASE DESC, rl.id DESC",
+    "progress-asc": "COALESCE(CAST(p.rd AS REAL) / NULLIF(p.tot, 0), 0) ASC, rl.id ASC",
 }
 READING_LIST_DEFAULT_SORT = "date-desc"
+
+# The grid's Show filter: how far the *viewer* has read each list. ``p`` is
+# _READING_LIST_PROGRESS (tot entries, rd of them read); a list with no
+# entries counts as not started.
+_READING_LIST_SHOWS = {
+    "in-progress": "COALESCE(p.rd, 0) > 0 AND p.rd < p.tot",
+    "not-started": "COALESCE(p.rd, 0) = 0",
+    "finished": "COALESCE(p.tot, 0) > 0 AND p.rd >= p.tot",
+}
+_READING_LIST_PROGRESS = """
+    WITH p AS (
+        SELECT rle.reading_list_id AS lid,
+               COUNT(DISTINCT rle.id) AS tot,
+               COUNT(DISTINCT ir.id) AS rd
+        FROM reading_list_entries rle
+        LEFT JOIN issues_read ir
+               ON COALESCE(rle.manual_override_path, rle.matched_file_path) = ir.issue_path
+              AND ir.user_id = ?
+        GROUP BY rle.reading_list_id)
+"""
+_READING_LIST_FROM = "reading_lists rl LEFT JOIN p ON p.lid = rl.id"
 
 
 def _reading_list_tags(raw):
@@ -12561,10 +12583,14 @@ def _reading_list_tag_where(tags):
     return (" AND ".join(clauses) or "1"), params
 
 
-def _reading_list_where(tags, query=None):
+def _reading_list_where(tags, query=None, show=None):
     """The tag filter plus the search box: the list's name contains ``query``
-    (SQLite LIKE: case-insensitive for ASCII; % and _ are matched literally)."""
+    (SQLite LIKE: case-insensitive for ASCII; % and _ are matched literally),
+    plus the Show filter (a _READING_LIST_SHOWS key; anything else is All).
+    Reads ``p``, so it goes after _READING_LIST_PROGRESS."""
     where, params = _reading_list_tag_where(tags)
+    if show in _READING_LIST_SHOWS:
+        where = f"({where}) AND {_READING_LIST_SHOWS[show]}"
     q = (query or "").strip()
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -12573,8 +12599,32 @@ def _reading_list_where(tags, query=None):
     return where, params
 
 
+def count_reading_lists_by_progress(viewer_id=None):
+    """{"all", "in-progress", "not-started", "finished"}: every list, by how
+    far the viewer has read it. The Show filter's counts and the page's
+    "N in progress" stat."""
+    counts = {"all": 0, "in-progress": 0, "not-started": 0, "finished": 0}
+    try:
+        uid = _resolve_user_id(viewer_id)
+        with db_conn() as conn:
+            if not conn:
+                return counts
+            c = conn.cursor()
+            cases = ", ".join(f"SUM(CASE WHEN {cond} THEN 1 ELSE 0 END)"
+                              for cond in _READING_LIST_SHOWS.values())
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT COUNT(*), {cases} "
+                      f"FROM {_READING_LIST_FROM}", [uid])
+            row = c.fetchone()
+            counts["all"] = row[0] or 0
+            for key, value in zip(_READING_LIST_SHOWS, row[1:]):
+                counts[key] = value or 0
+    except Exception as e:
+        app_logger.error(f"Error counting reading lists by progress: {e}")
+    return counts
+
+
 def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_SORT,
-                           page=1, per_page=40, query=None):
+                           page=1, per_page=40, query=None, show=None):
     """One page of the Reading Lists grid, filtered and sorted in SQL.
 
     Every list is visible to every user (so a reader can browse lists an
@@ -12590,7 +12640,7 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
     per_page = max(1, int(per_page or 40))
     page = max(1, int(page or 1))
     order = _READING_LIST_SORTS.get(sort) or _READING_LIST_SORTS[READING_LIST_DEFAULT_SORT]
-    where, params = _reading_list_where(tags, query)
+    where, params = _reading_list_where(tags, query, show)
     empty = {"lists": [], "total": 0, "page": 1, "per_page": per_page, "total_pages": 1}
     try:
         uid = _resolve_user_id(viewer_id)
@@ -12599,15 +12649,16 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
                 return empty
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute(f"SELECT COUNT(*) FROM reading_lists rl WHERE {where}", params)
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT COUNT(*) FROM {_READING_LIST_FROM} "
+                      f"WHERE {where}", [uid] + params)
             total = c.fetchone()[0]
             total_pages = max(1, -(-total // per_page))
             page = min(page, total_pages)
 
             c.execute(
-                f"SELECT rl.id FROM reading_lists rl WHERE {where} "
+                f"{_READING_LIST_PROGRESS} SELECT rl.id FROM {_READING_LIST_FROM} WHERE {where} "
                 f"ORDER BY {order} LIMIT ? OFFSET ?",
-                params + [per_page, (page - 1) * per_page],
+                [uid] + params + [per_page, (page - 1) * per_page],
             )
             ids = [row[0] for row in c.fetchall()]
             if not ids:
@@ -12617,7 +12668,10 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
                 f"""
                 SELECT rl.*,
                        COUNT(DISTINCT rle.id) as entry_count,
-                       COUNT(DISTINCT ir.id) as read_count
+                       COUNT(DISTINCT ir.id) as read_count,
+                       COUNT(DISTINCT CASE WHEN COALESCE(rle.manual_override_path,
+                                                         rle.matched_file_path) IS NOT NULL
+                                      THEN rle.id END) as owned_count
                 FROM reading_lists rl
                 LEFT JOIN reading_list_entries rle ON rl.id = rle.reading_list_id
                 LEFT JOIN issues_read ir
@@ -12640,19 +12694,21 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
         return empty
 
 
-def get_reading_list_matching_ids(tags=None, query=None):
+def get_reading_list_matching_ids(tags=None, query=None, show=None, viewer_id=None):
     """Every reading-list id carrying all of ``tags`` (and matching the search
-    ``query``), on every page.
+    ``query`` and the Show filter), on every page.
 
     Backs the grid's "Select All": a page holds only its own cards.
     """
-    where, params = _reading_list_where(tags, query)
+    where, params = _reading_list_where(tags, query, show)
     try:
+        uid = _resolve_user_id(viewer_id)
         with db_conn() as conn:
             if not conn:
                 return []
             c = conn.cursor()
-            c.execute(f"SELECT rl.id FROM reading_lists rl WHERE {where} ORDER BY rl.id", params)
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT rl.id FROM {_READING_LIST_FROM} "
+                      f"WHERE {where} ORDER BY rl.id", [uid] + params)
             return [row[0] for row in c.fetchall()]
     except Exception as e:
         app_logger.error(f"Error getting reading list ids: {e}")

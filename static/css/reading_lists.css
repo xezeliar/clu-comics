@@ -1,586 +1,396 @@
-/* Reading Lists Premium Redesign */
+/* Reading Lists: the index (cover stacks with read / in library / missing)
+   and a list's page (reading-order bar, Up next, Missing, dashed slots).
+   Theme colours only: --bs-* and the selection accent, never a hard-coded
+   colour (cover art is the image itself). */
 
 :root {
-    --card-height: 400px;
-    --card-border-radius: 16px;
-    --card-transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    --hover-scale: 1.02;
-    --overlay-gradient: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 50%, rgba(0, 0, 0, 0.1) 100%);
+    /* --clu-select lives in collection.css, which the index does not load. */
+    --rl-accent: var(--clu-select, var(--bs-primary));
+    --rl-owned: color-mix(in srgb, var(--rl-accent) 38%, var(--bs-body-bg));
+    --rl-missing: color-mix(in srgb, var(--bs-secondary-color) 70%, transparent);
 }
+
+.rl-stat {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .1rem .5rem;
+    font-size: .875rem;
+    color: var(--bs-secondary-color);
+    margin: .25rem 0 0;
+}
+.rl-stat b { color: var(--bs-emphasis-color); font-weight: 600; font-variant-numeric: tabular-nums; }
+.rl-stat > span + span::before { content: "\00B7"; margin-right: .5rem; }
+
+/* ---- The bar: read / in library / missing --------------------------------- */
+
+.rl-bar, .rl-run { display: flex; gap: 1px; }
+.rl-bar { height: .375rem; margin-top: .45rem; border-radius: 1rem; overflow: hidden; }
+.rl-bar i, .rl-run i { display: block; min-width: 2px; }
+.rl-bar .r, .rl-run .r, .rl-key .r { background: var(--rl-accent); }
+.rl-bar .o, .rl-run .o, .rl-key .o { background: var(--rl-owned); }
+.rl-bar .m, .rl-run .m, .rl-key .m { box-shadow: inset 0 0 0 1px var(--rl-missing); }
+
+/* ---- Index grid ------------------------------------------------------------ */
 
 .reading-list-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 2rem;
-    padding: 1rem 0;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: 1.75rem 1.25rem;
 }
 
-.reading-list-card {
+.rl-card {
     position: relative;
-    height: var(--card-height);
-    border-radius: var(--card-border-radius);
-    background-color: var(--bs-card-bg);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-    transition: var(--card-transition), z-index 0s;
-    cursor: pointer;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
+    min-width: 0;
+    border-radius: 8px;
+    transition: transform .2s;
 }
-
-.card-stack-container {
-    position: relative;
-    flex: 1;
-    min-height: 0;
+@media (hover: hover) {
+    .rl-card:hover { transform: translateY(-5px); z-index: 2; }
 }
+.rl-card:has(.dropdown-menu.show) { z-index: 6; }
 
-.reading-list-card:hover {
-    transform: translateY(-10px) scale(var(--hover-scale));
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-    border-color: var(--bs-primary);
-    z-index: 100;
-    /* Bring to front on hover */
-    overflow: visible;
-}
-
-/* Ensure content stays clipped to border-radius for the main container if needed, 
-   but since we want images to pop out, we rely on the image border radius if any. 
-   Actually, let's keep overflow hidden for the rounded corners on the static state 
-   but allow popout for the stack items.
-   
-   Better approach: Keep card overflow visible, but use a wrapper for the background/content 
-   that mimics the card shape? 
-   
-   Let's try simpler: reading-list-card allows visible overflow. 
-   We add border-radius to the stack items themselves.
-*/
-
-.card-stack-item {
-    position: absolute;
-    top: 3%;
-    left: 18%;
-    width: 65%;
-    height: 90%;
+.rl-stack { position: relative; margin: 8px 8px 0 0; }
+.rl-cover, .rl-back {
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    background-color: var(--bs-tertiary-bg);
     background-size: cover;
-    /* background-position: center; */
-    transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
-    transform-origin: center bottom;
-    /* box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); */
-    /* border-radius: var(--card-border-radius); */
-    /* Add radius to items */
+    background-position: center;
 }
+.rl-cover { position: relative; z-index: 1; box-shadow: var(--bs-box-shadow-sm); }
+.rl-back { position: absolute; inset: 0; filter: brightness(.72); box-shadow: var(--bs-box-shadow-sm); }
+.rl-back.b1 { transform: translate(4px, -4px); }
+.rl-back.b2 { transform: translate(8px, -8px); filter: brightness(.55); }
 
-/* Stacking Order */
-.card-stack-item:nth-child(1) {
-    z-index: 5;
-}
-
-.card-stack-item:nth-child(2) {
-    z-index: 4;
-    transform: scale(0.98) translateY(5px);
-    opacity: 0;
-}
-
-.card-stack-item:nth-child(3) {
-    z-index: 3;
-    transform: scale(0.96) translateY(10px);
-    opacity: 0;
-}
-
-.card-stack-item:nth-child(4) {
-    z-index: 2;
-    transform: scale(0.94) translateY(15px);
-    opacity: 0;
-}
-
-.card-stack-item:nth-child(5) {
-    z-index: 1;
-    transform: scale(0.92) translateY(20px);
-    opacity: 0;
-}
-
-/* Reveal stack items on hover/init if present */
-.reading-list-card .card-stack-item {
-    opacity: 1;
-    /* Show all items underneath initially but hidden by stacking */
-}
-
-/* Fan Effect on Hover */
-.reading-list-card:hover .card-stack-item:nth-child(1) {
-    transform: translateY(-40px) scale(1.05);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-}
-
-.reading-list-card:hover .card-stack-item:nth-child(2) {
-    transform: translateY(-20px) rotate(-5deg) translateX(-15px) scale(0.98);
-    opacity: 1;
-}
-
-.reading-list-card:hover .card-stack-item:nth-child(3) {
-    transform: translateY(-20px) rotate(5deg) translateX(15px) scale(0.98);
-    opacity: 1;
-}
-
-.reading-list-card:hover .card-stack-item:nth-child(4) {
-    transform: translateY(-10px) rotate(-10deg) translateX(-30px) scale(0.95);
-    opacity: 0.8;
-}
-
-.reading-list-card:hover .card-stack-item:nth-child(5) {
-    transform: translateY(-10px) rotate(10deg) translateX(30px) scale(0.95);
-    opacity: 0.8;
-}
-
-.card-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    /* background: var(--overlay-gradient); */
-    z-index: 2;
-    opacity: 0.8;
-    transition: opacity 0.3s ease;
-}
-
-.reading-list-card:hover .card-overlay {
-    opacity: 0.9;
-    /* background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 60%, rgba(0, 0, 0, 0.2) 100%); */
-}
-
-/* Content Area */
-.card-content {
-    padding: 1rem 1.25rem;
-    /* background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.8) 100%); */
-    border-radius: 0 0 var(--card-border-radius) var(--card-border-radius);
-    flex-shrink: 0;
-}
-
-.card-title-lg {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 0.25rem;
-    line-height: 1.2;
-}
-
-.card-meta {
-    font-size: 0.85rem;
-    opacity: 0.7;
-    margin-bottom: 0.5rem;
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-}
-
-.card-actions {
-    display: flex;
-    gap: 0.5rem;
-    opacity: 0;
-    max-height: 0;
-    overflow: hidden;
-    transition: all 0.3s ease;
-}
-
-.reading-list-card:hover .card-actions {
-    opacity: 1;
-    max-height: 50px;
-    margin-top: 0.5rem;
-}
-
-/* Empty State / Fallback */
-.no-image-placeholder {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, var(--bs-gray-700) 0%, var(--bs-gray-900) 100%);
+/* A list with no covers: its name on a themed tile, not a grey icon. */
+.rl-ph {
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-emphasis-color);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: var(--bs-gray-500);
+    justify-content: space-between;
+    padding: 12% 11%;
+    container-type: inline-size;
+    position: relative;
+    z-index: 1;
 }
-
-.placeholder-icon {
-    font-size: 4rem;
-    margin-bottom: 1rem;
-    opacity: 0.5;
-}
-
-/* Animations */
-@keyframes slideUpFade {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.stagger-load {
-    animation: slideUpFade 0.5s ease backwards;
-}
-
-.stagger-load:nth-child(1) {
-    animation-delay: 0.1s;
-}
-
-.stagger-load:nth-child(2) {
-    animation-delay: 0.2s;
-}
-
-.stagger-load:nth-child(3) {
-    animation-delay: 0.3s;
-}
-
-.stagger-load:nth-child(4) {
-    animation-delay: 0.4s;
-}
-
-.stagger-load:nth-child(5) {
-    animation-delay: 0.5s;
-}
-
-.stagger-load:nth-child(6) {
-    animation-delay: 0.6s;
-}
-
-/* Modal Improvements */
-.modal-content {
-    border-radius: 1rem;
-    border: none;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header {
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.modal-footer {
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-/* Tag Badges on Cards
-   The card has a fixed height, so the tag row never wraps: it takes the
-   space the counter leaves, and fitCardTags() (reading_list.js) folds what
-   does not fit into a "+N" chip. */
-.card-meta {
-    min-width: 0;
-}
-
-.card-count {
-    flex-shrink: 0;
-    white-space: nowrap;
-}
-
-.card-tags {
-    display: flex;
-    flex: 1 1 auto;
-    min-width: 0;
-    gap: 0.25rem;
-    overflow: hidden;
-}
-
-.tag-badge {
-    display: inline-block;
-    flex-shrink: 0;
-    max-width: 100%;
-    padding: 0.15rem 0.5rem;
-    border-radius: 1rem;
-    /* Theme-aware: the old white-at-20% vanished on light themes */
-    background: rgba(var(--bs-emphasis-color-rgb), 0.08);
-    border: 1px solid rgba(var(--bs-emphasis-color-rgb), 0.12);
-    font-size: 0.7rem;
-    line-height: 1.4;
-    color: inherit;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Last resort, set by fitCardTags() once every other tag is hidden: the
-   first tag shrinks to an ellipsis rather than leave the row empty. Never
-   unconditional -- the browser would squeeze it before any tag got hidden. */
-.card-tags .tag-badge.tag-squeeze {
-    flex-shrink: 1;
-    min-width: 2.5rem;
-}
-
-.tag-badge[hidden] {
-    display: none;
-}
-
-.tag-badge.tag-more {
+.rl-ph b {
     font-weight: 600;
-    cursor: help;
-}
-
-/* Special colors for known tags */
-.tag-badge[data-tag="Marvel"] {
-    background: #e23636;
-    border-color: transparent;
-    color: white;
-}
-
-.tag-badge[data-tag="DC"] {
-    background: #0476f2;
-    border-color: transparent;
-    color: white;
-}
-
-.tag-badge[data-tag="Event"] {
-    background: #ffc107;
-    border-color: transparent;
-    color: #000;
-}
-
-.tag-badge[data-tag="Complete"] {
-    background: #28a745;
-    border-color: transparent;
-    color: white;
-}
-
-.tag-badge[data-tag="Crossover"] {
-    background: #6f42c1;
-    border-color: transparent;
-    color: white;
-}
-
-.tag-badge[data-tag="Reading Order"] {
-    background: #17a2b8;
-    border-color: transparent;
-    color: white;
-}
-
-/* Tag Pills in Modal */
-.tag-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.75rem;
-    background: var(--bs-primary);
-    color: white;
-    border-radius: 1rem;
-    font-size: 0.875rem;
-}
-
-.tag-pill .remove-tag {
-    cursor: pointer;
-    opacity: 0.7;
-    display: inline-flex;
-    align-items: center;
-}
-
-.tag-pill .remove-tag:hover {
-    opacity: 1;
-}
-
-/* Editable Title Cursor */
-.card-title-lg {
-    cursor: text;
-}
-
-.card-title-lg:hover {
-    text-decoration: underline;
-    text-decoration-style: dotted;
-}
-
-/* Progress Bar */
-.progress-bar-container {
-    height: 4px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+    font-size: clamp(.8rem, 11cqw, 1.05rem);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
     overflow: hidden;
-    margin-top: 0.75rem;
 }
+.rl-ph .bi { font-size: 1.4rem; color: var(--bs-secondary-color); }
+.rl-ph small { font-size: .75rem; color: var(--bs-secondary-color); }
 
-.progress-bar-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.3s ease, background 0.3s ease;
-}
-
-/* Progress colors based on completion */
-.progress-bar-fill.progress-low {
-    background: linear-gradient(90deg, #dc3545, #e85d6b);
-}
-
-.progress-bar-fill.progress-medium {
-    background: linear-gradient(90deg, #fd7e14, #ffc107);
-}
-
-.progress-bar-fill.progress-high {
-    background: linear-gradient(90deg, #20c997, #28a745);
-}
-
-.progress-bar-fill.progress-complete {
-    background: linear-gradient(90deg, #28a745, #20c997);
-}
-
-/* Completion Badge */
-/* Want to Read Bookmark Toggle
-   Mirrors .to-read-button on the collection grid (static/css/collection.css):
-   hidden until hover, always visible once marked. Duplicated rather than
-   linking collection.css here, which would pull the whole file-grid stylesheet
-   into this page. */
-.want-to-read-button {
+/* Want to Read: a cover action, as on Library covers. */
+.rl-wtr {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    border: none;
-    border-radius: 50%;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
     width: 32px;
     height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 11;
-    opacity: 0;
-    transition: opacity 0.2s ease, background 0.2s ease;
-}
-
-.want-to-read-button i {
-    color: white;
-    font-size: 16px;
-}
-
-.reading-list-card:hover .want-to-read-button,
-.want-to-read-button:focus {
-    opacity: 1;
-}
-
-.want-to-read-button:hover {
-    background: rgba(0, 0, 0, 0.9);
-}
-
-.want-to-read-button:focus {
-    outline: 2px solid #0d6efd;
-    outline-offset: 2px;
-}
-
-.want-to-read-button.marked {
-    opacity: 1;
-    background: rgba(255, 193, 7, 0.9);
-}
-
-.want-to-read-button.marked i {
-    color: #212529;
-}
-
-.want-to-read-button.marked:hover {
-    background: rgba(255, 193, 7, 1);
-}
-
-/* Shifted left of the bookmark toggle, which occupies the top-right corner. */
-.completion-badge {
-    position: absolute;
-    top: 10px;
-    right: 48px;
-    background: #28a745;
-    color: white;
-    width: 28px;
-    height: 28px;
     border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    z-index: 10;
+    border: 0;
+    padding: 0;
+    background: rgba(0, 0, 0, .6);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s, background-color .15s;
+}
+.rl-card:hover .rl-wtr, .rl-wtr:focus-visible, .rl-wtr.marked { opacity: 1; }
+.rl-wtr.marked { background: var(--bs-warning); color: var(--bs-dark); }
+.rl-stack:has(.rl-ph) ~ .rl-wtr {
+    background: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    box-shadow: inset 0 0 0 1px var(--bs-border-color);
+}
+.rl-stack:has(.rl-ph) ~ .rl-wtr.marked {
+    color: var(--rl-accent);
+    box-shadow: inset 0 0 0 1px var(--rl-accent);
 }
 
-/* ==========================================================================
-   Bulk Select Mode
-   ========================================================================== */
+.rl-foot { display: flex; gap: .15rem; align-items: flex-start; margin-top: .55rem; }
+.rl-foot > div:first-child { flex: 1; min-width: 0; }
+.rl-t {
+    font-size: .9rem;
+    font-weight: 500;
+    line-height: 1.3;
+    margin: 0;
+    color: var(--bs-emphasis-color);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.rl-t a { color: inherit; text-decoration: none; outline: 0; }
+/* The whole card opens the list. */
+.rl-t a::after { content: ""; position: absolute; inset: 0; z-index: 2; border-radius: 8px; }
+.rl-t a:focus-visible::after { outline: 2px solid var(--rl-accent); outline-offset: 4px; }
+.rl-m { font-size: .75rem; color: var(--bs-secondary-color); line-height: 1.45; margin: .15rem 0 0; }
+.rl-m b { font-weight: 600; color: var(--bs-body-color); font-variant-numeric: tabular-nums; }
+
+/* Card and item menus: a quiet kebab above the card's link overlay. */
+.rl-menu { position: relative; z-index: 4; }
+.rl-menu > .btn { color: var(--bs-secondary-color); border-color: transparent; padding: .1rem .35rem; }
+.rl-menu > .btn:hover, .rl-menu > .btn:focus-visible { color: var(--bs-emphasis-color); }
+.rl-menu .dropdown-item small { display: block; color: var(--bs-secondary-color); white-space: normal; }
+
+/* ---- Bulk select ----------------------------------------------------------- */
 
 .card-select-checkbox {
     display: none;
     position: absolute;
-    top: 10px;
-    left: 10px;
+    top: 14px;
+    left: 6px;
     z-index: 5;
-    background: rgba(255, 255, 255, 0.92);
+    background: var(--bs-body-bg);
     border-radius: 4px;
     padding: 4px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--bs-box-shadow-sm);
 }
-
-.card-select-checkbox .form-check-input {
-    margin: 0;
-    width: 1.25rem;
-    height: 1.25rem;
-    cursor: pointer;
-}
-
-body.reading-list-select-mode .card-select-checkbox {
-    display: block;
-}
-
-body.reading-list-select-mode .reading-list-card {
-    cursor: pointer;
-}
-
-.reading-list-card.selected {
-    outline: 3px solid var(--bs-primary);
-    outline-offset: -3px;
-}
-
-#toggleSelectModeBtn.active {
-    background-color: var(--bs-secondary);
-    border-color: var(--bs-secondary);
-    color: #fff;
-    box-shadow: 0 0 0 0.2rem rgba(var(--bs-secondary-rgb), 0.35);
-}
-
-#toggleSelectModeBtn.active:hover {
-    background-color: #5c636a;
-    border-color: #565e64;
-    color: #fff;
-}
+.card-select-checkbox .form-check-input { margin: 0; width: 1.25rem; height: 1.25rem; cursor: pointer; }
+body.reading-list-select-mode .card-select-checkbox { display: block; }
+body.reading-list-select-mode .rl-card { cursor: pointer; }
+.rl-card.selected .rl-stack { outline: 3px solid var(--rl-accent); outline-offset: 2px; border-radius: 8px; }
+#toggleSelectModeBtn.active { background-color: var(--bs-secondary-bg); }
 
 .reading-list-bulk-action-bar {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(180deg, #1a1d21 0%, #0d0f12 100%);
-    border-top: 3px solid var(--bs-primary, #0d6efd);
+    background: var(--bs-dark);
+    border-top: 3px solid var(--bs-primary);
     padding: 14px 0;
     z-index: 1040;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55), 0 -2px 0 rgba(13, 110, 253, 0.45);
-    color: #fff;
-    animation: bulkBarSlideIn 0.28s ease-out, bulkBarPulse 1.6s ease-in-out 0.28s 2;
+    box-shadow: var(--bs-box-shadow-lg);
+    color: var(--bs-light);
+}
+.reading-list-bulk-action-bar #readingListBulkCount { font-size: 1.05rem; }
+
+/* Tags modal */
+.tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .75rem;
+    background: var(--bs-primary);
+    color: var(--bs-white);
+    border-radius: 1rem;
+    font-size: .875rem;
+}
+.tag-pill .remove-tag { cursor: pointer; opacity: .7; display: inline-flex; align-items: center; }
+.tag-pill .remove-tag:hover { opacity: 1; }
+
+/* ---- A list's page --------------------------------------------------------- */
+
+.rl-src { font-size: .8125rem; color: var(--bs-secondary-color); margin: .15rem 0 0; }
+.rl-desc {
+    margin: .35rem 0 0;
+    color: var(--bs-secondary-color);
+    max-width: 60ch;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.rl-desc.open { display: block; }
+.rl-desc p:last-child { margin-bottom: 0; }
+.rl-more { border: 0; background: none; padding: 0; color: var(--bs-link-color); font-size: .875rem; }
+.rl-run { height: .5rem; margin-top: .6rem; max-width: 34rem; }
+.rl-run i { flex: 1 1 0; border-radius: 1px; }
+.rl-key { display: flex; gap: .9rem; flex-wrap: wrap; font-size: .75rem; color: var(--bs-secondary-color); margin: .3rem 0 0; }
+.rl-key i { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; margin-right: .3rem; vertical-align: -1px; }
+
+.rl-sum {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+.rl-box {
+    display: flex;
+    gap: .75rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: .65rem .75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    min-width: 0;
+}
+.rl-box > div { flex: 1 1 11rem; min-width: 0; font-size: .9375rem; }
+.rl-box b { font-weight: 600; color: var(--bs-emphasis-color); }
+.rl-box .rl-sub { display: block; margin-top: .1rem; font-size: .8125rem; color: var(--bs-secondary-color); }
+.rl-thumb {
+    width: 2.6rem;
+    aspect-ratio: 2 / 3;
+    flex: none;
+    border-radius: 4px;
+    background-color: var(--bs-tertiary-bg);
+    background-size: cover;
+    background-position: center;
+}
+.rl-trk { display: inline-flex; gap: .5rem; align-items: center; font-size: .875rem; min-height: 2rem; margin: 0; }
+.rl-trk .form-check-input { margin: 0; float: none; }
+
+/* Issue grid */
+.reading-list-items.rl-ig {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8.25rem, 1fr));
+    gap: 1.5rem 1.25rem;
+}
+.rl-it { position: relative; min-width: 0; }
+.rl-it:has(.dropdown-menu.show) { z-index: 6; }
+.rl-it .book-cover {
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    background-color: var(--bs-tertiary-bg);
+    background-size: cover;
+    background-position: center;
+    position: relative;
+    cursor: pointer;
+    transition: transform .2s;
+}
+@media (hover: hover) {
+    .rl-it .book-cover:hover { transform: translateY(-4px); }
+}
+.rl-it .book-cover:focus-visible { outline: 2px solid var(--rl-accent); outline-offset: 3px; }
+/* The gold sticker (collection.css .issue-badge); a read issue's carries a
+   tick (.read-icon, bi-check-lg, so collection.css's green read badge, keyed
+   on bi-book-fill, does not apply). */
+.rl-it .issue-badge { top: auto; bottom: 8px; }
+.rl-it .issue-badge .read-icon[hidden] { display: none; }
+
+/* A missing issue: a quiet dashed slot, not a grey "?" tile. */
+.rl-slot {
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    border: 1.5px dashed var(--rl-missing);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 12% 10%;
+    color: var(--bs-secondary-color);
+    container-type: inline-size;
+    position: relative;
+}
+.rl-slot b { font-weight: 500; font-size: .8125rem; line-height: 1.25; overflow-wrap: anywhere; }
+.rl-slot strong {
+    font-size: clamp(1.1rem, 18cqw, 1.6rem);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--bs-body-color);
+    opacity: .7;
+}
+.rl-slot .btn { align-self: flex-start; opacity: 0; transition: opacity .15s; }
+.rl-it:hover .rl-slot .btn, .rl-slot .btn:focus-visible { opacity: 1; }
+.rl-ifoot { display: flex; gap: .1rem; align-items: flex-start; margin-top: .5rem; }
+.rl-ifoot > div:first-child { flex: 1; min-width: 0; }
+.rl-ct {
+    font-size: .875rem;
+    font-weight: 500;
+    margin: 0;
+    color: var(--bs-emphasis-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.rl-it.miss .rl-ct { color: var(--bs-secondary-color); font-weight: 400; }
+.rl-cm { font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; margin: 0; }
+
+/* Issue list view: numbered rows for long arcs. The same items, restyled. */
+.reading-list-items.rl-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    background: var(--bs-body-bg);
+}
+.rl-rows .rl-it {
+    display: flex;
+    gap: .6rem;
+    align-items: center;
+    padding: .45rem .5rem .45rem .6rem;
+    min-height: 3.4rem;
+}
+.rl-rows .rl-it + .rl-it { border-top: 1px solid var(--bs-border-color); }
+.rl-rows .rl-it.moved { background: color-mix(in srgb, var(--rl-accent) 10%, var(--bs-body-bg)); }
+.rl-rows .rl-art { width: 1.75rem; flex: none; }
+.rl-rows .book-cover { border-radius: 4px; }
+.rl-rows .book-cover:hover { transform: none; }
+.rl-rows .issue-badge, .rl-rows .rl-slot > * { display: none; }
+.rl-rows .rl-slot { padding: 0; border-radius: 4px; }
+.rl-rows .rl-ifoot { flex: 1; margin: 0; align-items: center; min-width: 0; }
+.rl-rows .rl-ct { white-space: normal; }
+.rl-num { display: none; }
+.rl-rows .rl-num {
+    display: block;
+    order: -2;
+    width: 1.6rem;
+    text-align: right;
+    font-size: .8125rem;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+}
+.rl-st { white-space: nowrap; }
+.rl-ig .rl-st { display: none; }
+.rl-st .bi { margin-right: .2rem; }
+.rl-rows .rl-lmap { display: inline-block; }
+.rl-lmap, .rl-mv, .rl-grip { display: none; }
+
+/* Reorder: list view, a grip to drag and Move up / Move down for keys. */
+.rl-rbar {
+    display: flex;
+    gap: .5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: .45rem .5rem .45rem .75rem;
+    margin-bottom: .5rem;
+    border: 1px solid var(--rl-accent);
+    border-radius: var(--bs-border-radius);
+    background: color-mix(in srgb, var(--rl-accent) 8%, var(--bs-body-bg));
+    font-size: .9375rem;
+}
+.rl-rbar span { margin-right: auto; }
+.reorder-mode .rl-grip { display: inline-flex; order: -3; color: var(--bs-secondary-color); cursor: grab; }
+.reorder-mode .rl-mv { display: flex; gap: .2rem; }
+.reorder-mode .rl-menu, .reorder-mode .rl-lmap { display: none; }
+.reorder-mode .book-cover { pointer-events: none; }
+.sortable-ghost { opacity: .4; }
+.sortable-chosen { box-shadow: var(--bs-box-shadow); }
+
+/* Map Issue / Add Issue result rows */
+.search-result-item { cursor: pointer; }
+.search-result-item.selected { box-shadow: inset 3px 0 0 var(--rl-accent); }
+
+/* ---- Touch and phone ----------------------------------------------------- */
+
+@media (pointer: coarse) {
+    .rl-wtr, .rl-slot .btn { opacity: 1; }
+    .rl-wtr::before { content: ""; position: absolute; inset: -6px; }
 }
 
-@keyframes bulkBarSlideIn {
-    from { transform: translateY(100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-@keyframes bulkBarPulse {
-    0%, 100% { box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.55), 0 -2px 0 rgba(13, 110, 253, 0.45); }
-    50% { box-shadow: 0 -8px 32px rgba(13, 110, 253, 0.6), 0 -2px 0 rgba(13, 110, 253, 1); }
-}
-
-/* Force readable text on the dark bar, regardless of Bootswatch theme. */
-.reading-list-bulk-action-bar .btn-outline-light {
-    color: #fff !important;
-    border-color: rgba(255, 255, 255, 0.75);
-    background-color: transparent;
-}
-
-.reading-list-bulk-action-bar .btn-outline-light:hover,
-.reading-list-bulk-action-bar .btn-outline-light:focus {
-    color: #1a1d21 !important;
-    background-color: #fff;
-    border-color: #fff;
-}
-
-.reading-list-bulk-action-bar #readingListBulkCount {
-    color: #fff;
-    font-size: 1.05rem;
+@media (max-width: 575.98px) {
+    .reading-list-grid, .reading-list-items.rl-ig {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1.25rem .9rem;
+    }
+    .rl-box .btn, .rl-menu > .btn, .rl-rows .btn-sm, .rl-trk { min-height: 2.75rem; min-width: 2.75rem; }
+    .rl-rows .rl-it { gap: .5rem; }
+    .rl-rows .rl-num { width: 1.3rem; }
 }

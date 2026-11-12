@@ -82,9 +82,53 @@ class TestReadingListGridPaging:
         assert 'data-clu-filter="multi"' in tags
         assert re.search(r'class="btn btn-sm btn-outline-secondary active"\s+data-value="odd" aria-pressed="true"', tags)
         assert 'data-value="" aria-pressed="false"' in tags
-        sort = html.split('id="rlSort"', 1)[1].split("</div>", 1)[0]
-        assert re.search(r'class="btn btn-sm btn-outline-secondary active"\s+data-value="name-asc" aria-pressed="true"', sort)
+        # Sort is a labelled select (select_field), right after the search.
+        sort = html.split('id="rlSort"', 1)[1].split("</select>", 1)[0]
+        assert '<option value="name-asc" selected>' in sort
+        assert html.index('id="rlSearch"') < html.index('id="rlSort"')
         assert html.index("List 01") < html.index("List 03")
+
+    @staticmethod
+    def _progress_lists():
+        """Three lists for the viewer: one finished, one in progress, one
+        not started (and empty)."""
+        from core.database import add_reading_list_entry, create_reading_list, mark_issue_read
+        done = create_reading_list("Done Arc")
+        half = create_reading_list("Half Arc")
+        create_reading_list("Fresh Arc")
+        for n, lid in ((1, done), (2, half), (3, half)):
+            add_reading_list_entry(lid, {"series": "Bat", "issue_number": str(n),
+                                         "matched_file_path": f"/data/Bat {n:03d}.cbz"})
+        add_reading_list_entry(half, {"series": "Bat", "issue_number": "4"})
+        mark_issue_read("/data/Bat 001.cbz")
+        mark_issue_read("/data/Bat 002.cbz")
+        return done, half
+
+    def test_show_filter_narrows_by_progress(self, client):
+        self._progress_lists()
+        html = client.get("/reading-lists?show=finished").get_data(as_text=True)
+        assert html.count('class="reading-list-card') == 1 and "Done Arc" in html
+        show = html.split('id="rlShow"', 1)[1].split("</div>", 1)[0]
+        assert re.search(r'active"\s+data-value="finished" aria-pressed="true"', show)
+        data = client.get("/api/reading-lists/page?show=in-progress").get_json()
+        assert data["total"] == 1 and "Half Arc" in data["html"]
+        assert data["show_counts"] == {"all": 3, "in-progress": 1, "not-started": 1, "finished": 1}
+        assert client.get("/api/reading-lists/page?show=not-started").get_json()["total"] == 1
+        assert client.get("/api/reading-lists/page?show=bogus").get_json()["total"] == 3
+        ids = client.get("/api/reading-lists/ids?show=finished").get_json()["ids"]
+        assert len(ids) == 1
+
+    def test_card_meta_counts_read_and_in_library(self, client):
+        self._progress_lists()
+        html = client.get("/reading-lists").get_data(as_text=True)
+        # Half Arc: 3 entries, 2 matched, 1 read.
+        assert "<b>1</b> read · <b>2</b> of 3 in library" in html
+        # Done Arc says so in the meta line; Fresh Arc has no covers, so a tile.
+        assert "All <b>1</b> read" in html
+        assert 'class="rl-ph"' in html
+        # Least read first.
+        html = client.get("/reading-lists?sort=progress-asc").get_data(as_text=True)
+        assert html.index("Fresh Arc") < html.index("Half Arc") < html.index("Done Arc")
 
     def test_unknown_tag_and_bad_params_fall_back(self, client):
         self._seed(3)
@@ -769,7 +813,11 @@ class TestReaderViewOnlyGating:
         assert 'id="comicReaderModal"' in html
         # But no management actions/modals.
         assert "Add Issue" not in html
-        assert "Export CBL" not in html
+        # More holds only Export CBL (a GET a Reader may make).
+        assert "Export CBL" in html
+        assert 'id="trackWantedBtn"' not in html and 'id="rematchBtn"' not in html
+        assert "Map issue" not in html
+        assert client.get(f"/api/reading-lists/{list_id}/export").status_code == 200
         assert 'id="addIssueModal"' not in html
         assert 'id="mapFileModal"' not in html
 
