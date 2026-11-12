@@ -1961,6 +1961,20 @@
                 </div>
 
 
+                <!-- Motion (site default) -->
+                <div class="clu-settings-panel mb-4">
+                    <h2 class="h4"><label for="siteReduceMotion"><i class="bi bi-magic me-2"></i>Default Motion</label></h2>
+                    <p class="text-muted">
+                        Whether animations follow each device's reduced-motion setting, for users who
+                        haven't picked their own. To change only your own, go to
+                        <a href="{{ url_for('auth.account') }}#appearance">My Account &rarr; Appearance</a>.
+                    </p>
+                    {% with select_id='siteReduceMotion', selected_motion=reduceMotion|default('system') %}
+                    {% include 'partials/motion_select.html' %}
+                    {% endwith %}
+                </div>
+
+
                 <!-- Dashboard Layout (site default) -->
                 <div class="clu-settings-panel mb-4">
                     <h2 class="h4"><i class="bi bi-layout-text-window-reverse me-2"></i>Default Dashboard Layout</h2>
@@ -2403,6 +2417,7 @@
     const personalizationSections = {
         theme: { label: 'Default Theme', url: '/api/config/styling', read: readStylingSettings },
         pageWidth: { label: 'Default Page Width', url: '/api/config/page-width', read: readPageWidthSettings },
+        motion: { label: 'Default Motion', url: '/api/config/motion', read: readMotionSettings },
         dashboard: { label: 'Default Dashboard Layout', url: '/api/config/dashboard', read: readDashboardSettings },
         thumbnails: { label: 'Folder Thumbnail Style', url: '/api/config/thumbnails', read: readThumbnailStyleSettings },
         recommendations: { label: 'Recommendation Service', url: '/api/config/recommendations', read: readRecommendationSettings }
@@ -2730,6 +2745,10 @@
     function readPageWidthSettings() {
         const selected = document.querySelector('input[name="sitePageWidth"]:checked');
         return { pageWidth: selected ? selected.value : 'auto' };
+    }
+
+    function readMotionSettings() {
+        return { reduceMotion: document.getElementById('siteReduceMotion')?.value || 'system' };
     }
 
     function readThumbnailStyleSettings() {

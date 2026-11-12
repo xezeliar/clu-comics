@@ -287,6 +287,7 @@
       for (const [downloadId, details] of Object.entries(data)) {
         const downloadKey = 'direct:' + downloadId;
             const tr = document.createElement('tr');
+            tr.dataset.flipKey = downloadKey;
             tr.appendChild(filenameCell(details.filename));
             tr.appendChild(providerCell(details.provider));
             tr.appendChild(progressCell(details.progress));
@@ -416,6 +417,7 @@
       for (const job of downloads) {
         const downloadKey = 'client:' + (job.download_id || job.filename);
         const tr = document.createElement('tr');
+        tr.dataset.flipKey = downloadKey;
         if (job.untracked) tr.className = 'text-muted';
         tr.appendChild(filenameCell(job.filename));
         tr.appendChild(providerCell(job.client_type));
@@ -506,11 +508,15 @@
         // The rebuild below would drop keyboard focus every second.
         const focusKey = tbody.contains(document.activeElement)
           ? document.activeElement.dataset.focusKey : null;
-        tbody.innerHTML = ''; // Clear previous rows.
-        renderDirectRows(tbody, data || {});
-        renderClientRows(tbody, usenetDownloads);
-        renderClientRows(tbody, dcppDownloads,
-          id => `/api/dcpp/downloads/${encodeURIComponent(id)}/dismiss`);
+        // CLU.flip (clu-motion.js) slides rows whose place changed and fades
+        // in new ones; a tick where nothing moved animates nothing.
+        CLU.flip(tbody, () => {
+          tbody.innerHTML = ''; // Clear previous rows.
+          renderDirectRows(tbody, data || {});
+          renderClientRows(tbody, usenetDownloads);
+          renderClientRows(tbody, dcppDownloads,
+            id => `/api/dcpp/downloads/${encodeURIComponent(id)}/dismiss`);
+        });
         if (focusKey) {
           const again = tbody.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
           if (again) again.focus();

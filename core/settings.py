@@ -117,6 +117,9 @@ SETTINGS_SCHEMA = {
     # Site-default page width (core/page_width.py); users override it on
     # /account. Never in an ini.
     "PAGE_WIDTH": _s("page_width", _S, "auto", "personalization"),
+    # Site-default motion (system/reduce/full); users override it on /account.
+    # base.html writes reduce/full as data-clu-motion on <html>.
+    "REDUCE_MOTION": _s("reduce_motion", _S, "system", "personalization"),
     # Comic reader (static/js/reader.js, routes/reading.py /api/reader-prefs).
     # Site defaults; each account overrides them with a per-user setting of the
     # same pref name, written by the reader's own toolbar buttons.
