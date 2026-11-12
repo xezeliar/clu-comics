@@ -347,6 +347,7 @@ _READER_WRITE_PREFIXES = (
     "/api/continue-reading",
     "/api/on-the-stack",
     "/api/account/",           # a user managing their OWN API tokens (self-service)
+    "/api/whats-new/dismiss",  # hides the Home card for this user only
 )
 
 # Read-only endpoints that use POST purely to carry a request body (a batch of

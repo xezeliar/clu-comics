@@ -891,6 +891,67 @@ function initializeComicReader(pageCount, startPage = 0) {
 
     // Initialize custom mousewheel handler for zoom-aware navigation
     initializeMousewheelHandler();
+
+    initReaderLoupe();
+}
+
+// Press and hold 350ms on a paged page (touch, not zoomed in) for a 2.5x loupe
+// that follows the finger; it sits above the finger, or below when there is no
+// room. A paged page does not scroll, so the hold never fights a scroll. Zoom
+// in/out buttons and +/-/0 do the keyboard equivalent. Keep this out of cover
+// grids, which do scroll.
+let readerLoupeBound = false;
+function initReaderLoupe() {
+    if (readerLoupeBound) return;
+    readerLoupeBound = true;
+    const SIZE = 140, ZOOM = 2.5, HOLD_MS = 350;
+    let timer = null, loupe = null, img = null, start = null;
+
+    function place(t) {
+        const r = img.getBoundingClientRect();
+        const x = Math.min(Math.max(t.clientX, r.left), r.right);
+        const y = Math.min(Math.max(t.clientY, r.top), r.bottom);
+        loupe.style.backgroundSize = `${r.width * ZOOM}px ${r.height * ZOOM}px`;
+        loupe.style.backgroundPosition = `${SIZE / 2 - (x - r.left) * ZOOM}px ${SIZE / 2 - (y - r.top) * ZOOM}px`;
+        const above = t.clientY - SIZE - 24 > 0;
+        loupe.style.left = `${Math.min(Math.max(t.clientX - SIZE / 2, 4), window.innerWidth - SIZE - 4)}px`;
+        loupe.style.top = `${above ? t.clientY - SIZE - 24 : t.clientY + 24}px`;
+    }
+    function close() {
+        clearTimeout(timer);
+        timer = null;
+        if (loupe) { loupe.remove(); loupe = null; }
+        start = null;
+    }
+    window.addEventListener('touchstart', (e) => {
+        close();
+        const host = document.getElementById('comicReaderSwiper');
+        if (!comicReaderSwiper || !host || !host.contains(e.target) || e.touches.length !== 1) return;
+        if (readerZoomedBeyondFit()) return;
+        img = activePagedImage(comicReaderSwiper);
+        if (!img) return;
+        const t = e.touches[0];
+        start = { x: t.clientX, y: t.clientY };
+        timer = setTimeout(() => {
+            loupe = document.createElement('div');
+            loupe.className = 'reader-loupe';
+            loupe.setAttribute('aria-hidden', 'true');
+            loupe.style.backgroundImage = `url("${img.currentSrc || img.src}")`;
+            document.body.appendChild(loupe);
+            place(t);
+        }, HOLD_MS);
+    }, { capture: true, passive: true });
+    window.addEventListener('touchmove', (e) => {
+        const t = e.touches[0];
+        if (loupe) {
+            e.preventDefault();
+            e.stopPropagation();   // the hold is a look, not a swipe to the next page
+            place(t);
+        } else if (start && Math.hypot(t.clientX - start.x, t.clientY - start.y) > 10) {
+            close();
+        }
+    }, { capture: true, passive: false });
+    ['touchend', 'touchcancel'].forEach(n => window.addEventListener(n, close, { capture: true, passive: true }));
 }
 
 /**
@@ -1626,6 +1687,41 @@ function updateReadingProgress(pageIndex) {
     const progressText = document.querySelector('.comic-reader-progress-text');
     if (progressBar) progressBar.style.width = `${progress}%`;
     if (progressText) progressText.textContent = `${Math.round(progress)}%`;
+    updateReaderPaceLine(currentIndex);
+}
+
+// "Page 12 of 24 · about 6 min left" in the footer. The estimate is pages left
+// times the median time per page turn this session (30s before three turns).
+let paceGaps = [];
+let paceLast = null;   // {index, at}
+let paceFor = 0;       // page count the history belongs to
+function updateReaderPaceLine(index) {
+    const text = document.getElementById('readerProgressLine');
+    const fill = document.querySelector('.comic-reader-footer-line > i');
+    if (!text) return;
+    const total = currentComicPageCount;
+    if (paceFor !== total) { paceGaps = []; paceLast = null; paceFor = total; }
+    const now = Date.now();
+    if (paceLast && index !== paceLast.index) {
+        const gap = now - paceLast.at;
+        if (gap < 5 * 60 * 1000) paceGaps.push(gap);   // a long idle is not reading
+    }
+    if (!paceLast || index !== paceLast.index) paceLast = { index: index, at: now };
+    const left = total - (index + 1);
+    let label = `Page ${index + 1} of ${total}`;
+    if (left <= 0) {
+        label += ' \u00b7 last page';
+    } else {
+        let per = 30000;
+        if (paceGaps.length >= 3) {
+            const sorted = paceGaps.slice().sort((a, b) => a - b);
+            per = sorted[Math.floor(sorted.length / 2)];
+        }
+        const mins = Math.round(left * per / 60000);
+        label += mins < 1 ? ' \u00b7 under a minute left' : ` \u00b7 about ${mins} min left`;
+    }
+    text.textContent = label;
+    if (fill) fill.style.width = `${((index + 1) / total) * 100}%`;
 }
 
 /**

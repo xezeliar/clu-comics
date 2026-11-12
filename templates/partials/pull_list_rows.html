@@ -2,7 +2,7 @@
 {# One page of Pull List rows. Rendered by /pull-list for the first page and by
 /api/pull-list/rows for every later one, so the two cannot drift. #}
 {% for series in series_list %}
-<tr data-series-id="{{ series.id }}"
+<tr data-series-id="{{ series.id }}" data-series-name="{{ series.name }}" data-swipe-row
     data-status-color="{{ series.row_status }}"
     class="{{ {'complete':'table-success','missing':'table-danger','upcoming':'table-info','unmonitored':'table-secondary'}.get(series.row_status, '') }}">
     <td class="ps-4">
@@ -79,14 +79,36 @@
                 class="btn btn-sm btn-outline-primary" title="View Series">
                 <i class="bi bi-eye"></i>
             </a>
-            <a aria-label="Open {{ series.name }} in Wanted" href="{{ url_for('series.wanted', q=series.name) }}"
-                class="btn btn-sm btn-outline-secondary" title="Open in Wanted">
-                <i class="bi bi-star"></i>
-            </a>
+        </div>
+        {# Row menu (UX polish): every row action, keyboard reachable. On phones
+        it opens as a bottom sheet, and a swipe left reveals its last two items
+        (clu-gestures.js); the page script handles data-pl-action. #}
+        <div class="dropdown d-inline-block clu-row-more">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown"
+                data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false"
+                aria-label="More actions for {{ series.name }}" title="More actions">
+                <i class="bi bi-three-dots"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('series.series_view', slug=generate_series_slug(series.name, series.id, series.volume)) }}">Open</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('series.wanted', q=series.name) }}">Open in Wanted</a></li>
+                <li><button type="button" class="dropdown-item" data-pl-action="monitor"
+                    data-monitored="{{ 'false' if series.row_status == 'unmonitored' else 'true' }}">{{ 'Monitor' if series.row_status == 'unmonitored' else 'Stop monitoring' }}</button></li>
+                <li><button type="button" class="dropdown-item" data-pl-action="unsubscribe">Unsubscribe</button></li>
+            </ul>
+        </div>
+        <div class="clu-swipe-acts" hidden>
+            <button type="button" tabindex="-1" data-pl-action="monitor"
+                data-monitored="{{ 'false' if series.row_status == 'unmonitored' else 'true' }}">{{ 'Monitor' if series.row_status == 'unmonitored' else 'Stop monitoring' }}</button>
+            <button type="button" tabindex="-1" data-pl-action="unsubscribe">Unsubscribe</button>
         </div>
     </td>
 </tr>
 {% else %}
+{% set sugg = [] %}
+{% for s in (suggestions or []) %}
+{% set _ = sugg.append({'name': s.name, 'href': url_for('series.series_view', slug=generate_series_slug(s.name, s.id, s.volume))}) %}
+{% endfor %}
 <tr class="pl-no-match">
     {% if load_error %}
     <td colspan="10" class="text-center text-danger py-4">{{ load_error }}</td>
@@ -101,7 +123,8 @@
     <td colspan="10" class="border-0">
         {{ no_matches('series', query=filters.q if filters else '',
                       filtered=filters and (filters.publisher_id or filters.letter or filters.status or filters.attention),
-                      clear_id='plClear') }}
+                      clear_id='plClear', suggestions=sugg,
+                      suggestions_hidden=filters and (filters.publisher_id or filters.letter or filters.status or filters.attention)) }}
     </td>
     {% endif %}
 </tr>

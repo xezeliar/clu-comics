@@ -42,6 +42,7 @@ SETTINGS_SCHEMA = {
     "MONITOR_ENABLED": _s("monitor_enabled", _B, False, "file_processing"),
     # Home-page setup checklist hidden for good (Dismiss on the card).
     "ONBOARDING_DISMISSED": _s("onboarding_dismissed", _B, False, "system"),
+    # Version whose "What's new" card was dismissed on Home ("" = never).
     "AUTOCONVERT": _s("autoconvert", _B, False, "file_processing"),
     "AUTO_COMPRESS": _s("auto_compress", _B, False, "file_processing"),
     # How hard Compress squeezes a CBZ: full | balanced | small (cbz_ops.compress.LEVELS).

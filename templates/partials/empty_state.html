@@ -24,6 +24,10 @@
     is CLU.emptyState({icon, title, message}) in static/js/clu-page.js.
   - A search or filter that matched nothing is no_matches(noun, query,
     filtered, clear_href | clear_id), never a hand-written "No results" line.
+    suggestions=[{name, href}] (up to three, closest first, searched over the
+    whole list) adds nearest matches between the sentence and the button;
+    suggestions_hidden says a filter was hiding them. CLU.noMatches takes the
+    same list as `suggestions`.
   - tone='success' colours the icon for a good empty ("No wanted issues");
     compact=True is for an empty panel or card, not a whole page.
 #}
@@ -44,7 +48,7 @@
 </div>
 {%- endmacro %}
 
-{% macro no_matches(noun, query=None, filtered=False, clear_href=None, clear_id=None, id=None, hidden=False, compact=False) -%}
+{% macro no_matches(noun, query=None, filtered=False, clear_href=None, clear_id=None, id=None, hidden=False, compact=False, suggestions=None, suggestions_hidden=False) -%}
 {#- The one "a search or filter matched nothing" state, worded as
     CLU.noMatches words it (static/js/clu-page.js). The button is a link when
     the server filters (clear_href) or a button a script wires (clear_id). -#}
@@ -59,6 +63,16 @@
   {%- set clear = 'Clear filters' -%}{%- set icon = 'bi-funnel' -%}
 {%- endif -%}
 {%- call empty_state(title, message, icon, id=id, hidden=hidden, compact=compact) -%}
+  {%- if suggestions -%}
+  <div class="clu-empty-suggest w-100">
+    <p class="clu-empty-text mb-1">Closest matches{% if suggestions_hidden %}, ignoring your filters{% endif %}:</p>
+    <ul class="list-unstyled mb-2">
+      {%- for s in suggestions %}
+      <li><a href="{{ s.href }}">{{ s.name }}</a></li>
+      {%- endfor %}
+    </ul>
+  </div>
+  {%- endif -%}
   {%- if clear_href -%}
   <a class="btn btn-outline-secondary" href="{{ clear_href }}">{{ clear }}</a>
   {%- elif clear_id -%}

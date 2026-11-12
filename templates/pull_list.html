@@ -1078,6 +1078,59 @@
             });
         }
 
+        // ── Row menu and swipe actions (same buttons, data-pl-action) ──
+        // Unsubscribe only clears the series' folder mapping, so the Undo
+        // toast restores it by handing that folder back to the server.
+        function postJson(url, body) {
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body || {}),
+            }).then(r => r.json().catch(() => ({})).then(data => {
+                if (!r.ok || !data.success) throw new Error(data.error || ('HTTP ' + r.status));
+                return data;
+            }));
+        }
+        const seriesApi = (id, tail) => {{ url_for('series.toggle_series_monitored', series_id=0)|tojson }}.replace(/\/0\/monitored$/, '/' + id + '/' + tail);
+        tbody.addEventListener('click', function (e) {
+            const btn = e.target.closest('[data-pl-action]');
+            if (!btn) return;
+            const row = btn.closest('tr[data-series-id]');
+            const id = rowId(row);
+            const toggle = btn.closest('.dropdown') && btn.closest('.dropdown').querySelector('[data-bs-toggle]');
+            if (toggle) bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
+            const name = row.dataset.seriesName;
+            if (btn.dataset.plAction === 'monitor') {
+                const on = btn.dataset.monitored !== 'true';
+                postJson(seriesApi(id, 'monitored'), { enabled: on })
+                    .then(() => {
+                        CLU.toast(on ? `Monitoring ${name}` : `Stopped monitoring ${name}`, 'success');
+                        return pager.load();
+                    })
+                    .catch(err => notifyError('Failed to update monitoring', err));
+                return;
+            }
+            if (btn.dataset.plAction !== 'unsubscribe') return;
+            postJson(seriesApi(id, 'unsubscribe'))
+                .then(data => {
+                    selected.delete(id);
+                    row.remove();
+                    updateBulkUI();
+                    CLU.toast(`Unsubscribed from ${name}`, 'success', {
+                        action: {
+                            label: 'Undo',
+                            onClick: () => postJson(seriesApi(id, 'restore-subscription'), { path: data.mapped_path })
+                                .then(() => {
+                                    CLU.toast(`${name} is back on your Pull List`, 'success');
+                                    return pager.load();
+                                })
+                                .catch(err => notifyError('Could not undo the unsubscribe', err)),
+                        },
+                    });
+                })
+                .catch(err => notifyError('Failed to unsubscribe', err));
+        });
+
         // ── Column visibility: a class on the table per hidden column, saved
         // per user. Rows from the pager need nothing: the CSS hides them.
         const columnToggles = Array.from(document.querySelectorAll('.pl-col-toggle'));

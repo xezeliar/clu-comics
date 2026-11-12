@@ -467,6 +467,38 @@ def api_onboarding_dismiss():
     return jsonify({"success": set_setting("ONBOARDING_DISMISSED", True)})
 
 
+# The card on Home after an upgrade: at most three changes, in plain words.
+# Edit with each release; dismissal is remembered per version.
+WHATS_NEW_ITEMS = [
+    "Long-press a cover for quick actions.",
+    "Pull List search suggests the nearest series when nothing matches.",
+    "Settings has a search box that filters by label.",
+]
+CHANGELOG_URL = "https://github.com/allaboutduncan/clu-comics/releases"
+WHATS_NEW_KEY = "whats_new_dismissed"  # a user_settings key, per user
+
+
+@collection_bp.route('/api/whats-new')
+def api_whats_new():
+    """The "What's new" card; visible until this user dismisses this version's card."""
+    from core.database import get_user_setting_override
+    from core.version import __version__
+    return jsonify({
+        "visible": get_user_setting_override(WHATS_NEW_KEY) != __version__,
+        "version": __version__,
+        "items": WHATS_NEW_ITEMS[:3],
+        "changelog_url": CHANGELOG_URL,
+    })
+
+
+@collection_bp.route('/api/whats-new/dismiss', methods=['POST'])
+def api_whats_new_dismiss():
+    """Per user: one reader dismissing the card must not hide it for everyone."""
+    from core.database import set_user_setting
+    from core.version import __version__
+    return jsonify({"success": set_user_setting(WHATS_NEW_KEY, __version__)})
+
+
 @collection_bp.route('/api/browse')
 def api_browse():
     """

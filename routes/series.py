@@ -561,6 +561,27 @@ def _pull_list_args():
     }
 
 
+def _pull_list_suggestions(a, today, result):
+    """Up to three Pull List series nearest to a search that matched nothing.
+
+    Searches the whole list, ignoring the other filters, so a filter that was
+    hiding the answer does not hide the suggestion. Empty when the page is not
+    empty, there is no query, or nothing is close enough.
+    """
+    if result.get("rows") or result.get("error") or not a["q"]:
+        return []
+    import difflib
+    from core.database import get_pull_list_page
+
+    q = a["q"].lower()
+    everything = get_pull_list_page(today, per_page=5000)["rows"]
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, q, r["name"].lower()).ratio(), r) for r in everything),
+        key=lambda t: -t[0],
+    )
+    return [r for score, r in scored[:3] if score >= 0.6]
+
+
 def _pull_list_filters(a):
     return {k: a[k] for k in ("q", "publisher_id", "letter", "status", "attention")}
 
@@ -619,6 +640,7 @@ def pull_list():
         this_week=_this_week_items(get_pull_list_this_week(today)),
         attention_count=facets["attention"],
         today=today,
+        suggestions=_pull_list_suggestions(a, today, result),
         pager=result,
         total_series=facets["total"],
         publishers=facets["publishers"],
@@ -646,6 +668,7 @@ def pull_list_rows():
     html = render_template(
         "partials/pull_list_rows.html",
         series_list=result["rows"],
+        suggestions=_pull_list_suggestions(a, today, result),
         filters=a,
         today=today,
     )
@@ -1730,6 +1753,38 @@ def bulk_unsubscribe_series():
     except Exception as e:
         app_logger.error(f"Error bulk-unsubscribing series: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@series_bp.route("/api/series/<int:series_id>/unsubscribe", methods=["POST"])
+def unsubscribe_one_series(series_id):
+    """Unsubscribe one series (Pull List row menu / swipe).
+
+    Returns the folder it was mapped to, which is everything unsubscribing
+    clears, so the Undo toast can hand it to restore-subscription.
+    """
+    from core.database import unsubscribe_series_returning_path
+
+    path = unsubscribe_series_returning_path(series_id)
+    if not path:
+        return jsonify({"success": False, "error": "Series is not subscribed"}), 404
+    return jsonify({"success": True, "mapped_path": path})
+
+
+@series_bp.route("/api/series/<int:series_id>/restore-subscription", methods=["POST"])
+def restore_series_subscription(series_id):
+    """Undo an unsubscribe: map the series back to its folder.
+
+    The folder comes from the client, so it must sit inside a library.
+    """
+    from core.database import restore_series_mapping
+    from helpers.library import is_valid_library_path
+
+    path = ((request.get_json(silent=True) or {}).get("path") or "").strip()
+    if not path or not is_valid_library_path(path):
+        return jsonify({"success": False, "error": "Folder is not inside a library"}), 400
+    if not restore_series_mapping(series_id, path):
+        return jsonify({"success": False, "error": "Series is already subscribed or was not found"}), 409
+    return jsonify({"success": True})
 
 
 @series_bp.route("/api/series/<int:series_id>/check-collection", methods=["GET"])
