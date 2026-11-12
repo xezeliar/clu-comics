@@ -526,6 +526,10 @@
         }
 
         CLU.bindSearch(box, apply, { delay: 0 });
+
+        // The Pull List's "Open in Wanted" arrives as ?q=<series name>.
+        const preset = new URLSearchParams(location.search).get('q');
+        if (preset) { box.value = preset; apply(preset); }
     });
 
     // Auto-poll when in loading state

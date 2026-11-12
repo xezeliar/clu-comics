@@ -8,7 +8,7 @@ import threading
 import time
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from core.config import CONFIG_DIR, get_cache_dir
 from core.app_logging import app_logger
@@ -11582,7 +11582,82 @@ _PULL_LIST_SORTS = {
     "issues": "COALESCE(s.issue_count, 0)",
     "collection": "COALESCE(c.missing_past, 0) + COALESCE(c.missing_future, 0)",
     "synced": "COALESCE(s.last_synced_at, '')",
+    # Needs the `nx` join (see _pull_list_next_sql). No next issue sorts last.
+    "next": "COALESCE(nx.next_date, '9999-12-31')",
 }
+
+# An issue the user does not have: no found file and no manual owned/skipped
+# mark. The same test _PULL_LIST_COUNTS_SQL applies, over `cs` and `ims`.
+_UNOWNED_SQL = "(cs.found IS NULL OR cs.found = 0) AND ims.status IS NULL"
+_ISSUE_STATUS_JOINS = """
+    LEFT JOIN collection_status cs
+           ON cs.series_id = i.series_id AND cs.issue_id = i.id
+    LEFT JOIN issue_manual_status ims
+           ON ims.series_id = i.series_id AND ims.issue_number = i.number
+"""
+
+# "Next issue" looks back this far, so an issue that slipped a few weeks still
+# shows (as overdue) instead of vanishing; it is overdue from a week past its date.
+PULL_LIST_NEXT_LOOKBACK_DAYS = 28
+PULL_LIST_OVERDUE_DAYS = 7
+PULL_LIST_STALE_SYNC_DAYS = 14
+
+
+def _shift_date(today, days):
+    """ISO date `days` from `today`. Also what makes the literals below safe
+    to format into SQL: strptime rejects anything but a real date."""
+    return (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _pull_list_next_sql(today, series_ids=None):
+    """Per mapped series, its earliest unowned issue dated within the last four
+    weeks or later: (series_id, next_number, next_date). Literal dates, no `?`."""
+    cutoff = _shift_date(today, -PULL_LIST_NEXT_LOOKBACK_DAYS)
+    narrow = ""
+    if series_ids is not None:
+        narrow = f"AND i.series_id IN ({_in_placeholders([int(x) for x in series_ids])})"
+    return f"""
+        SELECT series_id, number AS next_number, store_date AS next_date FROM (
+            SELECT i.series_id, i.number, i.store_date,
+                   ROW_NUMBER() OVER (PARTITION BY i.series_id
+                                      ORDER BY i.store_date, i.id) AS rn
+            FROM issues i
+            JOIN series s ON s.id = i.series_id
+                 AND s.mapped_path IS NOT NULL AND s.mapped_path != ''
+            {_ISSUE_STATUS_JOINS}
+            WHERE {_UNOWNED_SQL} AND i.store_date >= '{cutoff}' {narrow}
+        ) WHERE rn = 1
+    """
+
+
+def _pull_list_attention_sql(today):
+    """The four reasons a series "needs attention", as SQL fragments over `s`."""
+    cutoff = _shift_date(today, -PULL_LIST_NEXT_LOOKBACK_DAYS)
+    overdue = _shift_date(today, -PULL_LIST_OVERDUE_DAYS)
+    stale = _shift_date(today, -PULL_LIST_STALE_SYNC_DAYS)
+    return {
+        # The latest try for an issue failed (a later success supersedes it).
+        "failed": """EXISTS (SELECT 1 FROM download_run_items d
+            WHERE d.series_id = s.id AND d.download_status IN ('failed', 'interrupted')
+              AND d.id = (SELECT MAX(d2.id) FROM download_run_items d2
+                          WHERE d2.series_id = d.series_id
+                            AND d2.issue_number = d.issue_number))""",
+        "not_found": """EXISTS (SELECT 1 FROM search_attempts a
+            WHERE a.series_id = s.id AND a.outcome = 'nothing_found'
+              AND NOT EXISTS (SELECT 1 FROM collection_status f
+                              WHERE f.series_id = a.series_id
+                                AND f.issue_number = a.issue_number AND f.found = 1)
+            GROUP BY a.issue_number HAVING COUNT(*) >= 3)""",
+        # The next issue is the earliest unowned one in the window, so it is
+        # overdue exactly when some unowned issue sits between the window's
+        # start and a week ago.
+        "overdue": f"""EXISTS (SELECT 1 FROM issues i {_ISSUE_STATUS_JOINS}
+            WHERE i.series_id = s.id AND {_UNOWNED_SQL}
+              AND i.store_date >= '{cutoff}' AND i.store_date <= '{overdue}')""",
+        # Never synced means the first sync after subscribing failed: the series
+        # has no issue list and would otherwise just read "None announced".
+        "stale": f"(s.last_synced_at IS NULL OR s.last_synced_at < '{stale}')",
+    }
 
 # sqlite3 binds 64-bit integers only, so ?page=99999999999999999999 would
 # raise OverflowError. Anything past the end is clamped to the last page in
@@ -11664,7 +11739,8 @@ def _register_casefold(conn):
     conn.create_function("clu_casefold", 1, _casefold, deterministic=True)
 
 
-def _pull_list_where(q="", publisher_id=None, letter="", status=""):
+def _pull_list_where(q="", publisher_id=None, letter="", status="",
+                     attention=False, today=None):
     """WHERE clause + params for the Pull List filters, over `s`/`p`/`c`.
 
     Returns (sql, params, needs_counts): needs_counts says the clause reads
@@ -11703,11 +11779,49 @@ def _pull_list_where(q="", publisher_id=None, letter="", status=""):
         params.append(status)
         needs_counts = True
 
+    if attention and today:
+        clauses.append("(" + " OR ".join(_pull_list_attention_sql(today).values()) + ")")
+
     return " AND ".join(clauses), params, needs_counts
 
 
+_ENDED_STATUSES = ("ended", "completed", "cancelled", "canceled")
+
+
+def _next_issue_label(row, today):
+    """(text, overdue) for the Next issue cell: "#19 · Wed 18 Nov", "#45 · Today",
+    "#7 · 3 wk overdue" (from a week past its date), else why there is none."""
+    if not row["next_date"]:
+        ended = (row["status"] or "").lower() in _ENDED_STATUSES
+        return ("Ended" if ended else "None announced"), False
+    due = datetime.strptime(row["next_date"], "%Y-%m-%d")
+    days = (datetime.strptime(today, "%Y-%m-%d") - due).days
+    if days >= PULL_LIST_OVERDUE_DAYS:
+        return f"#{row['next_number']} · {days // 7} wk overdue", True
+    when = "Today" if days == 0 else f"{due:%a} {due.day} {due:%b}"
+    return f"#{row['next_number']} · {when}", False
+
+
+def _attention_reason(row, today):
+    """One line saying why a row needs attention, or "" if it does not."""
+    if row["attn_failed"]:
+        return "Last download failed"
+    if row["attn_not_found"]:
+        return "An issue was not found in 3 searches"
+    if row["attn_overdue"]:
+        return "Next issue is overdue"
+    if row["attn_stale"]:
+        if not row["last_synced_at"]:
+            return "Never synced"
+        days = (datetime.strptime(today, "%Y-%m-%d")
+                - datetime.strptime(row["last_synced_at"][:10], "%Y-%m-%d")).days
+        return f"Not synced for {days} days"
+    return ""
+
+
 def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
-                       sort="", descending=False, page=1, per_page=50):
+                       sort="", descending=False, page=1, per_page=50,
+                       attention=False):
     """One page of the Pull List, filtered and sorted in SQL.
 
     The page used to load every mapped series, aggregate every issue of every
@@ -11728,7 +11842,8 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
     """
     per_page = max(1, int(per_page or 50))
     page = min(max(1, int(page or 1)), _MAX_PAGE)
-    where, params, needs_counts = _pull_list_where(q, publisher_id, letter, status)
+    where, params, needs_counts = _pull_list_where(
+        q, publisher_id, letter, status, attention, today)
     sort_sql = _PULL_LIST_SORTS.get(sort)
     if sort == "collection":
         needs_counts = True
@@ -11740,6 +11855,11 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
     if needs_counts:
         counts_sql, counts_params = _pull_list_counts_sql(today)
         counts_join = f"LEFT JOIN ({counts_sql}) c ON c.series_id = s.id"
+    if sort == "next":
+        counts_join += f" LEFT JOIN ({_pull_list_next_sql(today)}) nx ON nx.series_id = s.id"
+
+    attn = _pull_list_attention_sql(today)
+    attn_cols = ", ".join(f"{sql} AS attn_{k}" for k, sql in attn.items())
 
     try:
         with db_conn() as conn:
@@ -11780,16 +11900,38 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
                            p.name AS publisher_name,
                            COALESCE(c.missing_past, 0) AS missing_past,
                            COALESCE(c.missing_future, 0) AS missing_future,
-                           ({_PULL_LIST_ROW_STATUS_SQL}) AS row_status
+                           ({_PULL_LIST_ROW_STATUS_SQL}) AS row_status,
+                           nx.next_number, nx.next_date, {attn_cols}
                     FROM series s
                     LEFT JOIN publishers p ON p.id = s.publisher_id
                     LEFT JOIN ({page_counts_sql}) c ON c.series_id = s.id
+                    LEFT JOIN ({_pull_list_next_sql(today, ids)}) nx ON nx.series_id = s.id
                     WHERE s.id IN ({_in_placeholders(ids)})
                     """,
-                    page_counts_params + ids,
+                    page_counts_params + ids + ids,
                 )
                 by_id = {row["id"]: dict(row) for row in cur.fetchall()}
                 rows = [by_id[i] for i in ids if i in by_id]
+                # One run per stretch of owned or missing issues, in issue order.
+                cur.execute(
+                    f"""
+                    SELECT i.series_id,
+                           CASE WHEN cs.found = 1 OR ims.status IS NOT NULL
+                                THEN 1 ELSE 0 END AS owned
+                    FROM issues i {_ISSUE_STATUS_JOINS}
+                    WHERE i.series_id IN ({_in_placeholders(ids)})
+                    ORDER BY i.series_id, CAST(i.number AS REAL), i.id
+                    """,
+                    ids,
+                )
+                for r in rows:
+                    r["bar"] = []
+                for sid, owned in cur.fetchall():
+                    bar = by_id[sid]["bar"]
+                    if bar and bar[-1][0] == owned:
+                        bar[-1][1] += 1
+                    else:
+                        bar.append([owned, 1])
     except Exception as e:
         app_logger.error(f"Failed to get pull list page: {e}")
         return {"rows": [], "total": 0, "page": 1, "per_page": per_page,
@@ -11797,19 +11939,25 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
 
     for row in rows:
         row["missing_count"] = row["missing_past"] + row["missing_future"]
+        row["have"] = sum(n for owned, n in row["bar"] if owned)
+        row["total_issues"] = sum(n for _, n in row["bar"])
+        row["attention"] = _attention_reason(row, today)
+        row["next_label"], row["next_overdue"] = _next_issue_label(row, today)
 
     return {"rows": rows, "total": total, "page": page, "per_page": per_page,
             "total_pages": max(1, -(-total // per_page)), "error": None}
 
 
-def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status=""):
+def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status="",
+                               attention=False):
     """Every series id matching the Pull List filters, on every page.
 
     Backs "Select all N matching": a page holds only its own rows, so the
     selection across pages has to come from the server. Returns None on a
     database error, so the caller cannot mistake it for "nothing matches".
     """
-    where, params, needs_counts = _pull_list_where(q, publisher_id, letter, status)
+    where, params, needs_counts = _pull_list_where(
+        q, publisher_id, letter, status, attention, today)
     counts_join, counts_params = "", []
     if needs_counts:
         counts_sql, counts_params = _pull_list_counts_sql(today)
@@ -11830,14 +11978,58 @@ def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status
         return None
 
 
-def get_pull_list_facets():
+def get_pull_list_this_week(today):
+    """Issues of mapped series with a store date in the current store week
+    (Sunday to Saturday), soonest first.
+
+    Each carries `found` (owned) and the newest download for it: `download_id`
+    and `download_status` (queued, failed...), plus `search_outcome`, the
+    newest search's result, for the strip's state line.
+    """
+    day = datetime.strptime(today, "%Y-%m-%d")
+    start = _shift_date(today, -((day.weekday() + 1) % 7))
+    end = _shift_date(start, 6)
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return []
+            rows = conn.execute(
+                f"""
+                SELECT s.id AS series_id, s.name, s.volume, i.number, i.store_date, i.image,
+                       CASE WHEN cs.found = 1 OR ims.status IS NOT NULL
+                            THEN 1 ELSE 0 END AS found,
+                       (SELECT d.download_id FROM download_run_items d
+                         WHERE d.series_id = s.id AND d.issue_number = i.number
+                         ORDER BY d.id DESC LIMIT 1) AS download_id,
+                       (SELECT d.download_status FROM download_run_items d
+                         WHERE d.series_id = s.id AND d.issue_number = i.number
+                         ORDER BY d.id DESC LIMIT 1) AS download_status,
+                       (SELECT a.outcome FROM search_attempts a
+                         WHERE a.series_id = s.id AND a.issue_number = i.number
+                         ORDER BY a.id DESC LIMIT 1) AS search_outcome
+                FROM issues i
+                JOIN series s ON s.id = i.series_id
+                     AND s.mapped_path IS NOT NULL AND s.mapped_path != ''
+                {_ISSUE_STATUS_JOINS}
+                WHERE i.store_date BETWEEN ? AND ?
+                ORDER BY i.store_date, s.name COLLATE NOCASE, i.id
+                """,
+                (start, end),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        app_logger.error(f"Failed to get this week's pull list issues: {e}")
+        return []
+
+
+def get_pull_list_facets(today=None):
     """What the Pull List's filter bar offers, without loading any rows.
 
     Returns {"total": mapped series, "letters": first letters present (with
     "#" for anything outside A-Z), "publishers": [{id, name}] that have at
     least one mapped series}.
     """
-    out = {"total": 0, "letters": [], "publishers": []}
+    out = {"total": 0, "letters": [], "publishers": [], "attention": 0}
     try:
         with db_conn() as conn:
             if not conn:
@@ -11846,6 +12038,10 @@ def get_pull_list_facets():
             mapped = "s.mapped_path IS NOT NULL AND s.mapped_path != ''"
             cur.execute(f"SELECT COUNT(*) FROM series s WHERE {mapped}")
             out["total"] = cur.fetchone()[0]
+            if today:
+                where = " OR ".join(_pull_list_attention_sql(today).values())
+                cur.execute(f"SELECT COUNT(*) FROM series s WHERE {mapped} AND ({where})")
+                out["attention"] = cur.fetchone()[0]
             cur.execute(
                 f"SELECT DISTINCT UPPER(SUBSTR(s.name, 1, 1)) FROM series s WHERE {mapped}"
             )

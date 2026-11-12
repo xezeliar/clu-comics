@@ -12,6 +12,43 @@
     {% for key, _ in optional_columns %}
     #seriesTable.pl-hide-{{ key }} [data-col="{{ key }}"] { display: none; }
     {% endfor %}
+
+    /* Have/missing bar: filled runs are owned issues, outlined runs are missing. */
+    .pl-bar { display: inline-flex; gap: 1px; width: 5.5rem; height: .5rem; vertical-align: middle; margin-right: .5rem; }
+    .pl-bar i { flex-basis: 0; min-width: 2px; border-radius: 1px; background: var(--bs-primary); }
+    .pl-bar i.pl-miss { background: none; box-shadow: inset 0 0 0 1px var(--bs-secondary-color); }
+    .pl-sub { display: none; }
+    #attentionFilter[aria-pressed="true"] { color: var(--bs-emphasis-color); border-color: var(--bs-primary);
+        background-color: color-mix(in srgb, var(--bs-primary) 18%, transparent); box-shadow: inset 0 0 0 1px var(--bs-primary); }
+
+    /* This week strip */
+    .pl-week ol { display: grid; grid-auto-flow: column; grid-auto-columns: 6.25rem; gap: 1rem; overflow-x: auto;
+        list-style: none; margin: .5rem 0 0; padding: 6px 4px .5rem; }
+    .pl-week img, .pl-week .pl-nocover { width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 4px; background: var(--bs-tertiary-bg); }
+    .pl-week .pl-nocover { display: grid; place-items: center; text-align: center; font-size: .75rem; padding: .25rem; }
+    .pl-week .pl-state { font-size: .75rem; line-height: 1.35; color: var(--bs-secondary-color); }
+
+    /* Phone: below 561px of page width the table is a stack of cards. The rows are the
+       same markup; only the layout changes. */
+    .pl-container { container-type: inline-size; }
+    @container (max-width: 560px) {
+        #seriesTable thead, #seriesTable [data-col] { display: none; }
+        #seriesTable [data-col="next"] { display: block; }
+        #seriesTable, #seriesTable tbody { display: block; }
+        #seriesTable tr[data-series-id] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .15rem .5rem;
+            padding: .6rem .5rem .6rem .75rem; align-items: center; }
+        #seriesTable td { display: block; border: 0; padding: 0; background: none; box-shadow: none; }
+        #seriesTable td:nth-child(1) { grid-row: 1 / span 3; }
+        #seriesTable td:nth-child(2) { grid-column: 2; }
+        #seriesTable td:last-child { grid-column: 3; grid-row: 1 / span 2; }
+        #seriesTable td.pl-have, #seriesTable td.pl-next { grid-column: 2; }
+        #seriesTable .pl-sub { display: block; }
+        #seriesTable .btn, #seriesTable td a.fw-bold, #seriesTable .form-check-input { min-height: 2.75rem; min-width: 2.75rem; }
+        #seriesTable .form-check-input { min-height: 1.5rem; min-width: 1.5rem; }
+        #seriesTable td a.fw-bold { display: inline-flex; align-items: center; }
+        #seriesTable tr.pl-no-match { display: table-row; }
+        #seriesTable tr.pl-no-match td { display: table-cell; }
+    }
 </style>
 {% endblock %}
 
@@ -21,11 +58,14 @@
                               subtitle='All tracked series in your collection',
                               stats=[{'value': total_series, 'label': 'tracked series'}]) %}
         {% if slot == 'actions' %}
-            <button type="button" class="btn btn-sm btn-primary" id="scanLibraryBtn"
-                title="Scan library folders and auto-map series from series.json / cvinfo sidecars">
-                <i class="bi bi-magic me-1" aria-hidden="true"></i>Scan Library
-            </button>
+            <a href="{{ url_for('series.series_search') }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add series
+            </a>
         {% elif slot == 'more' %}
+            <li><button type="button" class="dropdown-item" id="scanLibraryBtn"
+                title="Scan library folders and auto-map series from series.json / cvinfo sidecars">
+                <i class="bi bi-magic me-2" aria-hidden="true"></i>Scan Library
+            </button></li>
             <li><button type="button" class="dropdown-item" id="rematchFilesBtn"
                 title="Re-check every mapped series against the files on disk and rebuild owned/missing">
                 <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Re-match files
@@ -71,6 +111,31 @@
     {% endcall %}
     {% else %}
 
+    {% if this_week %}
+    <section class="pl-week mb-3" aria-labelledby="plWeekTitle">
+        <div class="d-flex align-items-baseline gap-2 flex-wrap">
+            <h2 class="h6 fw-semibold mb-0" id="plWeekTitle">This week</h2>
+            <span class="small text-muted">{{ this_week|length }} issue{{ '' if this_week|length == 1 else 's' }} out</span>
+        </div>
+        <ol>
+            {% for it in this_week %}
+            {% set slug = generate_series_slug(it.name, it.series_id, it.volume) %}
+            <li>
+                <a href="{{ url_for('series.series_view', slug=slug) }}" class="text-decoration-none d-block"
+                    aria-label="{{ it.name }} #{{ it.number }}">
+                    {% if it.image %}<img src="{{ it.image }}" alt="" loading="lazy">
+                    {% else %}<span class="pl-nocover">{{ it.name }}</span>{% endif %}
+                    <span class="d-block small mt-1">{{ it.name }} #{{ it.number }}</span>
+                </a>
+                <p class="pl-state mb-0{% if it.state_tone == 'bad' %} text-danger-emphasis{% endif %}">
+                    {% if it.state.startswith('Downloading') or it.state.startswith('Waiting') %}<a href="{{ url_for('status') }}">{{ it.state }}</a>{% else %}{{ it.state }}{% endif %}
+                </p>
+            </li>
+            {% endfor %}
+        </ol>
+    </section>
+    {% endif %}
+
     {% call toolbar('Filter the pull list') %}
         <div class="clu-toolbar-row">
             {{ search_input('searchInput', 'Search series', value=filters.q) }}
@@ -110,6 +175,11 @@
         </div>
         {% set _st = filters.status if filters.status in ['complete', 'missing', 'upcoming', 'unmonitored'] else '' %}
         <div class="clu-toolbar-row">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="attentionFilter"
+                aria-pressed="{{ 'true' if filters.attention else 'false' }}">
+                <i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>Needs attention
+                <span class="badge text-bg-secondary ms-1">{{ attention_count }}</span>
+            </button>
             {{ filter_bar('statusFilter', [
                 ('', 'All'),
                 {'value': 'complete', 'label': 'Complete', 'icon': 'bi-square-fill', 'icon_class': 'text-success'},
@@ -142,7 +212,7 @@
     </div>
 
     <!-- Series Table -->
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm pl-container">
         <div class="card-body p-0">
             <div class="table-responsive">
                 {% macro sort_icon(key) -%}
@@ -173,8 +243,11 @@
                             <th scope="col" class="sortable" data-col="publisher" data-sort="publisher" style="cursor: pointer;">
                                 Publisher <i class="{{ sort_icon('publisher') }}"></i>
                             </th>
-                            <th scope="col" class="text-center sortable" data-sort="issues" style="cursor: pointer;">
+                            <th scope="col" class="sortable" data-sort="issues" style="cursor: pointer;">
                                 Issues <i class="{{ sort_icon('issues') }}"></i>
+                            </th>
+                            <th scope="col" class="sortable" data-col="next" data-sort="next" style="cursor: pointer;">
+                                Next issue <i class="{{ sort_icon('next') }}"></i>
                             </th>
                             <th scope="col" class="sortable" data-col="collection" data-sort="collection" style="cursor: pointer;">
                                 Collection <i class="{{ sort_icon('collection') }}"></i>
@@ -644,6 +717,8 @@
         // '' is All on both bars.
         let currentLetterFilter = alphabetFilter ? CLU.filterValue(alphabetFilter) : '';
         let currentStatusFilter = statusFilter ? CLU.filterValue(statusFilter) : '';
+        const attentionBtn = document.getElementById('attentionFilter');
+        let currentAttention = attentionBtn ? attentionBtn.getAttribute('aria-pressed') === 'true' : false;
         let currentSort = {
             column: nav.dataset.sort || null,
             ascending: nav.dataset.dir !== 'desc',
@@ -735,6 +810,7 @@
                 publisher: publisherFilter ? publisherFilter.value : '',
                 letter: currentLetterFilter,
                 status: currentStatusFilter,
+                attention: currentAttention ? '1' : '',
             };
         }
 
@@ -873,6 +949,8 @@
                 if (publisherFilter) publisherFilter.value = '';
                 currentLetterFilter = '';
                 currentStatusFilter = '';
+                currentAttention = false;
+                if (attentionBtn) attentionBtn.setAttribute('aria-pressed', 'false');
                 CLU.setFilterValue(alphabetFilter, '');
                 CLU.setFilterValue(statusFilter, '');
             }
@@ -883,6 +961,14 @@
         CLU.bindSearch(searchInput, applyFilters);
 
         if (publisherFilter) publisherFilter.addEventListener('change', applyFilters);
+
+        if (attentionBtn) {
+            attentionBtn.addEventListener('click', function () {
+                currentAttention = !currentAttention;
+                attentionBtn.setAttribute('aria-pressed', String(currentAttention));
+                applyFilters();
+            });
+        }
 
         // The letter bar's second click on a letter goes back to All.
         CLU.filterBar(alphabetFilter, {
