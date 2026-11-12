@@ -929,6 +929,23 @@ function cropCover(filePath) {
         });
 }
 
+function toggleHighlight(entryId, highlight) {
+    fetch(`/api/reading-lists/${LIST_ID}/highlight`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_id: entryId, highlight })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                CLU.toast(data.message, 'error');
+            }
+        })
+        .catch(() => CLU.toast('An error occurred', 'error'));
+}
+
 function setAsThumbnail(filePath) {
     fetch(`/api/reading-lists/${LIST_ID}/thumbnail`, {
         method: 'POST',

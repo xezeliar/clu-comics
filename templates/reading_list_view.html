@@ -324,6 +324,10 @@
                                 <i class="bi bi-image me-2"></i>Set as List Thumbnail
                             </a></li>
                         <li><a class="dropdown-item" href="#"
+                                onclick="toggleHighlight({{ entry.id }}, {{ 'false' if entry.is_highlight else 'true' }}); return false;">
+                                <i class="bi bi-star{{ '-fill' if entry.is_highlight }} me-2"></i>{{ 'Remove from' if entry.is_highlight else 'Add to' }} Highlight Covers
+                            </a></li>
+                        <li><a class="dropdown-item" href="#"
                                 onclick="cropCover('{{ file_path|replace('\\', '\\\\')|replace("'", "\\'") }}'); return false;">
                                 <i class="bi bi-crop me-2"></i>Crop Cover
                             </a></li>
