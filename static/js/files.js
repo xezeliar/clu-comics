@@ -484,11 +484,14 @@ function createListItem(itemName, fullPath, type, panel, isDraggable) {
     }
   }
 
+  // The name is text, never markup: a file name can contain "<".
   let nameSpan = document.createElement("span");
+  nameSpan.textContent = fileData.name;
   if (type === "file" && fileData.size != null) {
-    nameSpan.innerHTML = `${fileData.name} <span class="text-info-emphasis small ms-2">(${formatSize(fileData.size)})</span>`;
-  } else {
-    nameSpan.textContent = fileData.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "text-info-emphasis small ms-2";
+    sizeSpan.textContent = `(${formatSize(fileData.size)})`;
+    nameSpan.append(" ", sizeSpan);
   }
   leftContainer.appendChild(nameSpan);
 
@@ -3361,8 +3364,8 @@ function previewCustomRename() {
           const previewItem = document.createElement('div');
           previewItem.className = 'mb-2 p-2 border rounded';
           previewItem.innerHTML = `
-                <div><strong>Old:</strong> <code>${fileData.name}</code></div>
-                <div><strong>New:</strong> <code>${newName}</code></div>
+                <div><strong>Old:</strong> <code>${CLU.escapeHtml(fileData.name)}</code></div>
+                <div><strong>New:</strong> <code>${CLU.escapeHtml(newName)}</code></div>
               `;
           previewList.appendChild(previewItem);
         });
@@ -3533,8 +3536,8 @@ function previewReplaceText() {
           const previewItem = document.createElement('div');
           previewItem.className = 'mb-2 p-2 border rounded';
           previewItem.innerHTML = `
-                <div><strong>Old:</strong> <code>${fileData.name}</code></div>
-                <div><strong>New:</strong> <code>${newName}</code></div>
+                <div><strong>Old:</strong> <code>${CLU.escapeHtml(fileData.name)}</code></div>
+                <div><strong>New:</strong> <code>${CLU.escapeHtml(newName)}</code></div>
               `;
           previewList.appendChild(previewItem);
         });
@@ -4797,17 +4800,17 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
           // File was skipped because it already has metadata
           successCount++;
           resultItem.className = 'text-info';
-          resultItem.innerHTML = `✓ ${fileName} - Skipped XML Present`;
+          resultItem.textContent = `✓ ${fileName} - Skipped XML Present`;
         } else {
           // File was successfully processed
           successCount++;
           resultItem.className = 'text-success';
-          resultItem.innerHTML = `✓ ${fileName} - Issue #${result.metadata.issue}`;
+          resultItem.textContent = `✓ ${fileName} - Issue #${result.metadata.issue}`;
         }
       } else {
         errorCount++;
         resultItem.className = 'text-danger';
-        resultItem.innerHTML = `✗ ${fileName} - ${result.error}`;
+        resultItem.textContent = `✗ ${fileName} - ${result.error}`;
         // Track failed file for secondary search
         failedFiles.push({ fileName, filePath, error: result.error });
       }
@@ -4822,7 +4825,7 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
       resultItem.className = 'text-danger';
       // Show actual error message instead of generic "Network error"
       const errorMsg = error.message || 'Network error';
-      resultItem.innerHTML = `✗ ${fileName} - ${errorMsg}`;
+      resultItem.textContent = `✗ ${fileName} - ${errorMsg}`;
       resultsDiv.appendChild(resultItem);
       // Track failed file for secondary search
       failedFiles.push({ fileName, filePath, error: errorMsg });
@@ -4865,7 +4868,7 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
 
       document.getElementById('bulkCurrentFile').innerHTML = `
             <div class="mb-2">Secondary search phase: Using filename-based search</div>
-            <div class="text-muted small">Processing: ${failedFile.fileName} (${i + 1}/${totalFailed})</div>
+            <div class="text-muted small">Processing: ${CLU.escapeHtml(failedFile.fileName)} (${i + 1}/${totalFailed})</div>
           `;
 
       try {
@@ -4885,16 +4888,16 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
         if (result.success && result.requires_selection) {
           // Found potential matches - show as warning and let user handle manually
           resultItem.className = 'text-warning';
-          resultItem.innerHTML = `⚠ ${failedFile.fileName} - Found ${result.possible_matches?.length || 0} potential matches, requires manual selection`;
+          resultItem.textContent = `⚠ ${failedFile.fileName} - Found ${result.possible_matches?.length || 0} potential matches, requires manual selection`;
         } else if (result.success && result.series_id) {
           // Direct match found
           secondarySuccessCount++;
           resultItem.className = 'text-success';
-          resultItem.innerHTML = `✓ ${failedFile.fileName} - Found direct match: ${result.parsed_filename?.series_name || 'Unknown Series'}`;
+          resultItem.textContent = `✓ ${failedFile.fileName} - Found direct match: ${result.parsed_filename?.series_name || 'Unknown Series'}`;
         } else {
           // Still no match
           resultItem.className = 'text-danger';
-          resultItem.innerHTML = `✗ ${failedFile.fileName} - No match found in secondary search`;
+          resultItem.textContent = `✗ ${failedFile.fileName} - No match found in secondary search`;
         }
 
         resultsDiv.appendChild(resultItem);
@@ -4903,7 +4906,7 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
       } catch (error) {
         const resultItem = document.createElement('div');
         resultItem.className = 'text-danger';
-        resultItem.innerHTML = `✗ ${failedFile.fileName} - Secondary search network error`;
+        resultItem.textContent = `✗ ${failedFile.fileName} - Secondary search network error`;
         resultsDiv.appendChild(resultItem);
       }
 
@@ -5867,13 +5870,10 @@ function updateRenamedFileInDOM(oldPath, newPath, newName) {
       // Find and update the filename span
       const nameSpan = listItem.querySelector('span');
       if (nameSpan) {
-        // Preserve the size info if it exists
-        const sizeMatch = nameSpan.innerHTML.match(/<span class="text-info-emphasis small ms-2">\([^)]+\)<\/span>/);
-        if (sizeMatch) {
-          nameSpan.innerHTML = `${newName} ${sizeMatch[0]}`;
-        } else {
-          nameSpan.textContent = newName;
-        }
+        // Keep the size span; the name itself is text, never markup.
+        const sizeSpan = nameSpan.querySelector('span');
+        nameSpan.textContent = newName;
+        if (sizeSpan) nameSpan.append(" ", sizeSpan);
         console.log('Updated filename in DOM');
       }
     }
