@@ -5,6 +5,8 @@
 
 .series-header {
     --sh-select: var(--clu-select);
+    /* The cover is the page's focus: one width, used by the grid column. */
+    --sh-cover-w: 15rem;
     margin-bottom: 1.5rem;
 }
 
@@ -56,8 +58,8 @@
 
 .sh-body {
     display: grid;
-    grid-template-columns: 9.5rem minmax(0, 1fr);
-    gap: 0 1.5rem;
+    grid-template-columns: var(--sh-cover-w) minmax(0, 1fr);
+    gap: 0 2rem;
 }
 
 .has-banner .sh-body {
@@ -74,7 +76,7 @@
 }
 
 .has-banner .sh-cover {
-    margin-top: -5rem;
+    margin-top: -6.5rem;
     box-shadow: 0 0 0 4px var(--bs-body-bg), 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
@@ -277,6 +279,13 @@
     padding: 0.15rem 0;
 }
 
+/* Tablet: a smaller cover leaves the title and run strip room. */
+@media (min-width: 576px) and (max-width: 991.98px) {
+    .series-header {
+        --sh-cover-w: 11.5rem;
+    }
+}
+
 /* Phone: the title wraps beside a smaller cover, the actions take their own
    row, and everything below spans the width; the run strip wraps so every
    issue stays on screen. */
@@ -287,13 +296,13 @@
 
     .sh-body,
     .has-banner .sh-body {
-        grid-template-columns: 5.25rem minmax(0, 1fr);
+        grid-template-columns: 7.5rem minmax(0, 1fr);
         gap: 0 0.75rem;
         padding-inline: 0;
     }
 
     .has-banner .sh-cover {
-        margin-top: -2rem;
+        margin-top: -2.75rem;
     }
 
     .sh-main {
