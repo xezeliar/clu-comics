@@ -880,7 +880,9 @@ a.clu-stat:focus-visible .clu-stat-value {
   width: 100%;
   max-height: 70vh;
   overflow-y: auto;
-  z-index: 1056;
+  /* !important: page rules such as .item-actions .dropdown-menu (1050) have
+     the same specificity and load later, which put the sheet under its scrim. */
+  z-index: 1056 !important;
   border-radius: 1rem 1rem 0 0;
   padding: 1.5rem 0 max(0.5rem, env(safe-area-inset-bottom));
   animation: clu-sheet-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
