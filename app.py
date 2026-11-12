@@ -65,6 +65,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 import core.app_state as app_state
 from routes.favorites import favorites_bp
 from routes.creators import creators_bp
+from routes.cosmetics import cosmetics_bp
 
 from routes.opds import opds_bp
 from models import gcd
@@ -298,6 +299,7 @@ from routes.auth import auth_bp
 app.register_blueprint(auth_bp)
 app.register_blueprint(favorites_bp)
 app.register_blueprint(creators_bp)
+app.register_blueprint(cosmetics_bp)
 app.register_blueprint(opds_bp)
 from routes.reading_lists import reading_lists_bp, prefetch_github_tree
 
@@ -7961,22 +7963,45 @@ def api_wrapped_data(year):
         return jsonify({"error": str(e)}), 500
 
 
+def _wrapped_theme():
+    """The requesting user's theme (dark slot in follow mode), else the site theme."""
+    try:
+        from routes.auth import _resolve_request_theme
+
+        return _resolve_request_theme()
+    except ImportError:  # pre-Appearance builds have no per-user theme
+        return get_setting("BOOTSTRAP_THEME")
+
+
+@app.route("/api/wrapped/card-prefs", methods=["GET", "POST"])
+def api_wrapped_card_prefs():
+    """This user's remembered Wrapped card style and format."""
+    from wrapped import card_prefs, save_card_prefs
+
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        if not save_card_prefs(body.get("style"), body.get("format")):
+            return jsonify({"error": "Invalid style or format"}), 400
+    style, fmt = card_prefs()
+    return jsonify({"style": style, "format": fmt})
+
+
 @app.route("/api/wrapped/<int:year>/image/<int:slide_num>")
 def api_wrapped_image(year, slide_num):
     """Return individual wrapped slide as PNG image."""
     from wrapped import (
-        generate_summary_slide,
+        card_prefs,
+        generate_summary_card,
         generate_most_read_series_slide,
         generate_series_highlights_slide,
     )
 
-    # Get current theme from config
-    # Get current theme from config
-    theme = get_setting("BOOTSTRAP_THEME")
+    theme = _wrapped_theme()
+    style, fmt = card_prefs()
 
     try:
         if slide_num == 1:
-            image_bytes = generate_summary_slide(year, theme)
+            image_bytes = generate_summary_card(year, theme, style, fmt)
         elif slide_num == 2:
             image_bytes = generate_most_read_series_slide(year, theme)
         elif slide_num == 3:
@@ -7994,13 +8019,13 @@ def api_wrapped_image(year, slide_num):
 @app.route("/api/wrapped/<int:year>/download")
 def api_wrapped_download(year):
     """Download all wrapped images as ZIP."""
-    from wrapped import generate_all_wrapped_images
+    from wrapped import card_prefs, generate_all_wrapped_images
     import zipfile
 
-    theme = get_setting("BOOTSTRAP_THEME")
+    theme = _wrapped_theme()
 
     try:
-        slides = generate_all_wrapped_images(year, theme)
+        slides = generate_all_wrapped_images(year, theme, *card_prefs())
 
         # Create ZIP in memory
         zip_buffer = io.BytesIO()
@@ -8050,7 +8075,7 @@ def api_monthly_wrapped_image(year, month, slide_num):
     if slide_num not in (1, 2):
         return jsonify({"error": "Invalid slide number (1-2)"}), 400
 
-    theme = get_setting("BOOTSTRAP_THEME")
+    theme = _wrapped_theme()
 
     try:
         if slide_num == 1:
@@ -8073,7 +8098,7 @@ def api_monthly_wrapped_download(year, month):
     if month < 1 or month > 12:
         return jsonify({"error": "Invalid month (1-12)"}), 400
 
-    theme = get_setting("BOOTSTRAP_THEME")
+    theme = _wrapped_theme()
 
     try:
         slides = generate_all_monthly_wrapped(year, month, theme)

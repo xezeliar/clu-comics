@@ -42,11 +42,13 @@ reading_bp = Blueprint("reading", __name__)
 # (the whole page visible).
 READER_MODES = ("paged", "scroll")
 READER_FITS = ("width", "height")
+READER_TURNS = ("slide", "turn", "none")
 
 # request/response field -> (schema key, allowed values)
 _READER_PREFS = {
     "mode": ("READER_MODE", READER_MODES),
     "fit": ("READER_FIT", READER_FITS),
+    "turn": ("READER_PAGE_TURN", READER_TURNS),
 }
 
 
@@ -67,8 +69,9 @@ def api_reader_prefs():
     """
     The signed-in user's comic reader layout preferences.
 
-    GET  -> {"success": True, "mode": "paged"|"scroll", "fit": "width"|"height"}
-    POST {mode?, fit?}  -> same body after saving. Only the fields sent are
+    GET  -> {"success": True, "mode": "paged"|"scroll", "fit": "width"|"height",
+             "turn": "slide"|"turn"|"none"}
+    POST {mode?, fit?, turn?}  -> same body after saving. Only the fields sent are
          changed; an unknown value is a 400 and nothing is written.
     """
     if request.method == "POST":
@@ -89,7 +92,7 @@ def api_reader_prefs():
                 return jsonify({"success": False, "error": "Could not save reader preference"}), 500
 
     return jsonify(
-        {"success": True, "mode": _reader_pref("mode"), "fit": _reader_pref("fit")}
+        {"success": True, **{field: _reader_pref(field) for field in _READER_PREFS}}
     )
 
 

@@ -56,6 +56,24 @@ THEME_COLORS.update({
     for flavour in CATPPUCCIN_PALETTE
 })
 
+# New themes (nord .. manga): palettes are the design board's, keyed by theme id.
+THEME_COLORS.update({
+    'nord': {'primary': '#4c6a91', 'secondary': '#4c566a', 'success': '#a3be8c', 'info': '#88c0d0', 'warning': '#ffc107', 'danger': '#e3949b', 'bg': '#2e3440', 'bg_secondary': '#3b4252', 'text': '#d8dee9', 'text_muted': '#aab4c5', 'is_dark': True},
+    'dracula': {'primary': '#7a52c7', 'secondary': '#44475a', 'success': '#50fa7b', 'info': '#bd93f9', 'warning': '#ffc107', 'danger': '#ff6e6e', 'bg': '#282a36', 'bg_secondary': '#30323f', 'text': '#f8f8f2', 'text_muted': '#b4bad6', 'is_dark': True},
+    'tokyo-night': {'primary': '#3d59a1', 'secondary': '#3b4261', 'success': '#9ece6a', 'info': '#7aa2f7', 'warning': '#ffc107', 'danger': '#f7768e', 'bg': '#1a1b26', 'bg_secondary': '#24283b', 'text': '#c0caf5', 'text_muted': '#9aa5ce', 'is_dark': True},
+    'rose-pine': {'primary': '#31748f', 'secondary': '#403d52', 'success': '#a3d9b1', 'info': '#9ccfd8', 'warning': '#ffc107', 'danger': '#eb6f92', 'bg': '#191724', 'bg_secondary': '#1f1d2e', 'text': '#e0def4', 'text_muted': '#a9a5c4', 'is_dark': True},
+    'everforest': {'primary': '#3e6b62', 'secondary': '#4f5b58', 'success': '#a7c080', 'info': '#7fbbb3', 'warning': '#ffc107', 'danger': '#e67e80', 'bg': '#2d353b', 'bg_secondary': '#343f44', 'text': '#d3c6aa', 'text_muted': '#a7b2a8', 'is_dark': True},
+    'one-dark': {'primary': '#3a6fb0', 'secondary': '#3e4451', 'success': '#98c379', 'info': '#61afef', 'warning': '#ffc107', 'danger': '#e57d86', 'bg': '#282c34', 'bg_secondary': '#2f343f', 'text': '#abb2bf', 'text_muted': '#9aa1ae', 'is_dark': True},
+    'solarized-dark': {'primary': '#1f6fa8', 'secondary': '#0e4a57', 'success': '#a2b31b', 'info': '#45a1e0', 'warning': '#ffc107', 'danger': '#f0605a', 'bg': '#002b36', 'bg_secondary': '#073642', 'text': '#a7b3b3', 'text_muted': '#93a1a1', 'is_dark': True},
+    'solarized-light': {'primary': '#1f6fa8', 'secondary': '#d9d2bd', 'success': '#5f6c00', 'info': '#1b659c', 'warning': '#b58900', 'danger': '#b32a26', 'bg': '#fdf6e3', 'bg_secondary': '#eee8d5', 'text': '#4f6168', 'text_muted': '#5a6b71', 'is_dark': False},
+    'kanagawa': {'primary': '#2d4f67', 'secondary': '#54546d', 'success': '#98bb6c', 'info': '#7e9cd8', 'warning': '#ffc107', 'danger': '#e46876', 'bg': '#1f1f28', 'bg_secondary': '#2a2a37', 'text': '#dcd7ba', 'text_muted': '#a6a69c', 'is_dark': True},
+    'newsprint': {'primary': '#9b2d20', 'secondary': '#cfc5ad', 'success': '#3d6b35', 'info': '#8a2a1d', 'warning': '#b58900', 'danger': '#a3271b', 'bg': '#f4efe1', 'bg_secondary': '#ebe4d1', 'text': '#2b2620', 'text_muted': '#5c5446', 'is_dark': False},
+    'noir': {'primary': '#b3121f', 'secondary': '#3a3a3a', 'success': '#d9d9d9', 'info': '#ff6b6b', 'warning': '#ffc107', 'danger': '#ff6b6b', 'bg': '#0d0d0d', 'bg_secondary': '#1a1a1a', 'text': '#d9d9d9', 'text_muted': '#a3a3a3', 'is_dark': True},
+    'pop-art': {'primary': '#d7001a', 'secondary': '#111111', 'success': '#00703a', 'info': '#0047b8', 'warning': '#b58900', 'danger': '#c4001a', 'bg': '#fffdf3', 'bg_secondary': '#fff3b0', 'text': '#111111', 'text_muted': '#3d3d3d', 'is_dark': False},
+    'manga': {'primary': '#161616', 'secondary': '#161616', 'success': '#2a6b2a', 'info': '#161616', 'warning': '#b58900', 'danger': '#a8001a', 'bg': '#ffffff', 'bg_secondary': '#efefef', 'text': '#161616', 'text_muted': '#4d4d4d', 'is_dark': False},
+    'brite': {'primary': '#a2e436', 'secondary': '#ffffff', 'success': '#22b24c', 'info': '#0dcaf0', 'warning': '#f5e625', 'danger': '#d9534f', 'bg': '#ffffff', 'bg_secondary': '#f8f9fa', 'text': '#212529', 'text_muted': '#6c757d', 'is_dark': False},
+})
+
 
 def get_theme_colors(theme_name: str) -> dict:
     """Return color palette for the given theme."""
@@ -742,11 +760,153 @@ def generate_books_grid_slide(year: int, theme: str) -> bytes:
         app_logger.error(f"Error generating books grid slide: {e}", exc_info=True)
         return None
 
-def generate_all_wrapped_images(year: int, theme: str) -> list:
+# ==========================================
+# Card styles and formats (Theme / Cover wall / Panel; Story / Square)
+# ==========================================
+
+CARD_STYLES = ('theme', 'wall', 'panel')
+CARD_FORMATS = {'story': (1080, 1920), 'square': (1080, 1080)}
+DEFAULT_CARD = ('theme', 'story')
+
+
+def _fit(path, box, radius=0):
+    """A cover scaled to fit inside box with rounded corners, or None."""
+    try:
+        im = ImageOps.contain(Image.open(path).convert('RGB'), box, Image.Resampling.LANCZOS)
+    except Exception:
+        return None
+    if radius:
+        mask = Image.new('L', im.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle([(0, 0), im.size], radius=radius, fill=255)
+        im.putalpha(mask)
+    return im
+
+
+def _wall(w, h, paths):
+    """The year's covers as a tilted 3-column wall, cropped to w x h."""
+    cols, gap = 3, 20
+    cw = int(w * 1.4 / cols) - gap
+    ch = int(cw * 1.5)
+    side = int(max(w, h) * 1.5)
+    sheet = Image.new('RGB', (side, side), (0, 0, 0))
+    covers = [c for c in (_fit(p, (cw, ch), 6) for p in paths) if c]
+    for i, c in enumerate(covers[:cols * (side // (ch + gap) + 1)]):
+        sheet.paste(c, (gap + (i % cols) * (cw + gap), gap + (i // cols) * (ch + gap)), c)
+    sheet = sheet.rotate(8, resample=Image.Resampling.BICUBIC)
+    return sheet.crop(((side - w) // 2, (side - h) // 2, (side - w) // 2 + w, (side - h) // 2 + h))
+
+
+def generate_card(year: int, theme: str, style: str = 'theme', fmt: str = 'story') -> bytes:
+    """One shareable Wrapped card in the given style and format, in the theme's colours."""
+    if style not in CARD_STYLES:
+        style = DEFAULT_CARD[0]
+    w, h = CARD_FORMATS.get(fmt, CARD_FORMATS[DEFAULT_CARD[1]])
+    tc = get_theme_colors(theme)
+    ink, muted, primary = hex_to_rgb(tc['text']), hex_to_rgb(tc['text_muted']), hex_to_rgb(tc['primary'])
+    page, raised = hex_to_rgb(tc['bg']), hex_to_rgb(tc['bg_secondary'])
+    total = get_yearly_total_read(year)
+    top = (get_most_read_series(year, limit=1) or [None])[0]
+    top_cover = ImageUtils.get_series_cover(top['path']) if top and top.get('path') else None
+    num_size = 340 if h > w else 240
+    pad = 100
+
+    if style == 'wall':
+        paths = [p for p in (ImageUtils.get_thumbnail_path(i) for i in get_read_issues(year)) if p and os.path.exists(p)]
+        img = _wall(w, h, paths[:60])
+        scrim = Image.new('RGBA', (w, h))
+        sd = ImageDraw.Draw(scrim)
+        for y in range(h):
+            sd.line([(0, y), (w, y)], fill=(0, 0, 0, int(255 * (0.55 + 0.27 * y / h))))
+        img.paste(scrim, (0, 0), scrim)
+        ink = muted = (255, 255, 255)
+        fill_big = (255, 255, 255)
+    elif style == 'panel':
+        img = Image.new('RGB', (w, h), ink)
+        fill_big = ink
+    else:
+        img = create_gradient(w, h, tc['bg'], tc['bg_secondary'])
+        fill_big = ink
+    d = ImageDraw.Draw(img)
+
+    def top_block(x, y, cover_w):
+        """Cover plus 'Most read / name / count' with its left edge at x."""
+        if not top:
+            return
+        c = _fit(top_cover, (cover_w, int(cover_w * 1.5)), 8) if top_cover else None
+        tx = x
+        if c:
+            img.paste(c, (x, y - c.height), c)
+            tx = x + c.width + 40
+        d.text((tx, y - 170), 'Most read', font=get_font(40), fill=muted)
+        d.text((tx, y - 120), top['name'][:26], font=get_font(56, True), fill=fill_big)
+        d.text((tx, y - 40), f"{top['count']} issues", font=get_font(40), fill=muted)
+
+    mark_y = h - 110
+    if style == 'panel':
+        g = 40
+        p1 = (g, g, w - g, int((h - 2 * g) * 0.56))
+        p2 = (g, p1[3] + g, w - g, mark_y - g // 2)
+        for box in (p1, p2):
+            d.rectangle(box, fill=page)
+        d.rectangle((p1[0] + 60, p1[1] + 60, p1[0] + 60 + 230, p1[1] + 60 + 70), fill=primary)
+        d.text((p1[0] + 80, p1[1] + 72), str(year), font=get_font(48, True), fill=(255, 255, 255))
+        d.text((p1[0] + 60, p1[1] + 170), str(total), font=get_font(num_size, True), fill=ink)
+        d.text((p1[0] + 60, p1[3] - 120), 'issues read', font=get_font(64), fill=muted)
+        top_block(p2[0] + 60, p2[3] - 60, 300)
+        mark_ink = page
+    else:
+        d.text((pad, pad), str(year), font=get_font(56, True), fill=muted)
+        if style == 'theme':
+            d.rectangle((pad, pad - 40, w - pad, pad - 28), fill=primary)
+        d.text((pad, pad + 90), str(total), font=get_font(num_size, True), fill=fill_big)
+        d.text((pad, pad + 90 + num_size + 30), 'issues read', font=get_font(72), fill=ink)
+        if style == 'theme':
+            top_block(pad, mark_y - 60, 300 if h > w else 220)
+        else:
+            # On the wall the covers are the picture; the top series stays as text.
+            if top:
+                d.text((pad, mark_y - 170), 'Most read', font=get_font(40), fill=muted)
+                d.text((pad, mark_y - 120), top['name'][:28], font=get_font(60, True), fill=fill_big)
+                d.text((pad, mark_y - 40), f"{top['count']} issues", font=get_font(40), fill=muted)
+        mark_ink = muted
+    d.text((pad if style != 'panel' else 60, mark_y + 20), 'CLU Wrapped', font=get_font(36), fill=mark_ink)
+    yr = f'{year}'
+    d.text((w - (pad if style != 'panel' else 60) - d.textlength(yr, font=get_font(36)), mark_y + 20), yr, font=get_font(36), fill=mark_ink)
+
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def card_prefs() -> tuple:
+    """This user's remembered (style, format), validated."""
+    from core.database import get_user_setting
+    style = get_user_setting('wrapped_card_style', DEFAULT_CARD[0])
+    fmt = get_user_setting('wrapped_card_format', DEFAULT_CARD[1])
+    return (style if style in CARD_STYLES else DEFAULT_CARD[0],
+            fmt if fmt in CARD_FORMATS else DEFAULT_CARD[1])
+
+
+def save_card_prefs(style, fmt) -> bool:
+    """Remember this user's card choice; False (nothing stored) if either is unknown."""
+    from core.database import set_user_setting
+    if style not in CARD_STYLES or fmt not in CARD_FORMATS:
+        return False
+    return bool(set_user_setting('wrapped_card_style', style) and set_user_setting('wrapped_card_format', fmt))
+
+
+def generate_summary_card(year: int, theme: str, style: str, fmt: str) -> bytes:
+    """Slide 1: today's summary slide for the default choice, otherwise the styled card."""
+    if (style, fmt) == DEFAULT_CARD:
+        return generate_summary_slide(year, theme)
+    return generate_card(year, theme, style, fmt)
+
+
+def generate_all_wrapped_images(year: int, theme: str, style: str = 'theme', fmt: str = 'story') -> list:
     """Generate all wrapped slides."""
     # We now have fewer slides
     slides = [
-        ('01_summary.png', generate_summary_slide(year, theme)),
+        ('01_summary.png', generate_summary_card(year, theme, style, fmt)),
         ('02_most_read_series.png', generate_most_read_series_slide(year, theme)),
         ('03_series_highlights.png', generate_series_highlights_slide(year, theme)),
         ('04_books_grid.png', generate_books_grid_slide(year, theme)),

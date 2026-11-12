@@ -1119,3 +1119,28 @@ a.clu-stat:focus-visible .clu-stat-value {
     :root:not([data-clu-motion="full"]) .sh-ring .val { animation: none; }
 }
 :root[data-clu-motion="reduce"] .sh-ring .val { animation: none; }
+
+/* Publisher dot: the publisher's house colour (inline --pub), ringed in the
+   page ink so a black or white house shows on every theme. The name is always beside it. */
+.pub-dot {
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    margin-right: 0.35em;
+    border-radius: 50%;
+    background: var(--pub);
+    vertical-align: baseline;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--bs-emphasis-color) 25%, transparent);
+}
+
+/* Cover tilt glare: a soft white highlight that follows the pointer, on cover
+   art only (the Sticker Exception). Opacity is driven by clu-motion.js. */
+.clu-glare {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255, 255, 255, 0.28), transparent 55%);
+    transition: opacity var(--clu-dur-base) var(--clu-ease);
+}

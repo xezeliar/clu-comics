@@ -57,6 +57,26 @@
                     <!-- Year Selection -->
                     <div id="wrappedYearSelect" class="text-center py-4">
                         <h4 class="mb-4">Select a year to generate your Wrapped</h4>
+                        <div class="d-flex justify-content-center gap-4 flex-wrap mb-4" id="wrappedCardOpts">
+                            <div>
+                                <div class="small text-body-secondary mb-1" id="wrStyleLabel">Style</div>
+                                <div class="btn-group" role="radiogroup" aria-labelledby="wrStyleLabel">
+                                    {% for v, l in (('theme', 'Theme'), ('wall', 'Cover wall'), ('panel', 'Panel')) %}
+                                    <input type="radio" class="btn-check" name="wrStyle" id="wrStyle-{{ v }}" value="{{ v }}" autocomplete="off">
+                                    <label class="btn btn-outline-secondary" for="wrStyle-{{ v }}">{{ l }}</label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="small text-body-secondary mb-1" id="wrFormatLabel">Format</div>
+                                <div class="btn-group" role="radiogroup" aria-labelledby="wrFormatLabel">
+                                    {% for v, l in (('story', 'Story'), ('square', 'Square')) %}
+                                    <input type="radio" class="btn-check" name="wrFormat" id="wrFormat-{{ v }}" value="{{ v }}" autocomplete="off">
+                                    <label class="btn btn-outline-secondary" for="wrFormat-{{ v }}">{{ l }}</label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
                         <div class="d-flex justify-content-center gap-2 flex-wrap" id="yearButtonsContainer">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -148,6 +168,20 @@
     const wrappedFooter = document.getElementById('wrappedFooter');
     const wrappedBackBtn = document.getElementById('wrappedBackBtn');
     const wrappedDownloadBtn = document.getElementById('wrappedDownloadBtn');
+
+    // Remembered per user: pick, save, and the next generated card uses it.
+    fetch('/api/wrapped/card-prefs').then(r => r.json()).then(p => {
+        const s = document.getElementById('wrStyle-' + p.style), f = document.getElementById('wrFormat-' + p.format);
+        if (s) s.checked = true;
+        if (f) f.checked = true;
+    }).catch(() => {});
+    document.getElementById('wrappedCardOpts').addEventListener('change', () => {
+        const pick = n => (document.querySelector(`input[name="${n}"]:checked`) || {}).value;
+        fetch('/api/wrapped/card-prefs', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({style: pick('wrStyle'), format: pick('wrFormat')})
+        }).catch(() => CLU.toast('Could not save your card choice', 'error'));
+    });
 
     let selectedYear = null;
 
