@@ -6,150 +6,171 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/files.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/series-header.css') }}">
 {% endblock %}
 
 {% block content %}
 <div>
-    {% call(slot) page_header(series.name, 'bi-journal-text') %}
-        {% if slot == 'crumbs' %}
-            <li class="breadcrumb-item"><a href="{{ url_for('series.pull_list') }}">Pull List</a></li>
-            <li class="breadcrumb-item active" aria-current="page">{{ series.name }}</li>
-        {% elif slot == 'actions' %}
-            <button onclick="history.back()" class="btn btn-sm btn-outline-secondary">
-                <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Back
-            </button>
-            <button onclick="forceRefresh()" class="btn btn-sm btn-outline-secondary" title="Force refresh from Metron API">
-                <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
-            </button>
-            {% if mapped_path %}
-            <button type="button" class="btn btn-sm btn-outline-secondary"
-                onclick="CLU.openSeriesJsonModal({{ mapped_path|tojson|forceescape }}, {{ series.name|tojson|forceescape }})"
-                title="Create or update series.json in the mapped folder">
-                <i class="bi bi-file-earmark-code me-1" aria-hidden="true"></i>series.json
-            </button>
-            {% endif %}
-        {% elif slot == 'more' %}
-            {% if series.id < 2000000000 %}
-            <li><a href="https://metron.cloud/series/{{ series.id }}/" target="_blank" class="dropdown-item">
-                <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>View on Metron
-            </a></li>
-            {% endif %}
-            {% if series.cv_id %}
-            <li><a href="https://comicvine.gamespot.com/volume/4050-{{ series.cv_id }}/" target="_blank" class="dropdown-item">
-                <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>ComicVine
-            </a></li>
-            {% endif %}
-            {% if series.gcd_id %}
-            <li><a href="https://www.comics.org/series/{{ series.gcd_id }}/" target="_blank" class="dropdown-item">
-                <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>GCD
-            </a></li>
-            {% endif %}
+    {#- Series header (DESIGN board "Series page header"): a banner strip from
+        folder art, the cover overlapping it, the run as owned/missing cells,
+        and credits from the owned files' ComicInfo.xml. -#}
+    {#- No header.* art: the banner is generated from the cover, blurred across
+        the strip (series-header.css). Decorative, so hidden from screen readers. -#}
+    <section class="series-header{% if header_banner or first_issue_image %} has-banner{% endif %}" id="series" aria-label="Series overview">
+        {% if header_banner %}
+        <div class="sh-banner" role="img" aria-label="Banner art for {{ series.name }}"
+             style="background-image: url('{{ header_banner }}')"></div>
+        {% elif first_issue_image and header_focus is not none %}
+        <div class="sh-banner sh-banner-slice" id="shBanner" aria-hidden="true"
+             style="background-image: url('{{ first_issue_image }}'); background-position: center {{ header_focus }}%"></div>
+        {% elif first_issue_image %}
+        <div class="sh-banner sh-banner-generated" id="shBanner" aria-hidden="true"
+             style="--sh-banner-img: url('{{ first_issue_image }}')"></div>
         {% endif %}
-    {% endcall %}
+        <div class="sh-body">
+            <div class="sh-cover">
+                {% if first_issue_image %}
+                <img src="{{ first_issue_image }}" alt="Cover of {{ series.name }}" class="clu-shared-cover">
+                {% else %}
+                <div class="sh-cover-empty"><i class="bi bi-journal-text" aria-hidden="true"></i></div>
+                {% endif %}
+            </div>
+            <div class="sh-main">
+                {% call(slot) page_header(series.name, 'bi-journal-text') %}
+                    {% if slot == 'crumbs' %}
+                        <li class="breadcrumb-item"><a href="{{ url_for('series.pull_list') }}">Pull List</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">{{ series.name }}</li>
+                    {% elif slot == 'actions' %}
+                        {% if not mapped_path %}
+                        <button type="button" class="btn btn-sm btn-primary" onclick="openSubscribeModal()" data-clu-keep>
+                            <i class="bi bi-bookmark-plus me-1" aria-hidden="true"></i>Subscribe
+                        </button>
+                        {% elif run and run.missing %}
+                        <button type="button" class="btn btn-sm btn-primary" onclick="checkForMissing()" id="checkMissingBtn"
+                            title="Search the configured sources for this series' missing issues">
+                            <i class="bi bi-search me-1" aria-hidden="true"></i>Search missing
+                        </button>
+                        {% endif %}
+                        <button onclick="forceRefresh()" class="btn btn-sm btn-outline-secondary" title="Force refresh from Metron API">
+                            <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
+                        </button>
+                    {% elif slot == 'more' %}
+                        {% if first_issue_image and not header_banner %}
+                        <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#shHeaderModal">
+                            <i class="bi bi-crop me-2" aria-hidden="true"></i>Set header…
+                        </button></li>
+                        {% endif %}
+                        {% if mapped_path %}
+                        <li><button type="button" class="dropdown-item"
+                            onclick="CLU.openSeriesJsonModal({{ mapped_path|tojson|forceescape }}, {{ series.name|tojson|forceescape }})"
+                            title="Create or update series.json in the mapped folder">
+                            <i class="bi bi-file-earmark-{{ 'check' if has_series_json else 'code' }} me-2" aria-hidden="true"></i>series.json{% if not has_series_json %} (missing){% endif %}
+                        </button></li>
+                        {% endif %}
+                        {% if series.id < 2000000000 %}
+                        <li><a href="https://metron.cloud/series/{{ series.id }}/" target="_blank" rel="noopener" class="dropdown-item">
+                            <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>View on Metron
+                        </a></li>
+                        {% endif %}
+                        {% if series.cv_id %}
+                        <li><a href="https://comicvine.gamespot.com/volume/4050-{{ series.cv_id }}/" target="_blank" rel="noopener" class="dropdown-item">
+                            <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>ComicVine
+                        </a></li>
+                        {% endif %}
+                        {% if series.gcd_id %}
+                        <li><a href="https://www.comics.org/series/{{ series.gcd_id }}/" target="_blank" rel="noopener" class="dropdown-item">
+                            <i class="bi bi-box-arrow-up-right me-2" aria-hidden="true"></i>GCD
+                        </a></li>
+                        {% endif %}
+                        {% if mapped_path %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><button type="button" class="dropdown-item text-danger" onclick="removeMappingConfirm()">
+                            <i class="bi bi-x-circle me-2" aria-hidden="true"></i>Remove mapping
+                        </button></li>
+                        {% endif %}
+                    {% endif %}
+                {% endcall %}
 
-    <div class="row mb-5" id="series">
-        <div class="col-12">
-            <div class="card bg-light border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <!-- Cover Image -->
-                        <div class="col-md-3">
-                            {% if first_issue_image %}
-                            <img src="{{ first_issue_image }}" alt="{{ series.name }}"
-                                class="img-fluid rounded shadow-sm">
-                            {% else %}
-                            <div class="bg-secondary rounded d-flex align-items-center justify-content-center">
-                                <i class="bi bi-journal-text text-white" style="font-size: 3rem; opacity: 0.5;"></i>
-                            </div>
-                            {% endif %}
-                        </div>
-                        <!-- Series Info -->
-                        <div class="col-md-9">
-                            {% if mapped_path %}
-                            <div class="d-flex align-items-baseline flex-wrap gap-2 mb-3">
-                                {% if has_series_json %}
-                                <span class="badge bg-success" title="series.json is present in the mapped folder">
-                                    <i class="bi bi-file-earmark-check me-1"></i>series.json
-                                </span>
-                                {% else %}
-                                <span class="badge bg-warning text-dark" title="series.json is missing — click Refresh to generate">
-                                    <i class="bi bi-file-earmark-x me-1"></i>series.json
-                                </span>
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                            <p class="lead mb-4">{{ series.desc or 'No description available.' }}</p>
+                <p class="sh-meta small text-body-secondary mb-0">
+                    {%- set sep = joiner(' · ') -%}
+                    {%- if series.publisher and series.publisher.name %}{{ sep() }}{{ series.publisher.name }}{% endif -%}
+                    {%- if series.volume %}{{ sep() }}Vol. {{ series.volume }}{% endif -%}
+                    {%- if series.year_began %}{{ sep() }}{{ series.year_began }} to {{ year_ended_label }}{% endif -%}
+                    {%- if series.status %}{{ sep() }}{{ series.status }}{% endif %}
+                </p>
 
-                            <div class="row g-3 text-muted">
-                                <div class="col-6 col-md-5">
-                                    <small class="text-uppercase fw-bold d-block mb-1"
-                                        style="font-size: 0.75rem;">Publisher</small>
-                                    <span>{{ series.publisher.name if series.publisher else '-' }}</span>
-                                </div>
-                                <div class="col-6 col-md-4">
-                                    <small class="text-uppercase fw-bold d-block mb-1"
-                                        style="font-size: 0.75rem;">Status</small>
-                                    <span>{{ series.status }}</span>
-                                </div>
-                                <div class="col-6 col-md-3">
-                                    <small class="text-uppercase fw-bold d-block mb-1" style="font-size: 0.75rem;">Issue
-                                        Count</small>
-                                    <span>{{ series.issue_count }}</span>
-                                </div>
-                                <div class="col-6 col-md-5">
-                                    <small class="text-uppercase fw-bold d-block mb-1"
-                                        style="font-size: 0.75rem;">Volume</small>
-                                    <span>{{ series.volume }}</span>
-                                </div>
-                                <div class="col-6 col-md-4">
-                                    <small class="text-uppercase fw-bold d-block mb-1" style="font-size: 0.75rem;">Year
-                                        Began</small>
-                                    <span>{{ series.year_began }}</span>
-                                </div>
-                                <div class="col-6 col-md-3">
-                                    <small class="text-uppercase fw-bold d-block mb-1" style="font-size: 0.75rem;">Year
-                                        Ended</small>
-                                    <span>{{ year_ended_label }}</span>
-                                </div>
-                                <div class="col-6 col-md-5">
-                                    <small class="text-uppercase fw-bold d-block mb-1"
-                                        style="font-size: 0.75rem;">
-                                        {% if series.id >= 2000000000 %}Source{% else %}Metron ID{% endif %}</small>
-                                    {% if series.id >= 2000000000 %}
-                                    <span class="badge bg-info">ComicVine</span>
-                                    {% else %}
-                                    <a href="https://metron.cloud/series/{{ series.id }}/" target="_blank"
-                                        class="font-monospace text-decoration-none">{{ series.id }}</a>
-                                    {% endif %}
-                                </div>
-                                <div class="col-6 col-md-4">
-                                    <small class="text-uppercase fw-bold d-block mb-1"
-                                        style="font-size: 0.75rem;">ComicVine ID</small>
-                                    {% if series.cv_id %}
-                                    <a href="https://comicvine.gamespot.com/volume/4050-{{ series.cv_id }}/"
-                                        target="_blank" class="font-monospace text-decoration-none">{{ series.cv_id
-                                        }}</a>
-                                    {% else %}
-                                    <span class="text-muted">-</span>
-                                    {% endif %}
-                                </div>
-                                <div class="col-6 col-md-3">
-                                    <small class="text-uppercase fw-bold d-block mb-1" style="font-size: 0.75rem;">GCD
-                                        ID</small>
-                                    {% if series.gcd_id %}
-                                    <a href="https://www.comics.org/series/{{ series.gcd_id }}/" target="_blank"
-                                        class="font-monospace text-decoration-none">{{ series.gcd_id }}</a>
-                                    {% else %}
-                                    <span class="text-muted">-</span>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                {% if run and run.total %}
+                {%- set c = 87.96 -%}
+                <div class="sh-stat">
+                    <svg class="sh-ring{% if run.complete %} done{% endif %}" viewBox="0 0 36 36" aria-hidden="true">
+                        <circle class="trk" cx="18" cy="18" r="14"/>
+                        <circle class="val" cx="18" cy="18" r="14" stroke-dasharray="{{ '%.2f'|format(c * run.owned / run.total) }} {{ c }}"/>
+                    </svg>
+                    <span>
+                        {%- if run.complete -%}
+                        <b>Complete</b> · {{ '{:,}'.format(run.total) }} issue{{ 's' if run.total != 1 }}
+                        {%- else -%}
+                        <b>{{ '{:,}'.format(run.owned) }}</b> of {{ '{:,}'.format(run.total) }} owned
+                        {%- if run.missing %} · <a href="{{ url_for('series.wanted', q=series.name) }}"><b>{{ '{:,}'.format(run.missing) }}</b> missing</a>{% endif -%}
+                        {%- endif -%}
+                        {%- if run.read %} · <b>{{ '{:,}'.format(run.read) }}</b> read{% endif -%}
+                    </span>
                 </div>
+                {% if run.cells %}
+                <ol class="sh-run" aria-label="Issues: {{ run.owned }} owned{% if missing_line %}, missing {{ missing_line|join(', ') }}{% endif %}">
+                    {%- for cell in run.cells %}
+                    <li class="{{ cell.state }}" title="#{{ cell.number }} {{ {'owned': 'owned', 'miss': 'missing', 'marked': 'marked by hand'}[cell.state] }}">{{ cell.number }}</li>
+                    {%- endfor %}
+                </ol>
+                <div class="sh-key" aria-hidden="true"><span><i></i> Owned</span><span><i class="m"></i> Missing</span></div>
+                {% elif missing_line %}
+                <p class="small text-body-secondary mb-0 mt-1" id="missingLine">Missing {{ missing_line|join(', ') }}</p>
+                {% endif %}
+                {% endif %}
+
+                {% if series.desc %}
+                <p class="sh-desc" id="seriesDesc">{{ series.desc }}</p>
+                <button type="button" class="btn btn-sm btn-link sh-more px-0" id="seriesDescMore"
+                        aria-expanded="false" aria-controls="seriesDesc" hidden>More</button>
+                {% endif %}
+
+                {% if series_credits and series_credits.credited %}
+                {% if series_credits.header %}
+                <dl class="sh-cred">
+                    {% for role in series_credits.header %}
+                    <div><dt>{{ role.label }}</dt><dd>
+                        {%- for p in role.people -%}
+                        {% if not loop.first %} · {% endif %}<a href="{{ url_for('creators.creator_page', name=p.name) }}">{{ p.name }}</a>
+                        {%- if p.show_count %} <span class="text-body-secondary">{{ p.count }}</span>{% endif -%}
+                        {%- endfor -%}
+                    </dd></div>
+                    {% endfor %}
+                </dl>
+                {% endif %}
+                {% if series_credits.credited < series_credits.issues %}
+                <p class="small text-body-secondary mb-0" id="creditsCoverage">Credits from {{ series_credits.credited }} of {{ series_credits.issues }} issues</p>
+                {% endif %}
+                <details class="sh-all">
+                    <summary>All credits</summary>
+                    <table>
+                        <tbody>
+                        {% for role in series_credits.roles %}
+                        <tr><th scope="row">{{ role.label }}</th><td>
+                            {%- for p in role.people -%}
+                            {% if not loop.first %} · {% endif %}<a href="{{ url_for('creators.creator_page', name=p.name) }}">{{ p.name }}</a> <span class="text-body-secondary">{{ p.count }}</span>
+                            {%- endfor -%}
+                        </td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <p class="small text-body-secondary mb-0">
+                        Issue counts, from the {{ series_credits.credited }} issue{{ 's' if series_credits.credited != 1 }} with credits.
+                    </p>
+                </details>
+                {% endif %}
             </div>
         </div>
-    </div>
+    </section>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -188,20 +209,10 @@
                         </div>
                         <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
                             <div class="d-flex flex-wrap gap-2">
-                                {% if mapped_path %}
-                                <button class="btn btn-outline-danger" onclick="removeMappingConfirm()">
-                                    <i class="bi bi-x-circle me-1"></i>Remove
-                                </button>
-                                {% endif %}
                                 <button class="btn btn-outline-primary" onclick="openMappingModal()">
                                     <i class="bi bi-folder-symlink me-1"></i>
                                     {% if mapped_path %}Change{% else %}Map{% endif %} Location
                                 </button>
-                                {% if not mapped_path %}
-                                <button class="btn btn-success" onclick="openSubscribeModal()">
-                                    <i class="bi bi-bookmark-plus me-1"></i>Subscribe
-                                </button>
-                                {% endif %}
                             </div>
                             {% if last_synced_at %}
                             <small class="text-muted" id="last-synced-display">
@@ -212,15 +223,14 @@
                     </div>
                     {% if mapped_path %}
                     <hr class="my-2">
-                    {% if missing_line %}
-                    <div class="small text-warning mb-2" id="missingLine"><i class="bi bi-slash-square me-1"></i>Missing: {{ missing_line|join(', ') }}</div>
-                    {% endif %}
                     <div class="d-flex justify-content-end gap-3">
+                        {% if not (run and run.missing) %}
                         <button class="btn btn-outline-primary btn-sm" onclick="checkForMissing()"
                             id="checkMissingBtn"
                             title="Search the configured sources for this series' missing issues">
                             <i class="bi bi-search me-1"></i>Check for Missing Issues
                         </button>
+                        {% endif %}
                         <button class="btn btn-outline-secondary btn-sm" onclick="syncSeries()" id="sync-btn"
                             title="Check API for New Issues">
                             <i class="bi bi-arrow-repeat me-1"></i>API Sync
@@ -964,6 +974,94 @@
 
 {% block scripts %}
 {{ super() }}
+{% if first_issue_image and not header_banner %}
+{#- Set header: drag the cover (or use the slider) to pick the slice the banner
+    shows. Saved per series; "Use blurred" goes back to the default. -#}
+<div class="modal fade" id="shHeaderModal" tabindex="-1" aria-labelledby="shHeaderModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title fs-5" id="shHeaderModalLabel">Set header</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-body-secondary small mb-2">Drag the image up or down to choose the part of the cover the banner shows.</p>
+        <div class="sh-banner sh-banner-slice sh-header-preview" id="shHeaderPreview"
+             style="background-image: url('{{ first_issue_image }}'); background-position: center {{ header_focus if header_focus is not none else 30 }}%"></div>
+        <label for="shHeaderFocus" class="form-label small mt-3 mb-1">Position</label>
+        <input type="range" class="form-range" id="shHeaderFocus" min="0" max="100" step="1"
+               value="{{ (header_focus if header_focus is not none else 30)|round|int }}" aria-describedby="shHeaderModalLabel">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary me-auto" id="shHeaderReset"{% if header_focus is none %} hidden{% endif %}>Use blurred</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="shHeaderSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const preview = document.getElementById('shHeaderPreview');
+    const range = document.getElementById('shHeaderFocus');
+    const banner = document.getElementById('shBanner');
+    const cover = {{ first_issue_image|tojson }};
+    const modal = document.getElementById('shHeaderModal');
+    const reset = document.getElementById('shHeaderReset');
+
+    function show(y) {
+      y = Math.max(0, Math.min(100, y));
+      range.value = Math.round(y);
+      preview.style.backgroundPosition = 'center ' + y + '%';
+    }
+    range.addEventListener('input', () => show(+range.value));
+
+    // Dragging down shows more of the top, so the position moves the other way.
+    let startY = null, startFocus = 0;
+    preview.addEventListener('pointerdown', e => {
+      startY = e.clientY; startFocus = +range.value;
+      preview.setPointerCapture(e.pointerId);
+    });
+    preview.addEventListener('pointermove', e => {
+      if (startY === null) return;
+      // The cover is 2:3, scaled to the preview's width: 100% is its whole
+      // overflow, so the image follows the pointer one pixel per pixel.
+      const overflow = preview.clientWidth * 1.5 - preview.clientHeight;
+      if (overflow > 0) show(startFocus - (e.clientY - startY) / overflow * 100);
+    });
+    ['pointerup', 'pointercancel'].forEach(t => preview.addEventListener(t, () => { startY = null; }));
+
+    function save(focus) {
+      fetch(`/api/series/${seriesData.id}/header`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ focus }),
+      })
+        .then(r => r.json().then(d => { if (!r.ok) throw new Error(d.error || 'Could not save the header'); return d; }))
+        .then(d => {
+          if (banner) {
+            if (d.focus === null) {
+              banner.className = 'sh-banner sh-banner-generated';
+              banner.removeAttribute('style');
+              banner.style.setProperty('--sh-banner-img', `url('${cover}')`);
+            } else {
+              banner.className = 'sh-banner sh-banner-slice';
+              banner.removeAttribute('style');
+              banner.style.backgroundImage = `url('${cover}')`;
+              banner.style.backgroundPosition = `center ${d.focus}%`;
+            }
+          }
+          reset.hidden = d.focus === null;
+          bootstrap.Modal.getOrCreateInstance(modal).hide();
+          CLU.toast(d.focus === null ? 'Header set to the blurred cover' : 'Header saved', 'success');
+        })
+        .catch(err => CLU.toast(err.message, 'error'));
+    }
+    document.getElementById('shHeaderSave').addEventListener('click', () => save(+range.value));
+    reset.addEventListener('click', () => save(null));
+  });
+</script>
+{% endif %}
 {% include 'partials/modal_series_json.html' %}
 <script src="{{ url_for('static', filename='js/clu-series-json.js') }}?v={{ range(1, 10000) | random }}"></script>
 <script>
@@ -982,6 +1080,20 @@
         url.searchParams.set('refresh', '1');
         window.location.href = url.toString();
     }
+
+    // Header description: clamped by CSS; the More toggle shows only when
+    // the text actually overflows the clamp.
+    document.addEventListener('DOMContentLoaded', function () {
+        const desc = document.getElementById('seriesDesc');
+        const more = document.getElementById('seriesDescMore');
+        if (!desc || !more) return;
+        more.hidden = desc.scrollHeight <= desc.clientHeight + 1;
+        more.addEventListener('click', function () {
+            const open = desc.classList.toggle('open');
+            more.textContent = open ? 'Less' : 'More';
+            more.setAttribute('aria-expanded', String(open));
+        });
+    });
 
     // Subscribe functionality
     const subscribePattern = {{ (config.CUSTOM_MOVE_PATTERN or "{publisher}/{series_name}/v{start_year}")|tojson }};
@@ -1076,7 +1188,9 @@
     // the identical pass across every monitored series; this one is scoped to
     // this series and ignores its Monitor toggle, since clicking it is an
     // explicit request.
-    const CHECK_MISSING_LABEL = '<i class="bi bi-search me-1"></i>Check for Missing Issues';
+    // The button is the header's primary ("Search missing") when issues are
+    // missing, else the outline one in the mapping card; restore whichever it is.
+    const CHECK_MISSING_LABEL = document.getElementById('checkMissingBtn')?.innerHTML || '';
     let missingCheckPoll = null;
 
     function checkForMissing() {

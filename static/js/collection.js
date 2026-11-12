@@ -525,8 +525,10 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
                         hasFiles: dir.has_files || false,
                         folderCount: dir.folder_count || 0,
                         fileCount: dir.file_count || 0,
+                        newCount: dir.new_count || 0,
                         metadataPending: hasPendingMetadata,
-                        thumbnailPending: hasPendingThumbnail
+                        thumbnailPending: hasPendingThumbnail,
+                        seriesUrl: dir.series_url || null
                     });
                     if (hasPendingMetadata) {
                         pendingMetadataPaths.push(itemPath);
@@ -1584,6 +1586,15 @@ async function loadContinueReading(preservePage = false) {
 /**
  * Render the current page of items.
  */
+/**
+ * Wording of the "New issue arrived" sticker: "New", "2 new" .. "9 new",
+ * then "9+ new".
+ */
+function newIssuesLabel(n) {
+    if (n === 1) return 'New';
+    return n > 9 ? '9+ new' : `${n} new`;
+}
+
 function renderPage() {
     // While a search or letter narrows the grid, the dashboard shelves above
     // it (Recently Added, Discover...) step aside so the results, or the
@@ -1883,8 +1894,13 @@ function renderGrid(items) {
                             <li><a class="dropdown-item folder-action-missing" href="#"><i class="bi bi-file-earmark-text"></i> Missing File Check</a></li>
                         `;
                     } else {
-                        // For folders with files, show full menu
+                        // For folders with files, show full menu. A folder mapped
+                        // to a series links to its series page first; an unmapped
+                        // one shows the link once the menu finds a sidecar.
+                        const seriesHidden = item.seriesUrl ? '' : ' d-none folder-series-probe';
                         dropdownMenu.innerHTML = `
+                        <li class="${seriesHidden}"><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl || '#'}"><i class="bi bi-collection"></i> Series Page</a></li>
+                        <li class="${seriesHidden}"><hr class="dropdown-divider"></li>` + `
                         <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-remove-custom-thumb" href="#"><i class="bi bi-x-square"></i> Remove Custom Thumbnail</a></li>
@@ -1900,6 +1916,37 @@ function renderGrid(items) {
                         `;
 
                         // Bind Generate Thumbnail action
+                        // A folder not mapped to a series: look for a
+                        // series.json/cvinfo when the menu opens (sidecars are
+                        // not indexed, so browsing never touches the disk), and
+                        // on click ask the server which series page it names.
+                        const seriesPageAction = dropdownMenu.querySelector('.folder-action-series-page');
+                        if (seriesPageAction && !item.seriesUrl) {
+                            const resolveUrl = '/api/series/for-folder?path=' + encodeURIComponent(item.path);
+                            let probed = false;
+                            actionsDropdown.addEventListener('show.bs.dropdown', () => {
+                                if (probed) return;
+                                probed = true;
+                                fetch(resolveUrl + '&check=1')
+                                    .then(r => r.json())
+                                    .then(d => {
+                                        if (!d.has_sidecar) return;
+                                        dropdownMenu.querySelectorAll('.folder-series-probe')
+                                            .forEach(li => li.classList.remove('d-none'));
+                                    })
+                                    .catch(() => { probed = false; });
+                            });
+                            seriesPageAction.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                fetch(resolveUrl)
+                                    .then(r => r.json())
+                                    .then(d => {
+                                        if (d.success && d.url) window.location.href = d.url;
+                                        else CLU.toast(d.error || 'No series page for this folder', 'warning');
+                                    })
+                                    .catch(() => CLU.toast('Could not open the series page', 'error'));
+                            });
+                        }
                         const thumbnailAction = dropdownMenu.querySelector('.folder-action-thumbnail');
                         if (thumbnailAction) {
                             thumbnailAction.onclick = (e) => {
@@ -2044,8 +2091,24 @@ function renderGrid(items) {
                 img.style.display = 'none';
             }
 
+            // "New issue arrived" sticker. The card's text (its accessible
+            // name) ends with ", 2 new issues"; opening the folder clears it.
+            const newBadge = clone.querySelector('.new-badge');
+            if (newBadge && item.newCount > 0) {
+                newBadge.textContent = newIssuesLabel(item.newCount);
+                newBadge.hidden = false;
+                const srText = document.createElement('span');
+                srText.className = 'visually-hidden';
+                srText.textContent = `, ${item.newCount} new issue${item.newCount === 1 ? '' : 's'}`;
+                nameEl.appendChild(srText);
+            }
+
             // Handle click for folders
-            gridItem.onclick = () => loadDirectory(item.path);
+            gridItem.onclick = () => {
+                if (newBadge) newBadge.classList.add('gone');
+                item.newCount = 0;
+                loadDirectory(item.path);
+            };
 
             // Enable drag and drop for folders
             setupFolderDropZone(gridItem, item.path);
@@ -2297,6 +2360,9 @@ function renderGrid(items) {
     initNameTooltips(grid);
 
     CLU.progress.apply(grid);
+
+    // First grid of the visit only; staggerIn ignores every later redraw.
+    if (CLU.staggerIn) CLU.staggerIn(grid);
 }
 
 // ===========================
@@ -3290,10 +3356,14 @@ function pollThumbnail(imgElement) {
                 // We found it's ready. Stop polling.
                 imgElement.classList.remove('polling');
 
-                // Update the image to the new version
-                imgElement.src = newSrc;
+                // Update the image to the new version. Fade it in only if a
+                // miss above means the placeholder is what is showing: a ready
+                // thumbnail swapped for its cache-busted copy must not blink.
+                if (imgElement.dataset.pollMissed && CLU.swapImage) CLU.swapImage(imgElement, newSrc);
+                else imgElement.src = newSrc;
 
             } else if (imgElement.classList.contains('polling')) {
+                imgElement.dataset.pollMissed = '1';
                 // Still generating, poll again in 2 seconds
                 setTimeout(() => pollThumbnail(imgElement), 2000);
             }
@@ -3482,10 +3552,40 @@ function renderBreadcrumbs(path) {
         breadcrumb.appendChild(li);
     });
 
+    collapseCrumbs(breadcrumb);
+
     // Update library header title if function exists (multi-library support)
     if (typeof updateLibraryHeaderTitle === 'function') {
         updateLibraryHeaderTitle(path);
     }
+}
+
+/**
+ * A deep path keeps the root and the last two levels and folds the middle
+ * into a "..." menu of the same links. shortcut: folds by depth (> 4 items),
+ * not by measured width.
+ */
+function collapseCrumbs(ol) {
+    const items = Array.from(ol.children);
+    if (items.length <= 4) return;
+    const middle = items.slice(1, -2);
+    const li = document.createElement('li');
+    li.className = 'breadcrumb-item dropdown';
+    li.innerHTML = '<button type="button" class="btn btn-link p-0 text-decoration-none" ' +
+        'data-bs-toggle="dropdown" aria-expanded="false" aria-label="Show hidden folders">&hellip;</button>' +
+        '<ul class="dropdown-menu"></ul>';
+    const menu = li.querySelector('ul');
+    middle.forEach(m => {
+        const a = m.querySelector('a');
+        const row = document.createElement('li');
+        if (a) {
+            a.classList.add('dropdown-item');
+            row.appendChild(a);
+        }
+        menu.appendChild(row);
+        m.remove();
+    });
+    ol.insertBefore(li, ol.children[1]);
 }
 
 /**
@@ -3498,7 +3598,8 @@ function initLazyLoading() {
                 if (entry.isIntersecting) {
                     const img = entry.target;
                     if (img.dataset.src) {
-                        img.src = img.dataset.src;
+                        if (CLU.swapImage) CLU.swapImage(img, img.dataset.src);
+                        else img.src = img.dataset.src;
                         img.classList.remove('lazy');
                         observer.unobserve(img);
                     }
@@ -4271,6 +4372,55 @@ function applyReadIconsToGrid() {
  * Mark a read issue as unread by removing it from issues_read
  * @param {string} path - Full path to the comic file
  */
+/**
+ * "More actions" for an issue on a home shelf. The same modal opens from the
+ * card's button and from a long-press or right-click (clu-gestures.js finds
+ * [data-clu-more]). A modal, not a dropdown: Swiper's transformed,
+ * overflow-hidden track would clip a menu.
+ */
+function issueMoreButton() {
+    return '<button type="button" class="btn btn-link btn-sm p-0 text-body dash-more" data-clu-more'
+        + ' aria-label="More actions" title="More actions"><i class="bi bi-three-dots-vertical"></i></button>';
+}
+
+function openIssueActions(path) {
+    const modal = document.getElementById('issueActionsModal');
+    if (!modal || !path) return;
+    const isRead = readIssuesSet.has(path);
+    modal.dataset.path = path;
+    modal.querySelector('.modal-title').textContent = path.split('/').pop();
+    modal.querySelector('[data-act="read-date"] span').textContent = isRead ? 'Update Read Date' : 'Set Read Date';
+    modal.querySelector('[data-act="unread"]').hidden = !isRead;
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+}
+
+// Capture phase: stopping the click here keeps the card's own onclick (open
+// the reader) from running.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.dashboard-card [data-clu-more]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openIssueActions(btn.closest('.dashboard-card').dataset.path);
+}, true);
+
+document.addEventListener('click', (e) => {
+    const act = e.target.closest('#issueActionsModal [data-act]');
+    if (!act) return;
+    const modal = document.getElementById('issueActionsModal');
+    const path = modal.dataset.path;
+    const run = {
+        'read': () => openReaderForFile(path),
+        'folder': () => loadDirectory(path.substring(0, path.lastIndexOf('/'))),
+        'read-date': () => openSetReadDateModal(path, readIssuesSet.has(path)),
+        'unread': () => markIssueAsUnread(path),
+        'list': () => openAddToReadingListModal(path),
+    }[act.dataset.act];
+    // The next modal (or the reader) opens once this one has gone.
+    modal.addEventListener('hidden.bs.modal', run, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modal).hide();
+});
+
 async function markIssueAsUnread(path) {
     try {
         const response = await fetch('/api/favorites/issues', {
@@ -4719,6 +4869,7 @@ async function loadRecentlyAddedSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="${thumbnailUrl}" alt="${name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                         <small class="text-muted">${timeAgo}</small>
                     </div>
@@ -4766,6 +4917,7 @@ async function loadNewThisWeekSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="/api/thumbnail?path=${encodeURIComponent(path)}" alt="${name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                     </div>
                 </div>
@@ -4829,6 +4981,7 @@ async function loadContinueReadingSwiper() {
                         </button>
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                         <small class="text-muted">${pageInfo}<br/>${timeAgo}</small>
                     </div>
@@ -4890,6 +5043,7 @@ async function loadOnTheStackSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="${thumbnailUrl}" alt="${item.file_name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${item.file_name}">${item.file_name}</div>
                         <small class="text-muted">${item.series_name} #${item.issue_number}<br/>${timeAgo}</small>
                         ${listBadge}
@@ -5216,6 +5370,7 @@ function togglePublisherFavorite(path, name, button) {
                     button.classList.add('favorited');
                     icon.className = 'bi bi-bookmark-heart-fill';
                     button.title = 'Remove from Favorites';
+                    if (CLU.burst) CLU.burst(button);
                     // Sync global favoritePaths
                     window.favoritePaths?.add(path);
                     CLU.showSuccess(`${name} added as a favorite`);

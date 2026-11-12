@@ -63,8 +63,14 @@ let readingListPager = null;
 const DEFAULT_LIST_SORT = 'date-desc';
 
 function activeListSort() {
-    const group = document.getElementById('rlSort');
-    return (group && window.CLU && CLU.filterValue(group)) || DEFAULT_LIST_SORT;
+    const select = document.getElementById('rlSort');
+    return (select && select.value) || DEFAULT_LIST_SORT;
+}
+
+// The Show filter (#rlShow): '', in-progress, not-started or finished.
+function activeListShow() {
+    const group = document.getElementById('rlShow');
+    return (group && window.CLU && CLU.filterValue(group)) || '';
 }
 
 // The search box (?q=): the server matches it against list names.
@@ -77,6 +83,7 @@ function listFilterState() {
     return {
         q: activeListQuery(),
         tag: [...activeTagFilters],
+        show: activeListShow(),
         sort: activeListSort() === DEFAULT_LIST_SORT ? '' : activeListSort(),
     };
 }
@@ -86,6 +93,7 @@ function fetchMatchingListIds() {
     const p = new URLSearchParams();
     if (activeListQuery()) p.set('q', activeListQuery());
     activeTagFilters.forEach(t => p.append('tag', t));
+    if (activeListShow()) p.set('show', activeListShow());
     return fetch(nav.dataset.idsEndpoint + '?' + p.toString(), { headers: { Accept: 'application/json' } })
         .then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -107,7 +115,7 @@ function updateListCount(data, grid) {
     if (typeof data.all_total === 'number') grid.dataset.totalLists = String(data.all_total);
     const allLists = parseInt(grid.dataset.totalLists, 10) || 0;
     // Narrowed to one page (or to nothing): "Showing 12 of 222 reading lists".
-    const narrowed = activeListQuery() !== '' || activeTagFilters.size > 0;
+    const narrowed = activeListQuery() !== '' || activeTagFilters.size > 0 || activeListShow() !== '';
     if (total === 0 || (narrowed && (data.total_pages || 1) <= 1)) {
         CLU.setCount(el, { total: allLists, noun: 'reading lists', one: 'reading list', shown: total });
         return;
@@ -129,6 +137,8 @@ document.addEventListener('click', e => {
     const group = document.getElementById('rlTags');
     if (group && window.CLU) CLU.setFilterValue(group, []);
     activeTagFilters = new Set();
+    const show = document.getElementById('rlShow');
+    if (show && window.CLU) CLU.setFilterValue(show, '');
     const box = document.getElementById('rlSearch');
     if (box) box.value = '';
     applyTagFilters();
@@ -137,9 +147,21 @@ document.addEventListener('click', e => {
 // Everything a freshly rendered card needs that its markup cannot carry.
 function initListCards() {
     syncListCheckboxes();
-    observeCardTags();
     loadWantToReadState();
     updateBulkBar();
+}
+
+// The Show chips' counts and the header's "N in progress" follow each page
+// load: reading a list moves it between them.
+function updateShowCounts(counts) {
+    if (!counts) return;
+    document.querySelectorAll('#rlShow [data-value]').forEach(btn => {
+        const n = counts[btn.dataset.value || 'all'];
+        const el = btn.querySelector('.clu-filter-count');
+        if (el && typeof n === 'number') el.textContent = CLU.formatCount(n);
+    });
+    const prog = document.getElementById('rlInProgress');
+    if (prog && typeof counts['in-progress'] === 'number') prog.textContent = CLU.formatCount(counts['in-progress']);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -173,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.classList.remove('opacity-50');
             grid.innerHTML = data.html;
             updateListCount(data, grid);
+            updateShowCounts(data.show_counts);
             initListCards();
         },
         // The tag chips may already show what failed to load; dim the cards
@@ -186,69 +209,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// ==========================================
-// Card tag row: one line, overflow as "+N"
-// ==========================================
-
-// The card has a fixed height, so wrapping tags would squeeze the covers.
-// Show what fits, hide the rest from the end, and say how many are hidden;
-// hovering the chip (or the row) lists them.
-function fitCardTags(box) {
-    const tags = [...box.querySelectorAll('.tag-badge:not(.tag-more)')];
-    const more = box.querySelector('.tag-more');
-    if (!more || box.clientWidth === 0) return;  // hidden by a filter
-
-    tags.forEach(t => { t.hidden = false; t.classList.remove('tag-squeeze'); });
-    more.hidden = true;
-    const overflowing = () => box.scrollWidth > box.clientWidth + 1;
-    if (!overflowing()) return;
-
-    const hidden = [];
-    more.hidden = false;
-    // Never hide the first tag: it shrinks to an ellipsis instead (CSS).
-    for (let i = tags.length - 1; i >= 1; i--) {
-        tags[i].hidden = true;
-        hidden.unshift(tags[i].textContent.trim());
-        more.textContent = `+${hidden.length}`;
-        if (!overflowing()) break;
-    }
-    if (hidden.length === 0) more.hidden = true;
-    more.title = hidden.join(', ');
-    // Still too wide with one tag left: let that one ellipsize (CSS).
-    if (overflowing() && tags[0]) tags[0].classList.add('tag-squeeze');
-}
-
-let cardTagObserver = null;
-
-// Fit every card's tag row. Called on load and after each page swap.
-function observeCardTags() {
-    const boxes = document.querySelectorAll('.reading-list-card .card-tags');
-    if (cardTagObserver) cardTagObserver.disconnect();
-    if (!boxes.length) return;
-    if ('ResizeObserver' in window) {
-        // Fires on first layout and on window resize -- every case where
-        // the room changes.
-        cardTagObserver = new ResizeObserver(entries => entries.forEach(e => fitCardTags(e.target)));
-        boxes.forEach(b => cardTagObserver.observe(b));
-    } else {
-        boxes.forEach(fitCardTags);
-    }
-}
-
-document.addEventListener('DOMContentLoaded', observeCardTags);
 
 // ==========================================
 // Sort System
 // ==========================================
 
-// #rlSort is a single-choice filter_bar; the server sorts, so a new order
-// shows its page 1.
+// #rlSort is a select_field; the server sorts, so a new order shows its
+// page 1. #rlShow (a filter_bar) narrows like a tag does, selection included.
 function initSortButtons() {
-    const group = document.getElementById('rlSort');
-    if (!group || !window.CLU || !CLU.filterBar) return;
-    CLU.filterBar(group, {
-        onChange: () => { if (readingListPager) readingListPager.load({ resetPage: true }); },
-    });
+    const select = document.getElementById('rlSort');
+    if (select) {
+        select.addEventListener('change', () => {
+            if (readingListPager) readingListPager.load({ resetPage: true });
+        });
+    }
+    const show = document.getElementById('rlShow');
+    if (show && window.CLU && CLU.filterBar) CLU.filterBar(show, { onChange: () => applyTagFilters() });
 }
 
 document.addEventListener('DOMContentLoaded', initSortButtons);
@@ -286,6 +262,7 @@ function _paintWantToReadButton(button, marked) {
     const label = button.querySelector('.want-to-read-label');
     const title = marked ? 'Remove from Want to Read' : 'Add to Want to Read';
     button.classList.toggle('marked', marked);
+    button.setAttribute('aria-pressed', marked ? 'true' : 'false');
     if (icon) {
         icon.className = (marked ? 'bi bi-bookmark-fill' : 'bi bi-bookmark-plus')
             + (label ? ' me-1' : '');
@@ -885,15 +862,15 @@ function sendBulkDelete(payload) {
         });
 }
 
-// Intercept card clicks while in select mode so the inline onclick="window.location.href=..."
-// is suppressed and the click toggles the checkbox instead.
+// Intercept card clicks while in select mode so the card's link does not
+// open the list and the click toggles the checkbox instead.
 document.addEventListener('DOMContentLoaded', function () {
     const grid = document.querySelector('.reading-list-grid');
     if (!grid) return;
     grid.addEventListener('click', function (e) {
         if (!isSelectModeActive()) return;
-        // Ignore clicks on action buttons within the card; they have their own stopPropagation.
-        if (e.target.closest('.card-actions')) return;
+        // The card's menu and Want to Read keep working in select mode.
+        if (e.target.closest('.rl-menu, .rl-wtr')) return;
         // Clicks directly on the checkbox/input wrapper are handled by the input itself.
         if (e.target.closest('.card-select-checkbox')) return;
 
@@ -929,6 +906,23 @@ function cropCover(filePath) {
         });
 }
 
+function toggleHighlight(entryId, highlight) {
+    fetch(`/api/reading-lists/${LIST_ID}/highlight`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_id: entryId, highlight })
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                CLU.toast(data.message, 'error');
+            }
+        })
+        .catch(() => CLU.toast('An error occurred', 'error'));
+}
+
 function setAsThumbnail(filePath) {
     fetch(`/api/reading-lists/${LIST_ID}/thumbnail`, {
         method: 'POST',
@@ -953,14 +947,19 @@ function setAsThumbnail(filePath) {
 // Inline Title Editing
 // ==========================================
 
+// The card menu's Rename: edit the title link in place.
+function renameListCard(listId) {
+    const link = document.querySelector(`.rl-card[data-list-id="${listId}"] .rl-t a`);
+    if (link) editTitle(listId, link);
+}
+
 function editTitle(listId, element) {
     const currentName = element.textContent.trim();
     const input = document.createElement('input');
     input.type = 'text';
     input.value = currentName;
     input.className = 'form-control form-control-sm';
-    input.style.maxWidth = '200px';
-    input.style.display = 'inline-block';
+    input.setAttribute('aria-label', 'List name');
 
     // Prevent clicks on input from navigating to the card link
     input.addEventListener('click', (e) => e.stopPropagation());
@@ -1486,10 +1485,9 @@ function doRemoveEntry(entryId) {
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            // Remove the card from DOM
-            const card = document.querySelector(`.book-card[data-entry-id="${entryId}"]`);
-            if (card) card.remove();
+            // The in-library and missing counts move too, so reload.
             CLU.toast('Entry removed', 'success');
+            setTimeout(() => location.reload(), 600);
         } else {
             CLU.toast('Failed to remove entry: ' + data.message, 'error');
         }
@@ -1596,62 +1594,274 @@ function confirmAddIssue() {
 }
 
 // ==========================================
-// Drag & Drop Reordering (SortableJS)
+// A list's page: filters, grid/list view, reorder
 // ==========================================
+// Every entry is in the DOM (#rlItems, one .rl-it each, in reading order), so
+// the filters, the reading-order bar and Up next all work on the page as it
+// is, plus the read set from /api/issues-read-paths. Nothing is fetched.
 let sortableInstance = null;
 let reorderMode = false;
+let rlIssueFilter = '';
+const RL_VIEW_KEY = 'cluReadingListView';
 
+function rlItems() {
+    return Array.from(document.querySelectorAll('#rlItems > .rl-it'));
+}
+
+function rlItemPath(li) {
+    const cover = li.querySelector('.book-cover[data-file-path]');
+    return cover ? cover.dataset.filePath : null;
+}
+
+function rlIsRead(li) {
+    const path = rlItemPath(li);
+    return !!path && readIssuesSet.has(path);
+}
+
+// Hide what the Show filter and the search leave out. Reorder shows every
+// issue: moving one among a filtered few would be guesswork.
+function applyIssueFilters() {
+    const items = rlItems();
+    if (!items.length) return;
+    const box = document.getElementById('rlIssueSearch');
+    const q = !reorderMode && box ? box.value.trim().toLowerCase() : '';
+    const f = reorderMode ? '' : rlIssueFilter;
+    let shown = 0;
+    items.forEach(li => {
+        const own = !!rlItemPath(li);
+        const keep = (!f || (f === 'own' && own) || (f === 'miss' && !own)
+                      || (f === 'unread' && own && !rlIsRead(li)))
+            && (!q || `${li.dataset.series} #${li.dataset.issue}`.toLowerCase().includes(q));
+        li.hidden = !keep;
+        if (keep) shown++;
+    });
+    CLU.setCount(document.getElementById('rlIssueCount'),
+        { total: items.length, noun: 'issues', one: 'issue', shown });
+
+    const empty = document.getElementById('rlIssuesEmpty');
+    if (!empty) return;
+    if (shown) { empty.replaceChildren(); return; }
+    if (f === 'miss' && !q) {
+        empty.replaceChildren(CLU.emptyState({
+            icon: 'bi-check2-circle', title: 'Nothing is missing',
+            message: 'Every issue in this list is in your library.', compact: true
+        }));
+        return;
+    }
+    empty.replaceChildren(CLU.noMatches({
+        noun: 'issues', query: q, filtered: !!f, compact: true,
+        onClear: () => {
+            if (box) box.value = '';
+            const group = document.getElementById('rlIssueShow');
+            if (group) CLU.setFilterValue(group, '');
+            rlIssueFilter = '';
+            applyIssueFilters();
+        }
+    }));
+}
+
+function setIssueView(view) {
+    const list = document.getElementById('rlItems');
+    if (!list) return;
+    const asList = view === 'list';
+    list.classList.toggle('rl-rows', asList);
+    list.classList.toggle('rl-ig', !asList);
+    document.querySelectorAll('#rlViewToggle [data-view]').forEach(btn => {
+        const on = btn.dataset.view === view;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+}
+
+function storedIssueView() {
+    try { return localStorage.getItem(RL_VIEW_KEY) || 'grid'; } catch (e) { return 'grid'; }
+}
+
+// "No. 9" on every issue, and the reading-order bar, follow the order.
+function renumberItems() {
+    rlItems().forEach((li, i) => {
+        li.querySelectorAll('.rl-num, .rl-pos').forEach(el => { el.textContent = String(i + 1); });
+    });
+}
+
+// Everything that depends on what is read: the header's "N read", the bar's
+// filled cells, each issue's tick and status, the Unread count and Up next.
+function refreshReadState() {
+    const items = rlItems();
+    if (!items.length) return;
+    let read = 0;
+    let owned = 0;
+    let next = null;
+    items.forEach(li => {
+        const path = rlItemPath(li);
+        const isRead = rlIsRead(li);
+        if (path) owned++;
+        if (isRead) read++;
+        if (path && !isRead && !next) next = li;
+        const icon = li.querySelector('.read-icon');
+        if (icon) icon.hidden = !isRead;
+        const label = li.querySelector('.read-label');
+        if (label) label.hidden = !isRead;
+        const st = li.querySelector('.rl-st-text');
+        if (st) st.textContent = isRead ? 'Read' : (path ? 'In library' : 'Missing');
+    });
+
+    const run = document.getElementById('rlRun');
+    if (run) {
+        run.replaceChildren(...items.map(li => {
+            const cell = document.createElement('i');
+            cell.className = rlIsRead(li) ? 'r' : (rlItemPath(li) ? 'o' : 'm');
+            return cell;
+        }));
+    }
+
+    const stats = document.getElementById('rlStats');
+    if (stats) {
+        let stat = document.getElementById('rlReadStat');
+        if (!stat) {
+            stat = document.createElement('span');
+            stat.className = 'clu-stat';
+            stat.id = 'rlReadStat';
+            stats.appendChild(stat);
+        }
+        stat.hidden = read === 0;
+        stat.innerHTML = `<span class="clu-stat-value">${CLU.formatCount(read)}</span> read`;
+    }
+
+    const unread = document.querySelector('#rlIssueShow [data-value="unread"] .clu-filter-count');
+    if (unread) unread.textContent = CLU.formatCount(owned - read);
+
+    renderUpNext(next, items.length, owned);
+    applyIssueFilters();
+}
+
+// Up next: the first unread issue in the library, in reading order. Read
+// opens the existing reader, whose Continue overlay walks on through the list.
+function renderUpNext(next, total, owned) {
+    const box = document.getElementById('rlUpNext');
+    if (!box) return;
+    const page = document.getElementById('rlPage');
+    // For a Reader it is the page's one primary action; a Clerk's is Add Issue.
+    const primary = page && page.dataset.canManage !== '1';
+    if (!next) {
+        const title = !owned ? 'Nothing from this list is in your library yet'
+            : (owned === total ? 'You have read every issue' : 'Every issue in your library is read');
+        box.innerHTML = `<i class="bi bi-check2-circle" aria-hidden="true"></i><div><b></b>${owned && owned < total
+            ? '<span class="rl-sub">The rest are missing.</span>' : ''}</div>`;
+        box.querySelector('b').textContent = title;
+        return;
+    }
+    const cover = next.querySelector('.book-cover[data-file-path]');
+    const pos = rlItems().indexOf(next) + 1;
+    box.innerHTML = `<span class="rl-thumb" aria-hidden="true"></span>
+        <div><b></b><span class="rl-sub">No. ${pos} of ${total}</span></div>
+        <button type="button" class="btn btn-sm ${primary ? 'btn-primary' : 'btn-outline-secondary'}">
+            <i class="bi bi-book me-1" aria-hidden="true"></i>Read</button>`;
+    box.querySelector('.rl-thumb').style.backgroundImage = cover.style.backgroundImage;
+    box.querySelector('b').textContent = `Up next: ${next.dataset.series} #${next.dataset.issue}`;
+    box.querySelector('button').addEventListener('click', () => openReadingListComic(cover.dataset.filePath));
+}
+
+function saveOrder() {
+    const entryIds = rlItems().map(li => parseInt(li.dataset.entryId, 10));
+    renumberItems();
+    refreshReadState();
+    buildReadingListEntries();
+    return fetch(`/api/reading-lists/${LIST_ID}/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_ids: entryIds })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) CLU.toast('Failed to save order', 'error');
+        })
+        .catch(err => {
+            console.error('Error reordering:', err);
+            CLU.toast('Failed to save order', 'error');
+        });
+}
+
+// Reorder switches to the list view; Done (or Reorder again) leaves it and
+// puts the view the user had back.
 function toggleReorderMode() {
     reorderMode = !reorderMode;
-    const grid = document.querySelector('.reading-list-grid');
+    const list = document.getElementById('rlItems');
+    const bar = document.getElementById('rlReorderBar');
+    if (!list) return;
+    list.classList.toggle('reorder-mode', reorderMode);
+    if (bar) bar.hidden = !reorderMode;
+    setIssueView(reorderMode ? 'list' : storedIssueView());
+    document.querySelectorAll('#rlViewToggle .btn, #rlIssueShow .btn, #rlIssueSearch')
+        .forEach(el => { el.disabled = reorderMode; });
+    if (sortableInstance) sortableInstance.option('disabled', !reorderMode);
     const btn = document.getElementById('reorderToggleBtn');
+    if (btn) btn.innerHTML = `<i class="bi bi-arrows-move me-2" aria-hidden="true"></i>${reorderMode ? 'Stop reordering' : 'Reorder'}`;
+    applyIssueFilters();
+    if (reorderMode && bar) bar.querySelector('button').focus();
+}
 
-    if (reorderMode) {
-        grid.classList.add('reorder-mode');
-        btn.classList.remove('btn-outline-secondary');
-        btn.classList.add('btn-warning');
-        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Done';
-        if (sortableInstance) sortableInstance.option('disabled', false);
-    } else {
-        grid.classList.remove('reorder-mode');
-        btn.classList.remove('btn-warning');
-        btn.classList.add('btn-outline-secondary');
-        btn.innerHTML = '<i class="bi bi-arrows-move me-1"></i>Reorder';
-        if (sortableInstance) sortableInstance.option('disabled', true);
-    }
+// Move up / Move down: the keyboard's way to reorder.
+function moveItem(li, step) {
+    const items = rlItems();
+    const i = items.indexOf(li);
+    const j = i + step;
+    if (j < 0 || j >= items.length) return;
+    if (step < 0) items[j].before(li); else items[j].after(li);
+    items.forEach(x => x.classList.remove('moved'));
+    li.classList.add('moved');
+    li.querySelector(`[data-move="${step}"]`)?.focus();
+    saveOrder();
+    CLU.toast(`${li.dataset.series} #${li.dataset.issue} is now ${j + 1} of ${items.length}`, 'info');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    const grid = document.querySelector('.reading-list-grid');
-    if (grid && typeof Sortable !== 'undefined') {
-        sortableInstance = Sortable.create(grid, {
+    const list = document.getElementById('rlItems');
+    if (!list) return;
+
+    setIssueView(storedIssueView());
+    document.querySelectorAll('#rlViewToggle [data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            try { localStorage.setItem(RL_VIEW_KEY, btn.dataset.view); } catch (e) { /* private mode */ }
+            setIssueView(btn.dataset.view);
+        });
+    });
+    const group = document.getElementById('rlIssueShow');
+    if (group && CLU.filterBar) {
+        CLU.filterBar(group, { onChange: value => { rlIssueFilter = value || ''; applyIssueFilters(); } });
+    }
+    const search = document.getElementById('rlIssueSearch');
+    if (search && CLU.bindSearch) CLU.bindSearch(search, applyIssueFilters, { delay: 0 });
+
+    list.addEventListener('click', e => {
+        const mv = e.target.closest('[data-move]');
+        if (mv) moveItem(mv.closest('.rl-it'), parseInt(mv.dataset.move, 10));
+    });
+
+    // The description: two lines, then More if it runs longer.
+    const desc = document.getElementById('rlDesc');
+    const more = document.getElementById('rlDescMore');
+    if (desc && more) {
+        more.hidden = desc.scrollHeight <= desc.clientHeight + 1;
+        more.addEventListener('click', () => {
+            const open = desc.classList.toggle('open');
+            more.textContent = open ? 'Less' : 'More';
+            more.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+    }
+
+    if (typeof Sortable !== 'undefined') {
+        sortableInstance = Sortable.create(list, {
             disabled: true,
             animation: 150,
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
-            filter: '.dropdown-menu, .dropdown-toggle, .btn',
+            filter: '.dropdown-menu, .btn',
             preventOnFilter: false,
-            onEnd: function() {
-                const cards = grid.querySelectorAll('.book-card');
-                const entryIds = Array.from(cards).map(c => parseInt(c.dataset.entryId));
-                fetch(`/api/reading-lists/${LIST_ID}/reorder`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ entry_ids: entryIds })
-                })
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.success) {
-                        CLU.toast('Failed to save order', 'error');
-                    }
-                })
-                .catch(err => {
-                    console.error('Error reordering:', err);
-                    CLU.toast('Failed to save order', 'error');
-                });
-            }
+            onEnd: saveOrder
         });
     }
+    refreshReadState();
 });
 
 // ==========================================
@@ -1693,49 +1903,24 @@ function openReadingListComic(filePath) {
     window.openComicReader(filePath);
 }
 
-
 function updateReadIcon(comicPath, isRead) {
-    // Find the book cover with this path and update its read icon
-    const covers = document.querySelectorAll('.book-cover[data-file-path]');
-    covers.forEach(cover => {
-        if (cover.dataset.filePath === comicPath) {
-            const readIcon = cover.querySelector('.read-icon');
-            if (readIcon) {
-                if (isRead) {
-                    readIcon.classList.remove('bi-book');
-                    readIcon.classList.add('bi-book-fill');
-                } else {
-                    readIcon.classList.remove('bi-book-fill');
-                    readIcon.classList.add('bi-book');
-                }
-            }
-        }
-    });
+    if (isRead) readIssuesSet.add(comicPath); else readIssuesSet.delete(comicPath);
+    refreshReadState();
 }
 
 function buildReadingListEntries() {
-    readingListEntries = [];
-    const bookCards = document.querySelectorAll('.book-card');
-
-    bookCards.forEach(card => {
-        const cover = card.querySelector('.book-cover[data-file-path]');
-        if (cover) {
-            const filePath = cover.dataset.filePath;
-            const series = card.dataset.series || '';
-            const issue = card.dataset.issue || '';
-            const thumbnailUrl = cover.style.backgroundImage.replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
-
-            readingListEntries.push({
-                path: filePath,
-                series: series,
-                issue: issue,
-                thumbnail: thumbnailUrl,
-                name: `${series} #${issue}`
-            });
-        }
+    readingListEntries = rlItems().filter(li => rlItemPath(li)).map(li => {
+        const cover = li.querySelector('.book-cover[data-file-path]');
+        const series = li.dataset.series || '';
+        const issue = li.dataset.issue || '';
+        return {
+            path: cover.dataset.filePath,
+            series: series,
+            issue: issue,
+            thumbnail: cover.style.backgroundImage.replace(/url\(['"]?([^'"]+)['"]?\)/, '$1'),
+            name: `${series} #${issue}`
+        };
     });
-
-    console.log(`Built reading list entries: ${readingListEntries.length} matched issues`);
 }
 
 function loadReadIssues() {
@@ -1746,20 +1931,8 @@ function loadReadIssues() {
             // Republish: this rebinds the variable, so any reference handed to
             // reader.js earlier would be stale.
             window._readerReadIssuesSet = readIssuesSet;
-            console.log(`Loaded ${readIssuesSet.size} read issues`);
-
-            // Update icons for already-read issues
-            const covers = document.querySelectorAll('.book-cover[data-file-path]');
-            covers.forEach(cover => {
-                const filePath = cover.dataset.filePath;
-                if (readIssuesSet.has(filePath)) {
-                    const readIcon = cover.querySelector('.read-icon');
-                    if (readIcon) {
-                        readIcon.classList.remove('bi-book');
-                        readIcon.classList.add('bi-book-fill');
-                    }
-                }
-            });
+            // Back-fill the ticks, the bar and Up next for what is read.
+            refreshReadState();
         })
         .catch(err => console.warn('Failed to load read issues:', err));
 }
@@ -1768,6 +1941,7 @@ function loadReadIssues() {
 // Set up event listeners when DOM is ready
 // ==========================================
 document.addEventListener('DOMContentLoaded', function () {
+    if (!document.getElementById('rlItems')) return;
     // Build the reading list entries from DOM
     buildReadingListEntries();
 
@@ -1777,7 +1951,6 @@ document.addEventListener('DOMContentLoaded', function () {
     // Let the shared reader update this page's read badges when it marks an
     // issue read (part of the reader.js host contract).
     window._readerOnMarkedRead = function (path) {
-        readIssuesSet.add(path);
         updateReadIcon(path, true);
     };
 
@@ -2874,11 +3047,9 @@ function pollRematchStatus(taskId, onDone) {
 // ComicVine arc costs one request per issue. So there are two shapes to handle.
 // Opt a reading list into the Wanted page and the nightly source sweep.
 // Server-rendered initial state, so there is no seeding fetch on load.
-function toggleTrackWanted(listId, btn) {
-    const enable = btn.dataset.tracking !== '1';
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
+function toggleTrackWanted(listId, input) {
+    const enable = input.checked;
+    input.disabled = true;
 
     fetch(`/api/reading-lists/${listId}/track-wanted`, {
         method: 'POST',
@@ -2887,22 +3058,32 @@ function toggleTrackWanted(listId, btn) {
     })
         .then(r => r.json())
         .then(data => {
-            btn.disabled = false;
+            input.disabled = false;
             if (!data.success) {
-                btn.innerHTML = originalHtml;
+                input.checked = !enable;
                 CLU.toast(data.message || 'Could not update this list', 'error');
                 return;
             }
-            btn.dataset.tracking = data.enabled ? '1' : '0';
-            btn.classList.toggle('btn-primary', data.enabled);
-            btn.classList.toggle('btn-outline-primary', !data.enabled);
-            btn.innerHTML = '<i class="bi bi-binoculars me-1"></i><span class="track-wanted-label">'
-                + (data.enabled ? 'Tracking Wanted' : 'Track Wanted') + '</span>';
+            input.checked = !!data.enabled;
+            const page = document.getElementById('rlPage');
+            if (page) page.dataset.tracking = data.enabled ? '1' : '0';
+            const note = document.getElementById('rlTrackNote');
+            if (note) {
+                if (data.enabled) {
+                    note.textContent = 'On your ';
+                    const link = document.createElement('a');
+                    link.href = input.dataset.wantedUrl;
+                    link.textContent = 'Wanted list';
+                    note.append(link, ' and searched for every night.');
+                } else {
+                    note.textContent = 'Track Wanted lists them on Wanted and searches for them every night.';
+                }
+            }
             CLU.toast(data.message, 'success');
         })
         .catch(err => {
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
+            input.disabled = false;
+            input.checked = !enable;
             CLU.toast('Error: ' + err.message, 'error');
         });
 }

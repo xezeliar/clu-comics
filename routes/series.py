@@ -339,6 +339,7 @@ def wanted():
     Fast load from database cache, refresh via API endpoint.
     """
     from core.database import get_cached_wanted_issues, get_wanted_cache_age
+    from core.wanted_state import get_ignored_issues, issue_states
     from core.wanted_reading_lists import (
         get_reading_list_wanted_items,
         dedupe_key,
@@ -376,6 +377,7 @@ def wanted():
             total_wanted=len(reading_list_wanted),
             total_upcoming=0,
             total_missing=0,
+            ignored=[],
             loading=True,
             refreshing=True,
             cache_age=None,
@@ -388,6 +390,7 @@ def wanted():
 
     wanted_issues = []
     series_stats_dict = {}
+    states = issue_states()
 
     for item in cached:
         issue_data = {
@@ -412,6 +415,8 @@ def wanted():
                 "series_id": item["series_id"],
                 "series_name": item["series_name"],
                 "series_volume": item["series_volume"],
+                "state": states.get((item["series_id"], str(item["issue_number"])))
+                or {"code": "not_searched", "label": "Not searched yet"},
             }
         )
 
@@ -469,6 +474,7 @@ def wanted():
         missing=missing,
         series_stats=series_stats,
         reading_list_wanted=reading_list_wanted,
+        ignored=get_ignored_issues(),
         total_wanted=len(wanted_issues) + len(reading_list_wanted),
         total_upcoming=len(upcoming),
         total_missing=len(missing),
@@ -483,7 +489,7 @@ PULL_LIST_PAGE_SIZES = PAGE_SIZES
 PULL_LIST_DEFAULT_PER_PAGE = DEFAULT_PER_PAGE
 # The size last picked in the select; used when the URL does not say.
 PULL_LIST_PER_PAGE_COOKIE = "clu_per_page_pull_list"
-_PULL_LIST_SORT_KEYS = ("name", "year", "status", "publisher", "issues", "collection", "synced")
+_PULL_LIST_SORT_KEYS = ("name", "year", "status", "publisher", "issues", "collection", "synced", "next")
 # Columns a user may hide, in table order, with their header labels. Series,
 # Issues and Actions always show. Stored per user (user_settings), so one
 # Clerk's layout is not everyone's.
@@ -492,6 +498,7 @@ PULL_LIST_OPTIONAL_COLUMNS = (
     ("status", "Status"),
     ("publisher", "Publisher"),
     ("collection", "Collection"),
+    ("next", "Next issue"),
     ("synced", "Last Synced"),
 )
 PULL_LIST_HIDDEN_COLUMNS_KEY = "pull_list_hidden_columns"
@@ -512,8 +519,10 @@ def _sanitize_hidden_columns(value):
 
 def _pull_list_hidden_columns():
     from core.database import get_user_setting
-    return _sanitize_hidden_columns(
-        get_user_setting(PULL_LIST_HIDDEN_COLUMNS_KEY, default=[]))
+    # Never saved: Last Synced starts hidden (Next issue took its place). Saving
+    # an empty list means "show everything", so None is checked, not falsiness.
+    saved = get_user_setting(PULL_LIST_HIDDEN_COLUMNS_KEY, default=None)
+    return ["synced"] if saved is None else _sanitize_hidden_columns(saved)
 
 
 def _pull_list_args():
@@ -544,6 +553,7 @@ def _pull_list_args():
         "publisher_id": publisher_id,
         "letter": (args.get("letter") or "").strip().upper(),
         "status": status,
+        "attention": args.get("attention") == "1",
         "sort": sort,
         "descending": bool(sort) and args.get("dir") == "desc",
         "page": page,
@@ -551,8 +561,53 @@ def _pull_list_args():
     }
 
 
+def _pull_list_suggestions(a, today, result):
+    """Up to three Pull List series nearest to a search that matched nothing.
+
+    Searches the whole list, ignoring the other filters, so a filter that was
+    hiding the answer does not hide the suggestion. Empty when the page is not
+    empty, there is no query, or nothing is close enough.
+    """
+    if result.get("rows") or result.get("error") or not a["q"]:
+        return []
+    import difflib
+    from core.database import get_pull_list_page
+
+    q = a["q"].lower()
+    everything = get_pull_list_page(today, per_page=5000)["rows"]
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, q, r["name"].lower()).ratio(), r) for r in everything),
+        key=lambda t: -t[0],
+    )
+    return [r for score, r in scored[:3] if score >= 0.6]
+
+
 def _pull_list_filters(a):
-    return {k: a[k] for k in ("q", "publisher_id", "letter", "status")}
+    return {k: a[k] for k in ("q", "publisher_id", "letter", "status", "attention")}
+
+
+def _week_state(item):
+    """The This week strip's state line, in the Downloads page's words."""
+    if item["found"]:
+        return "Arrived", "ok"
+    status = item["download_status"]
+    if status in ("failed", "interrupted"):
+        return "Failed", "bad"
+    if status in ("queued", "retrying"):
+        from api import download_progress
+        pct = (download_progress.get(item["download_id"]) or {}).get("progress") or 0
+        return (f"Downloading {pct}%", "") if 0 < pct < 100 else ("Waiting in Downloads", "")
+    if item["search_outcome"] == "nothing_found":
+        return "Not found", "bad"
+    return "Not searched yet", ""
+
+
+def _this_week_items(rows):
+    out = []
+    for r in rows:
+        state, tone = _week_state(r)
+        out.append(dict(r, state=state, state_tone=tone))
+    return out
 
 
 @series_bp.route("/pull-list")
@@ -564,10 +619,12 @@ def pull_list():
     (core.database.get_pull_list_page); later changes fetch
     /api/pull-list/rows, rendered from the same row partial.
     """
-    from core.database import get_pull_list_facets, get_pull_list_page
+    from core.database import (
+        get_pull_list_facets, get_pull_list_page, get_pull_list_this_week)
 
     a = _pull_list_args()
-    facets = get_pull_list_facets()
+    today = datetime.now().strftime("%Y-%m-%d")
+    facets = get_pull_list_facets(today)
     # A letter or publisher the bar no longer offers (a bookmark from before
     # the last such series was unmapped) would filter on something the page
     # shows as "All".
@@ -575,16 +632,20 @@ def pull_list():
         a["letter"] = ""
     if a["publisher_id"] not in {p["id"] for p in facets["publishers"]}:
         a["publisher_id"] = None
-    today = datetime.now().strftime("%Y-%m-%d")
     result = get_pull_list_page(today, **a)
 
     return render_template(
         "pull_list.html",
         series_list=result["rows"],
+        this_week=_this_week_items(get_pull_list_this_week(today)),
+        attention_count=facets["attention"],
+        today=today,
+        suggestions=_pull_list_suggestions(a, today, result),
         pager=result,
         total_series=facets["total"],
         publishers=facets["publishers"],
         letters=facets["letters"],
+        new_arrivals=facets["new_arrivals"],
         filters=a,
         hidden_columns=_pull_list_hidden_columns(),
         optional_columns=PULL_LIST_OPTIONAL_COLUMNS,
@@ -607,7 +668,9 @@ def pull_list_rows():
     html = render_template(
         "partials/pull_list_rows.html",
         series_list=result["rows"],
+        suggestions=_pull_list_suggestions(a, today, result),
         filters=a,
+        today=today,
     )
     return jsonify({
         "success": True,
@@ -971,6 +1034,63 @@ def issue_view(slug):
         return redirect(url_for(".releases"))
 
 
+@series_bp.route("/api/series/for-folder")
+def series_for_folder():
+    """Find the series page for a library folder.
+
+    The Library asks this for a folder that is not mapped to a series yet.
+    ``check=1`` only answers whether it holds a ``series.json`` or ``cvinfo``
+    (asked when the folder's menu opens: sidecars are not indexed, and a
+    listing must not touch the disk for every folder). Otherwise the answer is
+    ``url`` or ``error``. The sidecar cascade is the one Scan Library uses;
+    nothing is mapped or subscribed by asking.
+    """
+    import os
+    from core.auth import enforce_path_access
+    from core.database import get_series_slugs_for_folders
+    from helpers.library import is_valid_library_path
+    from helpers.series_slug import generate_series_slug
+    from helpers.comicvine_ids import is_comicvine_series_id
+    from models import comicvine_source, library_automap
+
+    path = (request.args.get("path") or "").strip()
+    if not path or not is_valid_library_path(path) or not os.path.isdir(path):
+        return jsonify({"success": False, "error": "Folder not found in your library"}), 404
+    denied = enforce_path_access(path, mode="browse")
+    if denied:
+        return denied
+
+    if request.args.get("check"):
+        has = any(os.path.isfile(os.path.join(path, n)) for n in ("series.json", "cvinfo"))
+        return jsonify({"success": True, "has_sidecar": has})
+
+    slug = get_series_slugs_for_folders([path]).get(path)
+    if slug:
+        return jsonify({"success": True, "url": url_for(".series_view", slug=slug)})
+
+    try:
+        ident = library_automap._resolve_identity(
+            path, metron.get_flask_api(),
+            cv_available=comicvine_source.is_available(),
+        )
+    except Exception as e:
+        app_logger.warning(f"series_for_folder: could not read sidecar in {path}: {e}")
+        ident = None
+    if not ident or not ident.get("metron_id"):
+        reason = (ident or {}).get("reason") or "No series.json or cvinfo in this folder"
+        return jsonify({"success": False, "error": reason})
+
+    series_id = ident["metron_id"]
+    # series_view can only fetch from Metron; a ComicVine-only series needs the
+    # local copy that Add to Pull List creates.
+    if is_comicvine_series_id(series_id) and not get_series_by_id(series_id):
+        return jsonify({"success": False, "error": (
+            "This series is on ComicVine only. Add the folder to the Pull List "
+            "to open its series page.")})
+    slug = generate_series_slug(ident.get("series_name") or "series", series_id, None)
+    return jsonify({"success": True, "url": url_for(".series_view", slug=slug)})
+
+
 @series_bp.route("/series/<slug>")
 def series_view(slug):
     """
@@ -1184,6 +1304,28 @@ def series_view(slug):
         from core.gaps import missing_ranges
         missing_line = missing_ranges(missing_nums)
 
+        # Header: banner art, owned-of-run, read count and credits. Ownership
+        # needs a readable mapped folder for the same reason as missing_nums.
+        from core.series_header import banner_url, run_summary
+
+        header_banner = banner_url(mapped_path)
+        header_focus = (cached_series or {}).get("header_focus")
+        run = None
+        series_credits = None
+        if mapped_path and os.path.isdir(mapped_path):
+            released = [
+                str(get_attr(i, "number")) for i in all_issues
+                if not ((sd := get_attr(i, "store_date")) and str(sd) > today_str)
+            ]
+            found = {n for n in released if issue_status.get(n, {}).get("found")}
+            run = run_summary(released, found, set(missing_nums))
+            from core.database import get_folder_read_progress
+            run["read"] = get_folder_read_progress([mapped_path])[mapped_path]["read"]
+            from core.auth import accessible_folder_prefixes, current_user
+            from core.creators import series_credits as _series_credits
+            series_credits = _series_credits(
+                mapped_path, prefixes=accessible_folder_prefixes(current_user()))
+
         # Convert series_info to dict for JSON serialization
         series_dict = None
         if series_info:
@@ -1274,6 +1416,12 @@ def series_view(slug):
                 os.path.join(mapped_path, SERIES_JSON_FILENAME)
             )
 
+        # Opening the series page clears this user's "new" sticker; the
+        # issues that arrived since their last visit stay available to the
+        # page (for the header's run strip).
+        from core.database import mark_series_visited
+        arrived_paths = mark_series_visited(mapped_path) if mapped_path else []
+
         from core.series_status import year_ended_label
 
         return render_template(
@@ -1296,6 +1444,11 @@ def series_view(slug):
             has_series_json=has_series_json,
             char_map=load_char_map(),
             missing_line=missing_line,
+            header_banner=header_banner,
+            header_focus=header_focus,
+            run=run,
+            series_credits=series_credits,
+            arrived_paths=arrived_paths,
         )
     except Exception as e:
         if metron.is_connection_error(e):
@@ -1661,6 +1814,38 @@ def bulk_unsubscribe_series():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@series_bp.route("/api/series/<int:series_id>/unsubscribe", methods=["POST"])
+def unsubscribe_one_series(series_id):
+    """Unsubscribe one series (Pull List row menu / swipe).
+
+    Returns the folder it was mapped to, which is everything unsubscribing
+    clears, so the Undo toast can hand it to restore-subscription.
+    """
+    from core.database import unsubscribe_series_returning_path
+
+    path = unsubscribe_series_returning_path(series_id)
+    if not path:
+        return jsonify({"success": False, "error": "Series is not subscribed"}), 404
+    return jsonify({"success": True, "mapped_path": path})
+
+
+@series_bp.route("/api/series/<int:series_id>/restore-subscription", methods=["POST"])
+def restore_series_subscription(series_id):
+    """Undo an unsubscribe: map the series back to its folder.
+
+    The folder comes from the client, so it must sit inside a library.
+    """
+    from core.database import restore_series_mapping
+    from helpers.library import is_valid_library_path
+
+    path = ((request.get_json(silent=True) or {}).get("path") or "").strip()
+    if not path or not is_valid_library_path(path):
+        return jsonify({"success": False, "error": "Folder is not inside a library"}), 400
+    if not restore_series_mapping(series_id, path):
+        return jsonify({"success": False, "error": "Series is already subscribed or was not found"}), 409
+    return jsonify({"success": True})
+
+
 @series_bp.route("/api/series/<int:series_id>/check-collection", methods=["GET"])
 def check_series_collection(series_id):
     """
@@ -1845,6 +2030,27 @@ def get_series_manual_status(series_id):
     return jsonify({"success": True, "manual_status": manual_status})
 
 
+@series_bp.route("/api/series/<int:series_id>/header", methods=["POST"])
+def set_series_header(series_id):
+    """Pick the slice of the cover the series header banner shows.
+
+    ``focus`` is the vertical position, 0 (top) to 100 (bottom); null goes
+    back to the blurred cover. Header art (header.* folder art) still wins.
+    """
+    from core.database import set_series_header_focus
+
+    data = request.get_json(silent=True) or {}
+    focus = data.get("focus")
+    if focus is not None:
+        if isinstance(focus, bool) or not isinstance(focus, (int, float)) \
+                or not 0 <= focus <= 100:
+            return jsonify({"error": "focus must be a number from 0 to 100, or null"}), 400
+        focus = round(float(focus), 1)
+    if not set_series_header_focus(series_id, focus):
+        return jsonify({"error": "Series not found"}), 404
+    return jsonify({"success": True, "focus": focus})
+
+
 @series_bp.route(
     "/api/series/<int:series_id>/issue/<issue_number>/manual-status", methods=["POST"]
 )
@@ -1901,6 +2107,30 @@ def set_bulk_manual_status(series_id):
         return jsonify({"success": True, "count": count, "status": status})
     else:
         return jsonify({"error": "Failed to set bulk manual status"}), 500
+
+
+@series_bp.route("/api/wanted/ignore", methods=["POST", "DELETE"])
+def wanted_ignore():
+    """Ignore wanted issues (POST) or bring them back (DELETE).
+
+    ``{"issues": [{"series_id", "issue_number"}]}``. Ignore is the skipped
+    manual status, so the issues also leave the wanted cache at once; bringing
+    them back recomputes their series' wanted rows.
+    """
+    from core.wanted_state import ignore_issues, parse_issues, unignore_issues
+
+    issues = parse_issues(request.get_json(silent=True))
+    if not issues:
+        return jsonify({"success": False, "error": "No issues given"}), 400
+    try:
+        if request.method == "POST":
+            count = ignore_issues(issues)
+        else:
+            count = unignore_issues(issues)
+    except Exception as e:
+        app_logger.error(f"Wanted ignore failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, "count": count})
 
 
 @series_bp.route("/api/series/<int:series_id>/bulk-manual-status", methods=["DELETE"])

@@ -1,6 +1,6 @@
 <!-- templates/base.html -->
 <!DOCTYPE html>
-<html lang="en"{% if theme_is_dark %} data-bs-theme="dark"{% endif %}>
+<html lang="en"{% if theme_is_dark %} data-bs-theme="dark"{% endif %}{% if clu_motion in ('reduce', 'full') %} data-clu-motion="{{ clu_motion }}"{% endif %}>
 
 <head>
   <meta charset="UTF-8">
@@ -18,6 +18,8 @@
 
   <title>{% block title %}Comic Library Utilities{% endblock %}</title>
   {% include 'partials/theme_css.html' %}
+  {# In <head> so its pagereveal listener is up before the first render. #}
+  <script src="{{ url_for('static', filename='js/clu-motion.js') }}"></script>
   <style>
     .list-group-item {
       display: flex;
@@ -154,6 +156,7 @@
   <script src="{{ url_for('static', filename='js/clu-toast.js') }}"></script>
   <script src="{{ url_for('static', filename='js/clu-pull-refresh.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/clu-page.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/clu-gestures.js') }}" defer></script>
 
   <!-- Environment-based console logging -->
   <script>

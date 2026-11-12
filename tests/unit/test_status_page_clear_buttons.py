@@ -25,30 +25,21 @@ def status_source():
 
 
 class TestClearButtonsCoverClientStores:
-    def test_both_buttons_go_through_one_helper(self, status_source):
-        assert "function clearDownloads(" in status_source
-        assert "clearDownloads('/clear_downloads', 'completed'" in status_source
-        assert "clearDownloads('/clear_failed_downloads', 'failed'" in status_source
-
-    def test_helper_also_clears_the_managed_clients(self, status_source):
-        assert "/api/download-clients/downloads/clear" in status_source
-
-    def test_bucket_is_sent_as_json(self, status_source):
-        # The route rejects an unknown bucket with a 400, so the two names
-        # here are a contract with core.download_utils.CLIENT_CLEAR_BUCKETS.
-        assert "JSON.stringify({ bucket })" in status_source
+    def test_clear_calls_both_stores(self, status_source):
+        clear = status_source[status_source.index("      clear: () =>"):]
+        clear = clear[:clear.index("}),")]
+        assert "dlCall(DL.clear)" in clear
+        assert "dlCall(DL.clientClear, 'POST', { bucket: 'finished' })" in clear
+        assert "url_for('download_clients.clear_client_downloads')" in status_source
 
     def test_one_store_failing_does_not_hide_the_other(self, status_source):
-        # Promise.all over two already-caught promises: an all-or-nothing
-        # chain would report a total failure while rows had in fact gone.
-        assert "Promise.all([direct, clients])" in status_source
+        # Each call is already caught, so Promise.all reports both outcomes.
         assert "Some downloads could not be cleared" in status_source
 
-    def test_confirmation_names_the_import_pending_case(self, status_source):
-        # Clearing one of these drops CLU's only record that the file finished
-        # at the client but never reached WATCH, so the modal says so.
-        assert 'Complete (import pending)' in status_source
-        assert 'marked "Complete (import pending)". Continue?' in status_source
+    def test_import_pending_waits_under_needs_attention(self, status_source):
+        # Clear ('finished') leaves it alone; Dismiss is the way out.
+        assert "job.status === 'complete_no_move'" in status_source
+        assert "g: 'attn', err: 'Downloaded, but CLU could not move it" in status_source
 
 
 class TestBucketNamesMatchTheServer:
@@ -59,9 +50,10 @@ class TestBucketNamesMatchTheServer:
             CLIENT_FAILED_STATUSES,
         )
 
-        assert set(CLIENT_CLEAR_BUCKETS) == {"completed", "failed"}
+        assert set(CLIENT_CLEAR_BUCKETS) == {"completed", "failed", "finished"}
         assert CLIENT_CLEAR_BUCKETS["completed"] is CLIENT_COMPLETED_STATUSES
         assert CLIENT_CLEAR_BUCKETS["failed"] is CLIENT_FAILED_STATUSES
+        assert CLIENT_CLEAR_BUCKETS["finished"] == {"complete"}
 
     def test_import_pending_clears_as_completed_not_failed(self):
         from core.download_utils import (
@@ -73,3 +65,11 @@ class TestBucketNamesMatchTheServer:
         assert "complete_no_move" in CLIENT_COMPLETED_STATUSES
         assert "complete_no_move" not in CLIENT_FAILED_STATUSES
         assert CLIENT_COMPLETED_STATUSES.isdisjoint(CLIENT_FAILED_STATUSES)
+
+
+def test_cancel_asks_first_in_a_modal():
+    """Cancel deletes a running download's partial file and has no Undo."""
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[2].joinpath("templates", "status.html").read_text()
+    assert 'id="dlCancelModal"' in src
+    assert "cancel: row => confirmCancel(row)" in src

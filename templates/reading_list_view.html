@@ -1,184 +1,31 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
+{% from 'partials/filters.html' import toolbar, filter_bar, search_input, result_count %}
+{% from 'partials/empty_state.html' import empty_state %}
 {% block title %}{{ reading_list.name }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/collection.css') }}?v={{ range(1, 10000) | random }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}?v={{ range(1, 10000) | random }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reading_lists.css') }}?v={{ range(1, 10000) | random }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
-<style>
-    /* Bookmarked state for the header's Want to Read toggle — the outline
-       button fills in, matching how .want-to-read-button.marked reads on the
-       Reading Lists grid. */
-    .want-to-read-toggle.marked {
-        background-color: var(--bs-warning);
-        border-color: var(--bs-warning);
-        color: #212529;
-    }
-
-    .reading-list-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 1.5rem;
-    }
-
-    .book-card {
-        cursor: pointer;
-        transition: transform 0.2s;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .book-card:hover {
-        transform: translateY(-5px);
-    }
-
-    .book-cover {
-        aspect-ratio: 2/3;
-        background-color: #f8f9fa;
-        background-size: cover;
-        background-position: center;
-        border-radius: 4px;
-        position: relative;
-        overflow: hidden;
-        border: 1px solid #dee2e6;
-    }
-
-    .book-cover.unmatched {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: #e9ecef;
-        color: #adb5bd;
-    }
-
-    .match-status {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-    }
-
-    .status-matched {
-        background-color: #28a745;
-    }
-
-    .status-unmatched {
-        background-color: #dc3545;
-    }
-
-    .book-info {
-        margin-top: 0.5rem;
-        font-size: 0.9rem;
-    }
-
-    .book-title {
-        font-weight: 600;
-        line-height: 1.2;
-        margin-bottom: 0.2rem;
-    }
-
-    .book-meta {
-        color: #6c757d;
-        font-size: 0.8rem;
-    }
-
-    /* Search Modal Styles */
-    .search-result-item {
-        cursor: pointer;
-        padding: 10px;
-        border-bottom: 1px solid #eee;
-    }
-
-    .search-result-item:hover {
-        background-color: #f8f9fa;
-    }
-
-    .search-result-item.selected {
-        background-color: #e9ecef;
-        border-left: 3px solid #0d6efd;
-    }
-
-    /* Issue Badge Styles */
-    .issue-badge {
-        position: absolute;
-        bottom: 8px;
-        right: 8px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        /* Dark ink for the gold sticker: white on it is about 1.6:1. This
-           block loads after collection.css, so it must not reset to white. */
-        color: #212529;
-        font-size: 0.7rem;
-        font-weight: bold;
-        z-index: 10;
-        border: 1px solid black;
-        display: inline-block;
-        line-height: 1.2;
-        height: 20px;
-        width: auto;
-    }
-
-    .issue-badge-matched {
-        background: rgb(253 200 63 / 85%);
-    }
-
-    .issue-badge-unmatched {
-        background: rgba(220, 53, 69, 0.85);
-        /* The base sticker ink is dark (for the gold); keep white on red. */
-        color: #fff;
-    }
-
-    .book-details {
-        min-width: 0;
-    }
-
-    /* Fix dropdown z-index issue */
-    .book-card {
-        position: relative;
-        z-index: 1;
-    }
-
-    .book-card:has(.dropdown-menu.show) {
-        z-index: 1000;
-    }
-
-    .book-card .dropdown-menu {
-        z-index: 1050;
-    }
-
-    .sortable-ghost {
-        opacity: 0.4;
-    }
-
-    .sortable-chosen {
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-    }
-
-    .reading-list-grid.reorder-mode .book-card {
-        cursor: grab;
-    }
-
-    .reading-list-grid.reorder-mode .book-card:active {
-        cursor: grabbing;
-    }
-
-    .reading-list-grid.reorder-mode .book-cover {
-        pointer-events: none;
-    }
-</style>
 {% endblock %}
 
 {% block content %}
-{# Role gating: add/export/sync/reorder/map/delete are Clerk/Owner features. Readers
-   get a view-only detail page and can still open/read matched issues. In
-   implicit-owner mode current_user is the owner, so everything shows as before. #}
+{# Role gating: add/sync/reorder/map/delete are Clerk/Owner features. Readers
+   get a view-only page: they can read, bookmark (Want to Read) and export.
+   In implicit-owner mode current_user is the owner, so everything shows. #}
 {% set _can_manage = (g.current_user.role if g.get('current_user') else 'owner') in ['clerk', 'owner'] %}
-<div>
+{%- set _entries = reading_list.entries -%}
+{%- set _total = _entries|length -%}
+{%- set _owned = _entries|selectattr('matched_file_path')|list|length
+               + _entries|rejectattr('matched_file_path')|selectattr('manual_override_path')|list|length -%}
+{%- set _missing = _total - _owned -%}
+<div id="rlPage" data-can-manage="{{ 1 if _can_manage else 0 }}"
+    data-tracking="{{ 1 if reading_list.track_wanted else 0 }}">
     {% call(slot) page_header(reading_list.name, 'bi-journal-bookmark', title_id='reading-list-title',
-                              stats=[{'value': reading_list.entries|length, 'label': 'issues'}]) %}
+                              stats_id='rlStats',
+                              stats=[{'value': _total, 'label': 'issues', 'keep_zero': True},
+                                     {'value': _owned, 'label': 'in library', 'keep_zero': True}]) %}
         {% if slot == 'crumbs' %}
             <li class="breadcrumb-item"><a href="{{ url_for('reading_lists.index') }}">Reading Lists</a></li>
             <li class="breadcrumb-item active" aria-current="page">{{ reading_list.name }}</li>
@@ -188,42 +35,25 @@
                 <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add Issue
             </button>
             {% endif %}
-            {# Outside the _can_manage gate on purpose — bookmarking is personal
+            {# Outside the _can_manage gate on purpose: bookmarking is personal
                data, so Readers get it too. #}
             <button type="button" class="btn btn-outline-secondary btn-sm want-to-read-toggle"
-                data-list-id="{{ reading_list.id }}"
+                data-list-id="{{ reading_list.id }}" aria-pressed="false"
                 onclick='toggleReadingListWantToRead({{ reading_list.id }}, {{ reading_list.name|tojson }}, this)'
                 title="Add to Want to Read" aria-label="Add to Want to Read">
                 <i class="bi bi-bookmark-plus me-1" aria-hidden="true"></i><span class="want-to-read-label">Want to Read</span>
             </button>
-            {% if _can_manage %}
-            {# Opt this list into the Wanted page and the nightly source sweep.
-               Unlike Want to Read above -- personal data every role may set --
-               this spends bandwidth and disk, so it stays inside _can_manage.
-               reading_list.js swaps btn-primary/btn-outline-primary on it, so
-               it stays inline (data-clu-keep). #}
-            <button class="btn btn-sm {% if reading_list.track_wanted %}btn-primary{% else %}btn-outline-primary{% endif %}"
-                id="trackWantedBtn" data-tracking="{{ 1 if reading_list.track_wanted else 0 }}" data-clu-keep
-                onclick="toggleTrackWanted({{ reading_list.id }}, this)"
-                title="Add this list's unmatched issues to your Wanted list and search for them on the nightly sweep">
-                <i class="bi bi-binoculars me-1" aria-hidden="true"></i><span class="track-wanted-label">{% if reading_list.track_wanted %}Tracking Wanted{% else %}Track Wanted{% endif %}</span>
-            </button>
-            {# reading_list.js swaps btn-outline-secondary/btn-warning on it. #}
-            <button class="btn btn-outline-secondary btn-sm" id="reorderToggleBtn" data-clu-keep onclick="toggleReorderMode()" title="Toggle reorder mode">
-                <i class="bi bi-arrows-move me-1" aria-hidden="true"></i>Reorder
-            </button>
-            {% endif %}
         {% elif slot == 'more' %}
             {% if _can_manage %}
-            <li><a class="dropdown-item" href="{{ url_for('reading_lists.export_cbl', list_id=reading_list.id) }}">
-                <i class="bi bi-download me-2" aria-hidden="true"></i>Export CBL
-            </a></li>
+            <li><button class="dropdown-item" id="reorderToggleBtn" onclick="toggleReorderMode()">
+                <i class="bi bi-arrows-move me-2" aria-hidden="true"></i>Reorder
+            </button></li>
             {# `syncable` is decided by core.reading_list_sync.parse_source, so
                the four source schemes are spelled out in exactly one place. #}
             {% if syncable %}
-            <li><button class="dropdown-item" onclick="syncReadingList({{ reading_list.id }})"
-                {% if reading_list.last_synced %}data-bs-toggle="tooltip" data-bs-placement="bottom" title="Last synced: {{ reading_list.last_synced }}"{% endif %}>
-                <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Sync
+            <li><button class="dropdown-item" onclick="syncReadingList({{ reading_list.id }})">
+                <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Sync now
+                {% if reading_list.last_synced %}<small class="d-block text-body-secondary ms-4">Last synced {{ reading_list.last_synced|string|truncate(16, True, '') }}</small>{% endif %}
             </button></li>
             {# Keeps hand edits from being overwritten by the scheduled sync
                (Schedules -> Reading List Sync). Sync above still works. #}
@@ -234,7 +64,7 @@
                 <span class="form-check form-switch mb-0 me-2">
                     <input class="form-check-input" type="checkbox" tabindex="-1" aria-hidden="true"
                         style="pointer-events: none;" {% if reading_list.exclude_auto_sync %}checked{% endif %}>
-                </span>Exclude from Auto-Sync
+                </span>Skip in scheduled sync
             </button></li>
             {% endif %}
             {# Shown for every list, Sync or not: Sync pulls what the source now
@@ -242,7 +72,7 @@
             <li><button class="dropdown-item" id="rematchBtn"
                 onclick="rematchReadingList({{ reading_list.id }})"
                 title="Re-run file matching for this list (manual mappings are kept)">
-                <i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Re-match
+                <i class="bi bi-arrow-clockwise me-2" aria-hidden="true"></i>Re-match
             </button></li>
             {# Subscribe every series this list touches in one go
                (core/series_setup.py, static/js/reading-list-series-setup.js). #}
@@ -252,102 +82,186 @@
                 <i class="bi bi-folder-plus me-2" aria-hidden="true"></i>Set up series
             </button></li>
             {% endif %}
+            <li><a class="dropdown-item" href="{{ url_for('reading_lists.export_cbl', list_id=reading_list.id) }}">
+                <i class="bi bi-download me-2" aria-hidden="true"></i>Export CBL
+            </a></li>
         {% endif %}
     {% endcall %}
 
-    {% if reading_list.description %}
-    <div class="card mb-4">
-        <div class="card-body">
-            <div class="mb-0 text-muted reading-list-description">{{ reading_list.description|safe }}</div>
+    {# Source and last sync, the description (two lines, More), then the
+       reading order as one cell per issue. Read cells are filled in by
+       reading_list.js once /api/issues-read-paths answers. #}
+    <div class="mb-3">
+        {% if source_label %}
+        <p class="rl-src">{{ source_label }}{% if reading_list.last_synced %} · synced {{ reading_list.last_synced|string|truncate(10, True, '') }}{% endif %}</p>
+        {% endif %}
+        {% if reading_list.description %}
+        <div class="rl-desc reading-list-description" id="rlDesc">{{ reading_list.description|safe }}</div>
+        <button type="button" class="rl-more" id="rlDescMore" aria-expanded="false" aria-controls="rlDesc" hidden>More</button>
+        {% endif %}
+        {% if _total %}
+        <div class="rl-run" id="rlRun" aria-hidden="true">
+            {%- for entry in _entries %}<i class="{{ 'o' if (entry.manual_override_path or entry.matched_file_path) else 'm' }}"></i>{% endfor -%}
+        </div>
+        <p class="rl-key" aria-hidden="true"><span><i class="r"></i>Read</span><span><i class="o"></i>In library</span><span><i class="m"></i>Missing</span></p>
+        {% endif %}
+    </div>
+
+    {% if _total %}
+    <div class="rl-sum">
+        {# Up next: the first unread issue in the library, in reading order.
+           Drawn by reading_list.js (it needs the read set). #}
+        <div class="rl-box" id="rlUpNext" aria-live="polite"></div>
+        <div class="rl-box" id="rlMissingBox">
+            {% if _missing %}
+            <div>
+                <b>{{ _missing }} issue{{ ' isn’t' if _missing == 1 else 's aren’t' }} in your library</b>
+                {% if _can_manage %}
+                <span class="rl-sub" id="rlTrackNote">{% if reading_list.track_wanted %}On your <a href="{{ url_for('series.wanted') }}">Wanted list</a> and searched for every night.{% else %}Track Wanted lists them on Wanted and searches for them every night.{% endif %}</span>
+                {% endif %}
+            </div>
+            {% if _can_manage %}
+            {# Opt this list into the Wanted page and the nightly source sweep.
+               It spends bandwidth and disk, so it stays inside _can_manage. #}
+            <label class="rl-trk form-switch" title="Add this list's missing issues to your Wanted list and search for them on the nightly sweep">
+                <input class="form-check-input" type="checkbox" role="switch" id="trackWantedBtn"
+                    data-wanted-url="{{ url_for('series.wanted') }}"
+                    onchange="toggleTrackWanted({{ reading_list.id }}, this)"{% if reading_list.track_wanted %} checked{% endif %}>Track Wanted
+            </label>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="rematchReadingList({{ reading_list.id }})">Re-match</button>
+            {% endif %}
+            {% else %}
+            <i class="bi bi-check2-circle" aria-hidden="true"></i>
+            <div><b>Every issue is in your library</b></div>
+            {% endif %}
         </div>
     </div>
+
+    {% call toolbar('Filter issues', id='rlIssueFilters') %}
+        <div class="clu-toolbar-row">
+            {{ search_input('rlIssueSearch', 'Search issues') }}
+            <div class="clu-toolbar-end">
+                {{ result_count('rlIssueCount', _total, 'issues', one='issue') }}
+                <div class="btn-group btn-group-sm" role="group" aria-label="View" id="rlViewToggle">
+                    <button type="button" class="btn btn-outline-secondary active" data-view="grid" aria-pressed="true"
+                        aria-label="Grid view" title="Grid view"><i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-outline-secondary" data-view="list" aria-pressed="false"
+                        aria-label="List view" title="List view"><i class="bi bi-list-ol" aria-hidden="true"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="clu-toolbar-row">
+            {{ filter_bar('rlIssueShow', [
+                {'value': '', 'label': 'All', 'count': _total},
+                {'value': 'own', 'label': 'In library', 'count': _owned},
+                {'value': 'miss', 'label': 'Missing', 'count': _missing},
+                {'value': 'unread', 'label': 'Unread', 'count': _owned},
+            ], label='Show', toggle_off=True) }}
+        </div>
+    {% endcall %}
     {% endif %}
 
-    <div class="reading-list-grid">
-        {% for entry in reading_list.entries %}
-        <div class="book-card" data-entry-id="{{ entry.id }}" data-series="{{ entry.series }}"
-            data-issue="{{ entry.issue_number }}" style="position: relative;">
-            {% set file_path = entry.manual_override_path or entry.matched_file_path %}
-            {% if file_path %}
-            <!-- Matched: clicking cover opens reader -->
-            <div class="book-cover" style="background-image: url('/api/thumbnail?path={{ file_path|urlencode }}')"
-                data-file-path="{{ file_path }}"
-                onclick="openReadingListComic('{{ file_path|replace('\\', '\\\\')|replace("'", "\\'") }}')">
-                <span class="issue-badge issue-badge-matched">
-                    #{{ entry.issue_number }}<i class="bi bi-book read-icon ms-1"></i>
-                </span>
-            </div>
-            {% else %}
-            <!-- Unmatched: clicking cover opens map modal (managers only) -->
-            <div class="book-cover unmatched"
-                {% if _can_manage %}onclick="openMapModal({{ entry.id }}, '{{ entry.series|replace("'", "\\'") }}', '{{ entry.issue_number }}', '{{ entry.volume or '' }}', '{{ entry.year or '' }}', '{{ entry.issue_year or '' }}')"{% endif %}>
-                <div class="text-center p-2">
-                    <i class="bi bi-question-circle display-6 mb-2"></i>
-                    {% if _can_manage %}<br>Click to map{% endif %}
-                </div>
-                <span class="issue-badge issue-badge-unmatched">
-                    #{{ entry.issue_number }}
-                </span>
-            </div>
-            {% endif %}
+    <div class="rl-rbar" id="rlReorderBar" hidden>
+        <span>Reordering. Drag a row or use its arrows.</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleReorderMode()">Done</button>
+    </div>
 
-            <div class="book-info d-flex justify-content-between align-items-start">
-                <div class="book-details flex-grow-1">
-                    <div class="book-title text-truncate">{{ entry.series }} #{{ entry.issue_number }}</div>
-                    <div class="book-meta">
-                        {%- if entry.year %}{{ entry.year }}{% endif -%}
-                        {%- if entry.issue_year and entry.issue_year != entry.year %}
-                        <span class="text-body-secondary" title="Issue published {{ entry.issue_year }}">&middot; {{ entry.issue_year }}</span>
-                        {%- endif -%}
-                    </div>
+    <ol class="reading-list-items rl-ig list-unstyled" id="rlItems">
+        {% for entry in _entries %}
+        {% set file_path = entry.manual_override_path or entry.matched_file_path %}
+        {% set _name = entry.series ~ ' #' ~ entry.issue_number %}
+        <li class="rl-it book-card{% if not file_path %} miss{% endif %}" data-entry-id="{{ entry.id }}"
+            data-series="{{ entry.series }}" data-issue="{{ entry.issue_number }}">
+            <span class="rl-grip" aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
+            <span class="rl-num">{{ loop.index }}</span>
+            <div class="rl-art">
+                {% if file_path %}
+                {# Clicking the cover opens the reader, through the reorder guard. #}
+                <div class="book-cover" role="button" tabindex="0" data-file-path="{{ file_path }}"
+                    aria-label="Read {{ _name }}"
+                    style='background-image: url("{{ url_for('get_thumbnail', path=file_path) }}");'
+                    onclick="openReadingListComic(this.dataset.filePath)"
+                    onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openReadingListComic(this.dataset.filePath); }">
+                    <span class="issue-badge">#{{ entry.issue_number }}<i class="bi bi-check-lg read-icon ms-1" hidden></i><span class="visually-hidden read-label" hidden>, read</span></span>
                 </div>
-                <!-- Three-dots menu (managers only) -->
+                {% else %}
+                <div class="rl-slot">
+                    <b>{{ entry.series }}</b>
+                    <strong>#{{ entry.issue_number }}</strong>
+                    {% if _can_manage %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                        onclick='openMapModal({{ entry.id }}, {{ entry.series|tojson }}, {{ entry.issue_number|string|tojson }}, {{ (entry.volume or "")|string|tojson }}, {{ (entry.year or "")|string|tojson }}, {{ (entry.issue_year or "")|string|tojson }})'>Map issue<span class="visually-hidden"> {{ _name }}</span></button>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            <div class="rl-ifoot">
+                <div>
+                    <p class="rl-ct" title="{{ _name }}">{{ _name }}</p>
+                    <p class="rl-cm">No. <span class="rl-pos">{{ loop.index }}</span>
+                        {%- if entry.year %} · {{ entry.year }}{% endif -%}
+                        {%- if entry.issue_year and entry.issue_year != entry.year %} · <span title="Issue published {{ entry.issue_year }}">{{ entry.issue_year }}</span>{% endif %}
+                        <span class="rl-st"> · <span class="rl-st-text">{{ 'In library' if file_path else 'Missing' }}</span></span></p>
+                </div>
+                {% if _can_manage and not file_path %}
+                <button type="button" class="btn btn-sm btn-outline-secondary rl-lmap"
+                    onclick='openMapModal({{ entry.id }}, {{ entry.series|tojson }}, {{ entry.issue_number|string|tojson }}, {{ (entry.volume or "")|string|tojson }}, {{ (entry.year or "")|string|tojson }}, {{ (entry.issue_year or "")|string|tojson }})'>Map<span class="visually-hidden"> {{ _name }}</span></button>
+                {% endif %}
                 {% if _can_manage %}
-                <div class="dropdown">
-                    <button aria-label="More actions" title="More actions" class="btn btn-link btn-sm p-0 text-dark" type="button" data-bs-toggle="dropdown"
-                        onclick="event.stopPropagation()">
-                        <i class="bi bi-three-dots-vertical"></i>
+                <span class="rl-mv">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-move="-1"
+                        aria-label="Move {{ _name }} up" title="Move up"><i class="bi bi-arrow-up" aria-hidden="true"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-move="1"
+                        aria-label="Move {{ _name }} down" title="Move down"><i class="bi bi-arrow-down" aria-hidden="true"></i></button>
+                </span>
+                {% endif %}
+                {% if _can_manage or file_path %}
+                <div class="dropdown rl-menu">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="dropdown" aria-expanded="false"
+                        aria-label="Actions for {{ _name }}" title="Actions">
+                        <i class="bi bi-three-dots-vertical" aria-hidden="true"></i>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end shadow">
-                        <li><a class="dropdown-item" href="#"
-                                onclick="openMapModal({{ entry.id }}, '{{ entry.series|replace("'", "\\'") }}', '{{ entry.issue_number }}', '{{ entry.volume or '' }}', '{{ entry.year or '' }}', '{{ entry.issue_year or '' }}'); return false;">
-                                <i class="bi bi-link-45deg me-2"></i>{% if file_path %}Re-map Issue{% else %}Map Issue{%
-                                endif %}
-                            </a></li>
                         {% if file_path %}
-                        <li><a class="dropdown-item" href="#"
-                                onclick="currentEntryId = {{ entry.id }}; clearMapping(); return false;">
-                                <i class="bi bi-x-circle me-2"></i>Clear Mapping
-                            </a></li>
-                        <li><a class="dropdown-item" href="#"
-                                onclick="setAsThumbnail('{{ file_path|replace('\\', '\\\\')|replace("'", "\\'") }}'); return false;">
-                                <i class="bi bi-image me-2"></i>Set as List Thumbnail
-                            </a></li>
-                        <li><a class="dropdown-item" href="#"
-                                onclick="cropCover('{{ file_path|replace('\\', '\\\\')|replace("'", "\\'") }}'); return false;">
-                                <i class="bi bi-crop me-2"></i>Crop Cover
-                            </a></li>
+                        <li><button type="button" class="dropdown-item" onclick="openReadingListComic(this.closest('.rl-it').querySelector('[data-file-path]').dataset.filePath)">
+                            <i class="bi bi-book me-2" aria-hidden="true"></i>Read</button></li>
                         {% endif %}
-                        {# The issue's year narrows every source — passing it stops
+                        {% if _can_manage %}
+                        <li><button type="button" class="dropdown-item"
+                            onclick='openMapModal({{ entry.id }}, {{ entry.series|tojson }}, {{ entry.issue_number|string|tojson }}, {{ (entry.volume or "")|string|tojson }}, {{ (entry.year or "")|string|tojson }}, {{ (entry.issue_year or "")|string|tojson }})'>
+                            <i class="bi bi-link-45deg me-2" aria-hidden="true"></i>{% if file_path %}Re-map issue{% else %}Map issue{% endif %}</button></li>
+                        {% if file_path %}
+                        <li><button type="button" class="dropdown-item" onclick="currentEntryId = {{ entry.id }}; clearMapping();">
+                            <i class="bi bi-x-circle me-2" aria-hidden="true"></i>Clear mapping</button></li>
+                        <li><button type="button" class="dropdown-item" onclick="setAsThumbnail(this.closest('.rl-it').querySelector('[data-file-path]').dataset.filePath)">
+                            <i class="bi bi-image me-2" aria-hidden="true"></i>Set as list thumbnail</button></li>
+                        <li><button type="button" class="dropdown-item" onclick="toggleHighlight({{ entry.id }}, {{ 'false' if entry.is_highlight else 'true' }})">
+                            <i class="bi bi-star{{ '-fill' if entry.is_highlight }} me-2" aria-hidden="true"></i>{{ 'Remove from' if entry.is_highlight else 'Add to' }} highlight covers</button></li>
+                        <li><button type="button" class="dropdown-item" onclick="cropCover(this.closest('.rl-it').querySelector('[data-file-path]').dataset.filePath)">
+                            <i class="bi bi-crop me-2" aria-hidden="true"></i>Crop cover</button></li>
+                        {% endif %}
+                        {# The issue's year narrows every source: passing it stops
                            "#8" matching every volume that ever had one. Prefer
                            issue_year: `year` is the year the SERIES began,
                            which for issue #14 of a 2025 run is not it. #}
-                        <li><a class="dropdown-item" href="#"
-                                onclick="openGetComicsSearch('{{ entry.series|replace("'", "\\'") }}', '{{ entry.issue_number }}', '{{ entry.issue_year or entry.year or '' }}'); return false;">
-                                <i class="bi bi-search me-2"></i>Search Sources
-                            </a></li>
+                        <li><button type="button" class="dropdown-item"
+                            onclick='openGetComicsSearch({{ entry.series|tojson }}, {{ entry.issue_number|string|tojson }}, {{ (entry.issue_year or entry.year or '')|string|tojson }})'>
+                            <i class="bi bi-search me-2" aria-hidden="true"></i>Search sources</button></li>
                         <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item text-danger" href="#"
-                                onclick="removeEntry({{ entry.id }}); return false;">
-                                <i class="bi bi-trash me-2"></i>Remove from List
-                            </a></li>
+                        <li><button type="button" class="dropdown-item text-danger" onclick="removeEntry({{ entry.id }})">
+                            <i class="bi bi-trash me-2" aria-hidden="true"></i>Remove from list</button></li>
+                        {% endif %}
                     </ul>
                 </div>
                 {% endif %}
             </div>
-        </div>
+        </li>
         {% endfor %}
-    </div>
+    </ol>
+    <div id="rlIssuesEmpty"></div>
+    {% if not _total %}
+    {{ empty_state('No issues yet', 'Add an issue to start this list.' if _can_manage else 'This list has no issues yet.', 'bi-journal-bookmark') }}
+    {% endif %}
 </div>
 
 {% if _can_manage %}

@@ -87,6 +87,10 @@ def _row(download_id, e):
         "bytes_downloaded": e.get("bytes_downloaded") or 0,
         "error": e.get("error"),
         "retry_in": e.get("retry_in"),
+        "retry_count": e.get("retry_count") or 0,
+        "retry_max": e.get("retry_max"),
+        # Cloudflare marker: the page offers "Download manually", not Retry.
+        "manual_url": e.get("manual_url"),
     }
 
 

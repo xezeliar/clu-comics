@@ -34,8 +34,13 @@ _getcomics_sweeps = {}
 _getcomics_sweeps_lock = threading.Lock()
 
 
-def getcomics_sweep_scope(only_series_id=None):
-    """The claim key for a run. A scoped run gets its own; a full sweep is "all"."""
+def getcomics_sweep_scope(only_series_id=None, only_issues=False):
+    """The claim key for a run. A scoped run gets its own; a full sweep is "all".
+
+    Searches started from the Wanted page (``only_issues``) share one key.
+    """
+    if only_issues:
+        return "issues"
     return "all" if only_series_id is None else f"series:{only_series_id}"
 
 
@@ -57,14 +62,14 @@ def release_getcomics_sweep(scope):
         _getcomics_sweeps.pop(scope, None)
 
 
-def getcomics_sweep_running(only_series_id=None):
+def getcomics_sweep_running(only_series_id=None, only_issues=False):
     """True when a sweep of this scope is already in flight.
 
     For routes that would rather tell the user than start a run the sweep will
     immediately stand down from.
     """
     with _getcomics_sweeps_lock:
-        return getcomics_sweep_scope(only_series_id) in _getcomics_sweeps
+        return getcomics_sweep_scope(only_series_id, only_issues) in _getcomics_sweeps
 
 
 def getcomics_sweep_age(scope):

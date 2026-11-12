@@ -526,6 +526,28 @@ class TestDcppDismiss:
         assert client.post("/api/dcpp/downloads/d1/dismiss").status_code == 500
 
 
+class TestUsenetDismiss:
+
+    @patch("models.usenet.dismiss_usenet_job", return_value=True)
+    def test_dismiss(self, mock_dismiss, client):
+        resp = client.post("/api/usenet/downloads/u1/dismiss")
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+        mock_dismiss.assert_called_once_with("u1")
+
+    @patch("models.usenet.dismiss_usenet_job", return_value=False)
+    def test_dismiss_unknown_job(self, mock_dismiss, client):
+        assert client.post("/api/usenet/downloads/nope/dismiss").status_code == 404
+
+    @patch("models.usenet.dismiss_usenet_job", return_value=None)
+    def test_dismiss_running_job_is_refused(self, mock_dismiss, client):
+        assert client.post("/api/usenet/downloads/u1/dismiss").status_code == 400
+
+    @patch("models.usenet.dismiss_usenet_job", side_effect=Exception("boom"))
+    def test_dismiss_error(self, mock_dismiss, client):
+        assert client.post("/api/usenet/downloads/u1/dismiss").status_code == 500
+
+
 class TestClearClientDownloads:
     """POST /api/download-clients/downloads/clear -- both stores, one call.
 
@@ -563,6 +585,16 @@ class TestClearClientDownloads:
         for mock in (mock_usenet, mock_dcpp):
             statuses = mock.call_args[0][0]
             assert statuses == {"failed"}
+
+    @patch("models.dcpp.clear_dcpp_jobs", return_value=0)
+    @patch("models.usenet.clear_usenet_jobs", return_value=0)
+    def test_finished_bucket_leaves_import_pending(self, mock_usenet, mock_dcpp, client):
+        # The Downloads tab's Clear: "could not be imported" stays under
+        # Needs attention until it is dismissed by hand.
+        client.post("/api/download-clients/downloads/clear",
+                    json={"bucket": "finished"})
+        for mock in (mock_usenet, mock_dcpp):
+            assert mock.call_args[0][0] == {"complete"}
 
     @patch("models.dcpp.clear_dcpp_jobs", return_value=0)
     @patch("models.usenet.clear_usenet_jobs", return_value=0)

@@ -401,13 +401,14 @@ def cbz_metadata():
         return jsonify({"error": "File is not a CBZ"}), 400
 
     try:
-        from core.comicinfo import read_comicinfo_xml
+        from core.comicinfo import read_comicinfo_xml, provider_from_notes
 
         metadata = {
             "file_size": os.path.getsize(file_path),
             "total_files": 0,
             "image_files": 0,
             "comicinfo": None,
+            "provider": None,
             "file_list": []
         }
 
@@ -443,6 +444,7 @@ def cbz_metadata():
                         if comicinfo:
                             app_logger.info(f"Successfully parsed ComicInfo.xml with {len(comicinfo)} fields")
                             metadata["comicinfo"] = comicinfo
+                            metadata["provider"] = provider_from_notes(comicinfo.get("Notes"))
                         else:
                             app_logger.warning(f"ComicInfo.xml parsed but returned empty data")
                 except Exception as e:
@@ -569,7 +571,7 @@ def cbz_update_comicinfo():
     from core.auth import enforce_path_access
     from core.comicinfo import (
         update_comicinfo_in_zip, find_comicinfo_in_zip, read_comicinfo_xml,
-        manual_edit_notes,
+        manual_edit_notes, provider_from_notes,
     )
     from core.database import set_has_comicinfo
 
@@ -650,7 +652,8 @@ def cbz_update_comicinfo():
         except Exception as e:
             app_logger.warning(f"Failed to sync file_index {ci_field} for {file_path}: {e}")
 
-    return jsonify({"success": True, "comicinfo": comicinfo})
+    return jsonify({"success": True, "comicinfo": comicinfo,
+                    "provider": provider_from_notes(comicinfo.get('Notes'))})
 
 
 @metadata_bp.route('/cbz-bulk-clear-comicinfo', methods=['POST'])

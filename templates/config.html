@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/settings_save_bar.html' import settings_save_bar %}
+{% from 'partials/filters.html' import search_input, result_count %}
 
 {% block title %}CLU: Settings Page{% endblock %}
 
@@ -69,6 +70,17 @@
         padding: 0.25rem 0.25rem 0;
         margin: -0.25rem -0.25rem 1.5rem;
     }
+
+    /* Settings search: every tab's groups show together while a query is on. */
+    .clu-searching > .tab-pane {
+        display: block;
+        opacity: 1;
+    }
+    .clu-settings-panel[hidden] { display: none; }
+    .clu-setting-hit {
+        background: var(--clu-select-fill, rgba(var(--bs-primary-rgb), 0.18));
+        border-radius: 0.25rem;
+    }
 </style>
 
 
@@ -90,6 +102,11 @@
         {% endif %}
     {% endcall %}
     <div>
+
+        <div class="d-flex align-items-center gap-3 mb-3">
+            {{ search_input('settingsSearch', 'Search settings', classes='flex-grow-1') }}
+            {{ result_count('settingsCount', 0, 'setting groups', one='setting group') }}
+        </div>
 
         <!-- Navigation Tabs -->
         <ul class="nav nav-tabs clu-settings-tabs clu-filter-scroll clu-filter-scroll-always" id="configTabs" role="tablist">
@@ -1523,6 +1540,7 @@
                                 <option value="2" {% if timezone=='2' %}selected{% endif %}>UTC+2 (Cairo)</option>
                                 <option value="5.5" {% if timezone=='5.5' %}selected{% endif %}>UTC+5:30 (India)
                                 </option>
+                                <option value="7" {% if timezone=='7' %}selected{% endif %}>UTC+7 (Bangkok)</option>
                                 <option value="8" {% if timezone=='8' %}selected{% endif %}>UTC+8 (Singapore)</option>
                                 <option value="9" {% if timezone=='9' %}selected{% endif %}>UTC+9 (Tokyo)</option>
                                 <option value="10" {% if timezone=='10' %}selected{% endif %}>UTC+10 (Sydney)</option>
@@ -1961,6 +1979,20 @@
                 </div>
 
 
+                <!-- Motion (site default) -->
+                <div class="clu-settings-panel mb-4">
+                    <h2 class="h4"><label for="siteReduceMotion"><i class="bi bi-magic me-2"></i>Default Motion</label></h2>
+                    <p class="text-muted">
+                        Whether animations follow each device's reduced-motion setting, for users who
+                        haven't picked their own. To change only your own, go to
+                        <a href="{{ url_for('auth.account') }}#appearance">My Account &rarr; Appearance</a>.
+                    </p>
+                    {% with select_id='siteReduceMotion', selected_motion=reduceMotion|default('system') %}
+                    {% include 'partials/motion_select.html' %}
+                    {% endwith %}
+                </div>
+
+
                 <!-- Dashboard Layout (site default) -->
                 <div class="clu-settings-panel mb-4">
                     <h2 class="h4"><i class="bi bi-layout-text-window-reverse me-2"></i>Default Dashboard Layout</h2>
@@ -2281,6 +2313,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/clu-settings-search.js') }}" defer></script>
 {{ super() }}
 <script src="{{ url_for('static', filename='js/clu-utils.js') }}?v={{ range(1000, 9999) | random }}"></script>
 <script src="{{ url_for('static', filename='js/clu-rename-preview.js') }}?v={{ range(1000, 9999) | random }}"></script>
@@ -2403,6 +2436,7 @@
     const personalizationSections = {
         theme: { label: 'Default Theme', url: '/api/config/styling', read: readStylingSettings },
         pageWidth: { label: 'Default Page Width', url: '/api/config/page-width', read: readPageWidthSettings },
+        motion: { label: 'Default Motion', url: '/api/config/motion', read: readMotionSettings },
         dashboard: { label: 'Default Dashboard Layout', url: '/api/config/dashboard', read: readDashboardSettings },
         thumbnails: { label: 'Folder Thumbnail Style', url: '/api/config/thumbnails', read: readThumbnailStyleSettings },
         recommendations: { label: 'Recommendation Service', url: '/api/config/recommendations', read: readRecommendationSettings }
@@ -2730,6 +2764,10 @@
     function readPageWidthSettings() {
         const selected = document.querySelector('input[name="sitePageWidth"]:checked');
         return { pageWidth: selected ? selected.value : 'auto' };
+    }
+
+    function readMotionSettings() {
+        return { reduceMotion: document.getElementById('siteReduceMotion')?.value || 'system' };
     }
 
     function readThumbnailStyleSettings() {

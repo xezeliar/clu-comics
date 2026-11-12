@@ -405,9 +405,15 @@ CLIENT_FAILED_STATUSES = frozenset({'failed'})
 
 # What the status page's two buttons map to. A bucket name that isn't here is
 # rejected by the route rather than silently clearing nothing.
+# 'finished' is the Downloads tab's Clear on its Finished group: a clean
+# completion only. ``complete_no_move`` sits under Needs attention there and is
+# dismissed by hand, so Clear must leave it alone.
+CLIENT_FINISHED_STATUSES = frozenset({'complete'})
+
 CLIENT_CLEAR_BUCKETS = {
     'completed': CLIENT_COMPLETED_STATUSES,
     'failed': CLIENT_FAILED_STATUSES,
+    'finished': CLIENT_FINISHED_STATUSES,
 }
 
 

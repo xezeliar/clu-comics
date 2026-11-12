@@ -193,6 +193,16 @@ class TestReadingTrends:
         trends = get_reading_trends("writer", limit=5)
         assert len(trends) == 5
 
+    def test_year_follows_the_user_timezone(self, db_connection):
+        from core.database import get_reading_trends, set_user_preference
+
+        # 20:00 UTC on New Year's Eve is already 2026 in UTC+7.
+        create_issue_read(issue_path="/data/ny.cbz", read_at="2025-12-31 20:00:00", writer="Late Reader")
+        assert [t["name"] for t in get_reading_trends("writer", year=2025)] == ["Late Reader"]
+        set_user_preference("timezone", "7", category="personalization")
+        assert get_reading_trends("writer", year=2025) == []
+        assert [t["name"] for t in get_reading_trends("writer", year=2026)] == ["Late Reader"]
+
 
 class TestReadingPositions:
 

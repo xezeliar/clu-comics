@@ -1,0 +1,346 @@
+/* Series page header (templates/series.html).
+   The banner is a strip with nothing on it; the title stays the page's
+   page_header h1. Owned cells and the ring use the selection colour
+   (--clu-select from clu-page.css, loaded on every page). */
+
+.series-header {
+    --sh-select: var(--clu-select);
+    /* The cover is the page's focus: one width, used by the grid column. */
+    --sh-cover-w: 15rem;
+    margin-bottom: 1.5rem;
+}
+
+.sh-banner {
+    height: 9.5rem;
+    border-radius: 8px;
+    background-color: var(--bs-tertiary-bg);
+    background-size: cover;
+    background-position: center;
+}
+
+/* Generated banner: the cover, blurred and scaled past the strip's edges so
+   the blur never shows a soft border, dimmed toward the page colour. */
+.sh-banner-generated {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.sh-banner-generated::before,
+.sh-banner-generated::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+}
+
+.sh-banner-generated::before {
+    background: var(--sh-banner-img) center 30% / cover no-repeat;
+    filter: blur(24px) saturate(1.3);
+    transform: scale(1.2);
+    z-index: -1;
+}
+
+.sh-banner-generated::after {
+    background: color-mix(in srgb, var(--bs-body-bg) 25%, transparent);
+}
+
+/* A slice the user picked (Set header): the cover sharp, at its position. */
+.sh-banner-slice {
+    background-size: cover;
+    background-repeat: no-repeat;
+}
+
+.sh-header-preview {
+    cursor: ns-resize;
+    touch-action: none;
+    user-select: none;
+}
+
+.sh-body {
+    display: grid;
+    grid-template-columns: var(--sh-cover-w) minmax(0, 1fr);
+    gap: 0 2rem;
+}
+
+.has-banner .sh-body {
+    padding-inline: 1rem;
+}
+
+/* The 2:3 rule: the frame sets the size, never the source pixels. */
+.sh-cover {
+    aspect-ratio: 2 / 3;
+    align-self: start;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bs-tertiary-bg);
+}
+
+.has-banner .sh-cover {
+    margin-top: -6.5rem;
+    box-shadow: 0 0 0 4px var(--bs-body-bg), 0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.sh-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.sh-cover-empty {
+    height: 100%;
+    display: grid;
+    place-items: center;
+    font-size: 2.5rem;
+    color: var(--bs-secondary-color);
+}
+
+.sh-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.has-banner .sh-main {
+    padding-top: 0.9rem;
+}
+
+.sh-main .clu-page-header {
+    margin-bottom: 0;
+}
+
+.sh-stat {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.sh-stat b {
+    color: var(--bs-emphasis-color);
+    font-weight: 600;
+}
+
+.sh-ring {
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: none;
+    transform: rotate(-90deg);
+}
+
+.sh-ring circle {
+    fill: none;
+    stroke-width: 4;
+}
+
+.sh-ring .trk {
+    stroke: var(--bs-border-color);
+}
+
+.sh-ring .val {
+    stroke: var(--sh-select);
+    stroke-linecap: round;
+}
+
+.sh-ring.done .val {
+    stroke: var(--bs-success);
+}
+
+.sh-run {
+    display: flex;
+    gap: 3px;
+    margin: 0.5rem 0 0;
+    padding: 0 0 2px;
+    list-style: none;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+.sh-run li {
+    flex: none;
+    width: 1.6rem;
+    height: 1.6rem;
+    display: grid;
+    place-items: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, var(--sh-select) 16%, var(--bs-body-bg));
+    color: var(--bs-emphasis-color);
+    border: 1px solid transparent;
+}
+
+.sh-run li.miss {
+    background: none;
+    border: 1px dashed var(--bs-secondary-color);
+    color: var(--bs-secondary-color);
+    font-weight: 400;
+}
+
+.sh-run li.marked {
+    background: none;
+    border-color: var(--bs-border-color);
+    color: var(--bs-secondary-color);
+}
+
+.sh-key {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+    margin-top: 0.25rem;
+}
+
+.sh-key i {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 3px;
+    margin-right: 0.1rem;
+    vertical-align: -1px;
+    background: color-mix(in srgb, var(--sh-select) 16%, var(--bs-body-bg));
+}
+
+.sh-key i.m {
+    background: none;
+    border: 1px dashed var(--bs-secondary-color);
+}
+
+.sh-desc {
+    margin: 0.75rem 0 0;
+    max-width: 65ch;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+}
+
+.sh-desc.open {
+    display: block;
+}
+
+.sh-more {
+    align-self: flex-start;
+}
+
+.sh-cred {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 1.25rem;
+    margin: 0.5rem 0 0;
+    font-size: 0.875rem;
+}
+
+.sh-cred div {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.sh-cred dt {
+    color: var(--bs-secondary-color);
+    font-weight: 400;
+}
+
+.sh-cred dd {
+    margin: 0;
+}
+
+.sh-all {
+    font-size: 0.875rem;
+    margin-top: 0.35rem;
+}
+
+.sh-all summary {
+    cursor: pointer;
+    color: var(--bs-link-color);
+    width: fit-content;
+}
+
+.sh-all table {
+    margin: 0.4rem 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.sh-all th {
+    font-weight: 400;
+    color: var(--bs-secondary-color);
+    padding: 0.15rem 1rem 0.15rem 0;
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+.sh-all td {
+    padding: 0.15rem 0;
+}
+
+/* Tablet: a smaller cover leaves the title and run strip room. */
+@media (min-width: 576px) and (max-width: 991.98px) {
+    .series-header {
+        --sh-cover-w: 11.5rem;
+    }
+}
+
+/* Phone: the title wraps beside a smaller cover, the actions take their own
+   row, and everything below spans the width; the run strip wraps so every
+   issue stays on screen. */
+@media (max-width: 575.98px) {
+    .sh-banner {
+        height: 5.5rem;
+    }
+
+    .sh-body,
+    .has-banner .sh-body {
+        grid-template-columns: 7.5rem minmax(0, 1fr);
+        gap: 0 0.75rem;
+        padding-inline: 0;
+    }
+
+    .has-banner .sh-cover {
+        margin-top: -2.75rem;
+    }
+
+    .sh-main {
+        display: contents;
+    }
+
+    .sh-main > .clu-page-header {
+        grid-column: 2;
+        align-self: end;
+        padding-top: 0.6rem;
+    }
+
+    .sh-main > .clu-page-header .clu-page-title {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        font-size: 1.25rem;
+    }
+
+    .sh-main > .clu-page-header .clu-page-header-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sh-main > :not(.clu-page-header) {
+        grid-column: 1 / -1;
+    }
+
+    .sh-meta {
+        margin-top: 0.5rem;
+    }
+
+    .sh-desc {
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+    }
+
+    .sh-run {
+        flex-wrap: wrap;
+        overflow: visible;
+    }
+}

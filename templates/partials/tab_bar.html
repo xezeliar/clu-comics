@@ -1,6 +1,7 @@
 {# Bottom tab bar, phones only (<768px, see clu-page.css). Hidden while the
    reader overlay is open. The top navbar stays for desktop. Tabs follow the
-   same role gating as header.html. #}
+   same role gating as header.html. The active tab's pill carries a
+   view-transition-name, so it slides between pages (clu-page.css). #}
 {% set _tb_role = (g.current_user.role if g.get('current_user') else 'owner') %}
 {% set _tb_tabs = [
   (url_for('index'), 'bi-house', 'Home', true),
@@ -13,6 +14,7 @@
   {% for href, icon, label, show in _tb_tabs if show %}
   {% set on = (request.path == '/' or request.path.startswith('/collection')) if href == url_for('index') else request.path.startswith(href) %}
   <a href="{{ href }}" class="{% if on %}active{% endif %}"{% if on %} aria-current="page"{% endif %}>
+    {% if on %}<span class="clu-tabbar-pill" aria-hidden="true"></span>{% endif %}
     <i class="bi {{ icon }}"></i><span>{{ label }}</span>
   </a>
   {% endfor %}

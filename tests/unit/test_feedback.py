@@ -162,7 +162,7 @@ def test_status_page_says_when_nothing_is_running():
     html = (TEMPLATES / "status.html").read_text(encoding="utf-8")
     assert "id='downloads-empty'" in html and "Nothing is downloading" in html
     # An unreachable status endpoint must not read as an empty queue.
-    assert "'unreachable'" in html and "data === null" in html
+    assert "Could not reach the download queue" in html and "dlDown = !view" in html
 
 
 def test_file_manager_says_when_a_listing_is_empty():

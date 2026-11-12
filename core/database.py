@@ -8,7 +8,7 @@ import threading
 import time
 import zipfile
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from core.config import CONFIG_DIR, get_cache_dir
 from core.app_logging import app_logger
@@ -171,6 +171,10 @@ def _rebuild_add_user_scope(c, table, new_table_sql, new_cols, index_sqls):
     c.execute(f"ALTER TABLE {table}__new RENAME TO {table}")
     for isql in index_sqls:
         c.execute(isql)
+
+
+# user_preferences key: nothing indexed before this moment is a new arrival.
+NEW_ARRIVALS_EPOCH_KEY = "new_arrivals_epoch"
 
 
 def init_db():
@@ -749,6 +753,11 @@ def _init_db_locked():
             "CREATE INDEX IF NOT EXISTS idx_download_run_items_download "
             "ON download_run_items(download_id)"
         )
+        # Migration: why a search missed (queries, sources, nearest reject),
+        # as bounded JSON for the Wanted page's "Why not found".
+        c.execute("PRAGMA table_info(download_run_items)")
+        if "search_info" not in [col[1] for col in c.fetchall()]:
+            c.execute("ALTER TABLE download_run_items ADD COLUMN search_info TEXT")
 
         # Activity feed (core/activity.py): one row per operation, UTC ts,
         # pruned by count and age on insert.
@@ -974,6 +983,10 @@ def _init_db_locked():
             app_logger.info("Migrating reading_list_entries table: adding sort_order column")
             c.execute("ALTER TABLE reading_list_entries ADD COLUMN sort_order INTEGER DEFAULT 0")
             c.execute("UPDATE reading_list_entries SET sort_order = id WHERE sort_order = 0")
+        if "is_highlight" not in rle_columns:
+            # Entries the user picked to lead the list card's cover stack.
+            app_logger.info("Migrating reading_list_entries table: adding is_highlight column")
+            c.execute("ALTER TABLE reading_list_entries ADD COLUMN is_highlight INTEGER DEFAULT 0")
 
         # Migrate: issue_year and metron_id.
         #
@@ -1049,6 +1062,10 @@ def _init_db_locked():
         if "hide" not in columns:
             app_logger.info("Migrating issues_read table: adding hide column")
             c.execute("ALTER TABLE issues_read ADD COLUMN hide INTEGER DEFAULT 0")
+        # Set by Insights' "Read credits from ComicInfo" on every row it re-read,
+        # so a file with no credits stops counting as a credits gap.
+        if "credits_read" not in columns:
+            c.execute("ALTER TABLE issues_read ADD COLUMN credits_read INTEGER DEFAULT 0")
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_issues_read_path ON issues_read(issue_path)"
         )
@@ -1144,6 +1161,27 @@ def _init_db_locked():
                 PRIMARY KEY (folder_path, kind)
             )
         """)
+
+        # "New issue arrived" badge: when each user last opened each series
+        # folder. The arrival itself is file_index.first_indexed_at, recorded
+        # once per file; see get_new_arrival_counts. previous_visited_at is the
+        # visit before the one that last saw new files, so the series page can
+        # still show which issues arrived after the badge clears.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS series_visits (
+                user_id INTEGER NOT NULL,
+                folder_path TEXT NOT NULL,
+                visited_at REAL NOT NULL,
+                previous_visited_at REAL,
+                PRIMARY KEY (user_id, folder_path)
+            )
+        """)
+        # Nothing indexed before the feature existed counts as new.
+        c.execute(
+            "INSERT OR IGNORE INTO user_preferences (key, value, category) "
+            "VALUES (?, ?, 'internal')",
+            (NEW_ARRIVALS_EPOCH_KEY, repr(time.time())),
+        )
 
         # Create reading_positions table (save reading position for comics).
         # Shape matches the post-migration table produced by
@@ -1283,6 +1321,11 @@ def _init_db_locked():
         if "cover_image" not in series_columns:
             c.execute("ALTER TABLE series ADD COLUMN cover_image TEXT")
             app_logger.info("Added cover_image column to series table")
+        # Series header banner: the vertical slice of the cover the user picked
+        # (0-100, CSS background-position y). NULL = the blurred cover.
+        if "header_focus" not in series_columns:
+            c.execute("ALTER TABLE series ADD COLUMN header_focus REAL DEFAULT NULL")
+            app_logger.info("Added header_focus column to series table")
         if "series_subscription" not in series_columns:
             c.execute("ALTER TABLE series ADD COLUMN series_subscription INTEGER DEFAULT NULL")
             app_logger.info("Added series_subscription column to series table")
@@ -1935,11 +1978,13 @@ def _init_db_locked():
                 characters TEXT DEFAULT '',
                 publisher TEXT DEFAULT '',
                 hide INTEGER DEFAULT 0,
+                credits_read INTEGER DEFAULT 0,
                 UNIQUE(user_id, issue_path)
             )
             """,
             {"id", "user_id", "issue_path", "read_at", "page_count", "time_spent",
-             "writer", "penciller", "characters", "publisher", "hide"},
+             "writer", "penciller", "characters", "publisher", "hide",
+             "credits_read"},
             [
                 "CREATE INDEX IF NOT EXISTS idx_issues_read_path ON issues_read(issue_path)",
                 "CREATE INDEX IF NOT EXISTS idx_issues_read_user ON issues_read(user_id)",
@@ -3751,6 +3796,23 @@ def save_file_index_to_db(file_index):
 
             c = conn.cursor()
 
+            # A rebuild is not an arrival: keep each known path's first-indexed
+            # time, or every series would read as "new" afterwards. On a first
+            # build there is nothing to keep, so the epoch moves up instead.
+            c.execute(
+                "SELECT path, first_indexed_at FROM file_index "
+                "WHERE first_indexed_at IS NOT NULL"
+            )
+            known = dict(c.fetchall())
+            if known:
+                records = [r[:-1] + (known.get(r[1], current_time),) for r in records]
+            else:
+                c.execute(
+                    "INSERT OR REPLACE INTO user_preferences (key, value, category) "
+                    "VALUES (?, ?, 'internal')",
+                    (NEW_ARRIVALS_EPOCH_KEY, repr(current_time)),
+                )
+
             # Clear existing index
             c.execute("DELETE FROM file_index")
             conn.commit()
@@ -4028,7 +4090,8 @@ def set_directory_has_thumbnail(path, has_thumbnail=True):
 
 
 def add_file_index_entry(
-    name, path, entry_type, size=None, parent=None, has_thumbnail=0, modified_at=None
+    name, path, entry_type, size=None, parent=None, has_thumbnail=0, modified_at=None,
+    first_indexed_at=None,
 ):
     """
     Add a new entry to the file index.
@@ -4041,6 +4104,10 @@ def add_file_index_entry(
         parent: Parent directory path (optional)
         has_thumbnail: 1 if directory has folder.png/jpg, 0 otherwise (optional)
         modified_at: Modification timestamp (optional)
+        first_indexed_at: carry an existing arrival time over (a conversion
+            or a rescan re-adds a row for a file that did not arrive). Set
+            even when the row already exists: the file watcher can index the
+            new path first, with "now".
 
     Returns:
         True if successful, False otherwise
@@ -4065,7 +4132,8 @@ def add_file_index_entry(
                     size = excluded.size,
                     parent = excluded.parent,
                     has_thumbnail = excluded.has_thumbnail,
-                    modified_at = excluded.modified_at
+                    modified_at = excluded.modified_at,
+                    first_indexed_at = COALESCE(?, file_index.first_indexed_at)
             """,
                 (
                     name,
@@ -4075,7 +4143,8 @@ def add_file_index_entry(
                     parent,
                     has_thumbnail,
                     modified_at,
-                    time.time(),
+                    first_indexed_at or time.time(),
+                    first_indexed_at,
                 ),
             )
 
@@ -4214,6 +4283,155 @@ def _like_prefix(path):
     """
     escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"{escaped}/%"
+
+
+#########################
+#   New arrivals        #
+#########################
+#
+# The "New issue arrived" badge. An arrival is recorded once, as the file's
+# file_index.first_indexed_at: a download filed into a library, a WATCH move
+# landing there (the file watcher indexes it -- monitor.py needs no hook) and a
+# scan that finds a new path all insert a fresh row. A rename keeps its row
+# (move_indexed_path), a metadata write upserts it, and a conversion, a folder
+# rescan and a full rebuild carry the old time over. Per user there is only a
+# series_visits row per folder, written when that user opens it.
+
+_ARRIVAL_COMIC_SQL = "f.type = 'file' AND (f.name LIKE '%.cbz' OR f.name LIKE '%.cbr')"
+
+# A series row (alias s) with comics in its folder newer than the user's last
+# visit. Placeholders: user id, arrivals floor.
+_NEW_ARRIVAL_SERIES_SQL = (
+    "EXISTS (SELECT 1 FROM file_index f LEFT JOIN series_visits v "
+    "ON v.user_id = ? AND v.folder_path = f.parent "
+    f"WHERE f.parent = s.mapped_path AND {_ARRIVAL_COMIC_SQL} "
+    "AND f.first_indexed_at > COALESCE(v.visited_at, ?))"
+)
+
+
+def _arrivals_floor(c, uid):
+    """Nothing indexed before this counts as new for *uid*: the feature's
+    epoch, or the user's creation if later (a new reader is not shown the
+    whole library as new)."""
+    c.execute("SELECT value FROM user_preferences WHERE key = ?", (NEW_ARRIVALS_EPOCH_KEY,))
+    row = c.fetchone()
+    floor = float(row[0]) if row else 0.0
+    c.execute("SELECT CAST(strftime('%s', created_at) AS REAL) FROM users WHERE id = ?", (uid,))
+    row = c.fetchone()
+    return max(floor, row[0]) if row and row[0] else floor
+
+
+def new_arrival_params(user_id=None):
+    """(user id, floor): the two placeholders of _NEW_ARRIVAL_SERIES_SQL."""
+    uid = _resolve_user_id(user_id)
+    try:
+        with db_conn() as conn:
+            return uid, (_arrivals_floor(conn.cursor(), uid) if conn else time.time())
+    except Exception as e:
+        app_logger.error(f"Failed to read new-arrivals floor: {e}")
+        return uid, time.time()
+
+
+def get_first_indexed_times(path):
+    """{path: first_indexed_at} for *path* and everything under it, so a
+    re-add (conversion, rescan) can carry the arrival time over."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return {}
+            c = conn.cursor()
+            c.execute(
+                "SELECT path, first_indexed_at FROM file_index "
+                "WHERE (path = ? OR path LIKE ? ESCAPE '\\') AND first_indexed_at IS NOT NULL",
+                (path, _like_prefix(path)),
+            )
+            return {r[0]: r[1] for r in c.fetchall()}
+    except Exception as e:
+        app_logger.error(f"Failed to read first-indexed times under {path}: {e}")
+        return {}
+
+
+def get_new_arrival_counts(folder_paths, user_id=None):
+    """{folder: comics that arrived since this user last opened it}.
+
+    Folders with none are left out. Counts direct children only: the series
+    folder is the one that holds the issues.
+    """
+    paths = list(folder_paths)
+    if not paths:
+        return {}
+    uid = _resolve_user_id(user_id)
+    out = {}
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return {}
+            c = conn.cursor()
+            floor = _arrivals_floor(c, uid)
+            for i in range(0, len(paths), 500):
+                chunk = paths[i:i + 500]
+                c.execute(
+                    "SELECT f.parent, COUNT(*) FROM file_index f "
+                    "LEFT JOIN series_visits v ON v.user_id = ? AND v.folder_path = f.parent "
+                    f"WHERE f.parent IN ({_in_placeholders(chunk)}) AND {_ARRIVAL_COMIC_SQL} "
+                    "AND f.first_indexed_at > COALESCE(v.visited_at, ?) GROUP BY f.parent",
+                    [uid] + chunk + [floor],
+                )
+                out.update({r[0]: r[1] for r in c.fetchall()})
+    except Exception as e:
+        app_logger.error(f"Failed to count new arrivals: {e}")
+    return out
+
+
+def mark_series_visited(folder_path, user_id=None):
+    """Clear this user's "new" badge for *folder_path* and return the comic
+    paths that arrived since their last visit.
+
+    The returned set survives the clear: previous_visited_at only moves when
+    this visit found something new, so reloading the series page keeps
+    showing the batch that arrived (the series header's run strip dots them).
+    """
+    if not folder_path:
+        return []
+    uid = _resolve_user_id(user_id)
+    now = time.time()
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return []
+            c = conn.cursor()
+            floor = _arrivals_floor(c, uid)
+            c.execute(
+                "SELECT visited_at, previous_visited_at FROM series_visits "
+                "WHERE user_id = ? AND folder_path = ?",
+                (uid, folder_path),
+            )
+            row = c.fetchone()
+            since = max(row[0], floor) if row else floor
+            c.execute(
+                f"SELECT 1 FROM file_index f WHERE f.parent = ? AND {_ARRIVAL_COMIC_SQL} "
+                "AND f.first_indexed_at > ? LIMIT 1",
+                (folder_path, since),
+            )
+            fresh = c.fetchone() is not None
+            previous = since if fresh or not row or row[1] is None else row[1]
+            c.execute(
+                "INSERT INTO series_visits (user_id, folder_path, visited_at, previous_visited_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(user_id, folder_path) DO UPDATE SET "
+                "visited_at = excluded.visited_at, "
+                "previous_visited_at = excluded.previous_visited_at",
+                (uid, folder_path, now, previous),
+            )
+            conn.commit()
+            c.execute(
+                f"SELECT f.path FROM file_index f WHERE f.parent = ? AND {_ARRIVAL_COMIC_SQL} "
+                "AND f.first_indexed_at > ? ORDER BY f.name",
+                (folder_path, previous),
+            )
+            return [r[0] for r in c.fetchall()]
+    except Exception as e:
+        app_logger.error(f"Failed to record series visit for {folder_path}: {e}")
+        return []
 
 
 def _prune_vanished_files_outside_roots():
@@ -7269,7 +7487,10 @@ def get_reading_trends(field_name, year=None, limit=10, user_id=None):
             " AND " + field_name + " != '' AND " + field_name + " IS NOT NULL"
         )
         if year:
-            c.execute(base + " AND strftime('%Y', read_at) = ?", (uid, str(year)))
+            # read_at is UTC; the year is the user's, as on the rest of Insights.
+            from core.user_time import user_offset_hours
+            shift = f"{round(user_offset_hours() * 60):+d} minutes"
+            c.execute(base + " AND strftime('%Y', read_at, ?) = ?", (uid, shift, str(year)))
         else:
             c.execute(base, (uid,))
 
@@ -10768,6 +10989,15 @@ def move_path_references(old_path, new_path, is_dir=False, conn=None):
                  old_path, _like_prefix(old_path)),
             )
             moved += c.rowcount
+            # The "new arrivals" visits are keyed the same way.
+            c.execute(
+                "UPDATE OR REPLACE series_visits SET folder_path = "
+                "CASE WHEN folder_path = ? THEN ? ELSE ? || SUBSTR(folder_path, ?) END "
+                "WHERE folder_path = ? OR folder_path LIKE ? ESCAPE '\\'",
+                (old_path, new_path, new_path, len(old_path) + 1,
+                 old_path, _like_prefix(old_path)),
+            )
+            moved += c.rowcount
 
         if owns_conn:
             conn.commit()
@@ -11565,6 +11795,8 @@ _PULL_LIST_ROW_STATUS_SQL = """
 """
 
 PULL_LIST_STATUSES = ("complete", "missing", "upcoming", "unmonitored")
+# Not a row status: series with issues filed since this user last opened them.
+PULL_LIST_NEW_ARRIVALS = "new"
 
 # Sort keys the page offers -> ORDER BY expression. Every order ends on name,
 # start year and id, so a page boundary never splits ties differently between
@@ -11578,7 +11810,82 @@ _PULL_LIST_SORTS = {
     "issues": "COALESCE(s.issue_count, 0)",
     "collection": "COALESCE(c.missing_past, 0) + COALESCE(c.missing_future, 0)",
     "synced": "COALESCE(s.last_synced_at, '')",
+    # Needs the `nx` join (see _pull_list_next_sql). No next issue sorts last.
+    "next": "COALESCE(nx.next_date, '9999-12-31')",
 }
+
+# An issue the user does not have: no found file and no manual owned/skipped
+# mark. The same test _PULL_LIST_COUNTS_SQL applies, over `cs` and `ims`.
+_UNOWNED_SQL = "(cs.found IS NULL OR cs.found = 0) AND ims.status IS NULL"
+_ISSUE_STATUS_JOINS = """
+    LEFT JOIN collection_status cs
+           ON cs.series_id = i.series_id AND cs.issue_id = i.id
+    LEFT JOIN issue_manual_status ims
+           ON ims.series_id = i.series_id AND ims.issue_number = i.number
+"""
+
+# "Next issue" looks back this far, so an issue that slipped a few weeks still
+# shows (as overdue) instead of vanishing; it is overdue from a week past its date.
+PULL_LIST_NEXT_LOOKBACK_DAYS = 28
+PULL_LIST_OVERDUE_DAYS = 7
+PULL_LIST_STALE_SYNC_DAYS = 14
+
+
+def _shift_date(today, days):
+    """ISO date `days` from `today`. Also what makes the literals below safe
+    to format into SQL: strptime rejects anything but a real date."""
+    return (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def _pull_list_next_sql(today, series_ids=None):
+    """Per mapped series, its earliest unowned issue dated within the last four
+    weeks or later: (series_id, next_number, next_date). Literal dates, no `?`."""
+    cutoff = _shift_date(today, -PULL_LIST_NEXT_LOOKBACK_DAYS)
+    narrow = ""
+    if series_ids is not None:
+        narrow = f"AND i.series_id IN ({_in_placeholders([int(x) for x in series_ids])})"
+    return f"""
+        SELECT series_id, number AS next_number, store_date AS next_date FROM (
+            SELECT i.series_id, i.number, i.store_date,
+                   ROW_NUMBER() OVER (PARTITION BY i.series_id
+                                      ORDER BY i.store_date, i.id) AS rn
+            FROM issues i
+            JOIN series s ON s.id = i.series_id
+                 AND s.mapped_path IS NOT NULL AND s.mapped_path != ''
+            {_ISSUE_STATUS_JOINS}
+            WHERE {_UNOWNED_SQL} AND i.store_date >= '{cutoff}' {narrow}
+        ) WHERE rn = 1
+    """
+
+
+def _pull_list_attention_sql(today):
+    """The four reasons a series "needs attention", as SQL fragments over `s`."""
+    cutoff = _shift_date(today, -PULL_LIST_NEXT_LOOKBACK_DAYS)
+    overdue = _shift_date(today, -PULL_LIST_OVERDUE_DAYS)
+    stale = _shift_date(today, -PULL_LIST_STALE_SYNC_DAYS)
+    return {
+        # The latest try for an issue failed (a later success supersedes it).
+        "failed": """EXISTS (SELECT 1 FROM download_run_items d
+            WHERE d.series_id = s.id AND d.download_status IN ('failed', 'interrupted')
+              AND d.id = (SELECT MAX(d2.id) FROM download_run_items d2
+                          WHERE d2.series_id = d.series_id
+                            AND d2.issue_number = d.issue_number))""",
+        "not_found": """EXISTS (SELECT 1 FROM search_attempts a
+            WHERE a.series_id = s.id AND a.outcome = 'nothing_found'
+              AND NOT EXISTS (SELECT 1 FROM collection_status f
+                              WHERE f.series_id = a.series_id
+                                AND f.issue_number = a.issue_number AND f.found = 1)
+            GROUP BY a.issue_number HAVING COUNT(*) >= 3)""",
+        # The next issue is the earliest unowned one in the window, so it is
+        # overdue exactly when some unowned issue sits between the window's
+        # start and a week ago.
+        "overdue": f"""EXISTS (SELECT 1 FROM issues i {_ISSUE_STATUS_JOINS}
+            WHERE i.series_id = s.id AND {_UNOWNED_SQL}
+              AND i.store_date >= '{cutoff}' AND i.store_date <= '{overdue}')""",
+        # Never synced means the first sync after subscribing failed: the series
+        # has no issue list and would otherwise just read "None announced".
+        "stale": f"(s.last_synced_at IS NULL OR s.last_synced_at < '{stale}')",
+    }
 
 # sqlite3 binds 64-bit integers only, so ?page=99999999999999999999 would
 # raise OverflowError. Anything past the end is clamped to the last page in
@@ -11660,7 +11967,8 @@ def _register_casefold(conn):
     conn.create_function("clu_casefold", 1, _casefold, deterministic=True)
 
 
-def _pull_list_where(q="", publisher_id=None, letter="", status=""):
+def _pull_list_where(q="", publisher_id=None, letter="", status="",
+                     attention=False, today=None):
     """WHERE clause + params for the Pull List filters, over `s`/`p`/`c`.
 
     Returns (sql, params, needs_counts): needs_counts says the clause reads
@@ -11698,12 +12006,53 @@ def _pull_list_where(q="", publisher_id=None, letter="", status=""):
         clauses.append(f"({_PULL_LIST_ROW_STATUS_SQL}) = ?")
         params.append(status)
         needs_counts = True
+    elif status == PULL_LIST_NEW_ARRIVALS:
+        clauses.append(_NEW_ARRIVAL_SERIES_SQL)
+        params.extend(new_arrival_params())
+
+    if attention and today:
+        clauses.append("(" + " OR ".join(_pull_list_attention_sql(today).values()) + ")")
 
     return " AND ".join(clauses), params, needs_counts
 
 
+_ENDED_STATUSES = ("ended", "completed", "cancelled", "canceled")
+
+
+def _next_issue_label(row, today):
+    """(text, overdue) for the Next issue cell: "#19 · Wed 18 Nov", "#45 · Today",
+    "#7 · 3 wk overdue" (from a week past its date), else why there is none."""
+    if not row["next_date"]:
+        ended = (row["status"] or "").lower() in _ENDED_STATUSES
+        return ("Ended" if ended else "None announced"), False
+    due = datetime.strptime(row["next_date"], "%Y-%m-%d")
+    days = (datetime.strptime(today, "%Y-%m-%d") - due).days
+    if days >= PULL_LIST_OVERDUE_DAYS:
+        return f"#{row['next_number']} · {days // 7} wk overdue", True
+    when = "Today" if days == 0 else f"{due:%a} {due.day} {due:%b}"
+    return f"#{row['next_number']} · {when}", False
+
+
+def _attention_reason(row, today):
+    """One line saying why a row needs attention, or "" if it does not."""
+    if row["attn_failed"]:
+        return "Last download failed"
+    if row["attn_not_found"]:
+        return "An issue was not found in 3 searches"
+    if row["attn_overdue"]:
+        return "Next issue is overdue"
+    if row["attn_stale"]:
+        if not row["last_synced_at"]:
+            return "Never synced"
+        days = (datetime.strptime(today, "%Y-%m-%d")
+                - datetime.strptime(row["last_synced_at"][:10], "%Y-%m-%d")).days
+        return f"Not synced for {days} days"
+    return ""
+
+
 def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
-                       sort="", descending=False, page=1, per_page=50):
+                       sort="", descending=False, page=1, per_page=50,
+                       attention=False):
     """One page of the Pull List, filtered and sorted in SQL.
 
     The page used to load every mapped series, aggregate every issue of every
@@ -11724,7 +12073,8 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
     """
     per_page = max(1, int(per_page or 50))
     page = min(max(1, int(page or 1)), _MAX_PAGE)
-    where, params, needs_counts = _pull_list_where(q, publisher_id, letter, status)
+    where, params, needs_counts = _pull_list_where(
+        q, publisher_id, letter, status, attention, today)
     sort_sql = _PULL_LIST_SORTS.get(sort)
     if sort == "collection":
         needs_counts = True
@@ -11736,6 +12086,11 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
     if needs_counts:
         counts_sql, counts_params = _pull_list_counts_sql(today)
         counts_join = f"LEFT JOIN ({counts_sql}) c ON c.series_id = s.id"
+    if sort == "next":
+        counts_join += f" LEFT JOIN ({_pull_list_next_sql(today)}) nx ON nx.series_id = s.id"
+
+    attn = _pull_list_attention_sql(today)
+    attn_cols = ", ".join(f"{sql} AS attn_{k}" for k, sql in attn.items())
 
     try:
         with db_conn() as conn:
@@ -11776,16 +12131,38 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
                            p.name AS publisher_name,
                            COALESCE(c.missing_past, 0) AS missing_past,
                            COALESCE(c.missing_future, 0) AS missing_future,
-                           ({_PULL_LIST_ROW_STATUS_SQL}) AS row_status
+                           ({_PULL_LIST_ROW_STATUS_SQL}) AS row_status,
+                           nx.next_number, nx.next_date, {attn_cols}
                     FROM series s
                     LEFT JOIN publishers p ON p.id = s.publisher_id
                     LEFT JOIN ({page_counts_sql}) c ON c.series_id = s.id
+                    LEFT JOIN ({_pull_list_next_sql(today, ids)}) nx ON nx.series_id = s.id
                     WHERE s.id IN ({_in_placeholders(ids)})
                     """,
-                    page_counts_params + ids,
+                    page_counts_params + ids + ids,
                 )
                 by_id = {row["id"]: dict(row) for row in cur.fetchall()}
                 rows = [by_id[i] for i in ids if i in by_id]
+                # One run per stretch of owned or missing issues, in issue order.
+                cur.execute(
+                    f"""
+                    SELECT i.series_id,
+                           CASE WHEN cs.found = 1 OR ims.status IS NOT NULL
+                                THEN 1 ELSE 0 END AS owned
+                    FROM issues i {_ISSUE_STATUS_JOINS}
+                    WHERE i.series_id IN ({_in_placeholders(ids)})
+                    ORDER BY i.series_id, CAST(i.number AS REAL), i.id
+                    """,
+                    ids,
+                )
+                for r in rows:
+                    r["bar"] = []
+                for sid, owned in cur.fetchall():
+                    bar = by_id[sid]["bar"]
+                    if bar and bar[-1][0] == owned:
+                        bar[-1][1] += 1
+                    else:
+                        bar.append([owned, 1])
     except Exception as e:
         app_logger.error(f"Failed to get pull list page: {e}")
         return {"rows": [], "total": 0, "page": 1, "per_page": per_page,
@@ -11793,19 +12170,25 @@ def get_pull_list_page(today, q="", publisher_id=None, letter="", status="",
 
     for row in rows:
         row["missing_count"] = row["missing_past"] + row["missing_future"]
+        row["have"] = sum(n for owned, n in row["bar"] if owned)
+        row["total_issues"] = sum(n for _, n in row["bar"])
+        row["attention"] = _attention_reason(row, today)
+        row["next_label"], row["next_overdue"] = _next_issue_label(row, today)
 
     return {"rows": rows, "total": total, "page": page, "per_page": per_page,
             "total_pages": max(1, -(-total // per_page)), "error": None}
 
 
-def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status=""):
+def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status="",
+                               attention=False):
     """Every series id matching the Pull List filters, on every page.
 
     Backs "Select all N matching": a page holds only its own rows, so the
     selection across pages has to come from the server. Returns None on a
     database error, so the caller cannot mistake it for "nothing matches".
     """
-    where, params, needs_counts = _pull_list_where(q, publisher_id, letter, status)
+    where, params, needs_counts = _pull_list_where(
+        q, publisher_id, letter, status, attention, today)
     counts_join, counts_params = "", []
     if needs_counts:
         counts_sql, counts_params = _pull_list_counts_sql(today)
@@ -11826,14 +12209,59 @@ def get_pull_list_matching_ids(today, q="", publisher_id=None, letter="", status
         return None
 
 
-def get_pull_list_facets():
+def get_pull_list_this_week(today):
+    """Issues of mapped series with a store date in the current store week
+    (Sunday to Saturday), soonest first.
+
+    Each carries `found` (owned) and the newest download for it: `download_id`
+    and `download_status` (queued, failed...), plus `search_outcome`, the
+    newest search's result, for the strip's state line.
+    """
+    day = datetime.strptime(today, "%Y-%m-%d")
+    start = _shift_date(today, -((day.weekday() + 1) % 7))
+    end = _shift_date(start, 6)
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return []
+            rows = conn.execute(
+                f"""
+                SELECT s.id AS series_id, s.name, s.volume, i.number, i.store_date, i.image,
+                       CASE WHEN cs.found = 1 OR ims.status IS NOT NULL
+                            THEN 1 ELSE 0 END AS found,
+                       (SELECT d.download_id FROM download_run_items d
+                         WHERE d.series_id = s.id AND d.issue_number = i.number
+                         ORDER BY d.id DESC LIMIT 1) AS download_id,
+                       (SELECT d.download_status FROM download_run_items d
+                         WHERE d.series_id = s.id AND d.issue_number = i.number
+                         ORDER BY d.id DESC LIMIT 1) AS download_status,
+                       (SELECT a.outcome FROM search_attempts a
+                         WHERE a.series_id = s.id AND a.issue_number = i.number
+                         ORDER BY a.id DESC LIMIT 1) AS search_outcome
+                FROM issues i
+                JOIN series s ON s.id = i.series_id
+                     AND s.mapped_path IS NOT NULL AND s.mapped_path != ''
+                {_ISSUE_STATUS_JOINS}
+                WHERE i.store_date BETWEEN ? AND ?
+                ORDER BY i.store_date, s.name COLLATE NOCASE, i.id
+                """,
+                (start, end),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        app_logger.error(f"Failed to get this week's pull list issues: {e}")
+        return []
+
+
+def get_pull_list_facets(today=None):
     """What the Pull List's filter bar offers, without loading any rows.
 
     Returns {"total": mapped series, "letters": first letters present (with
     "#" for anything outside A-Z), "publishers": [{id, name}] that have at
-    least one mapped series}.
+    least one mapped series, "new_arrivals": series with issues filed since
+    the current user last opened them}.
     """
-    out = {"total": 0, "letters": [], "publishers": []}
+    out = {"total": 0, "letters": [], "publishers": [], "attention": 0, "new_arrivals": 0}
     try:
         with db_conn() as conn:
             if not conn:
@@ -11842,6 +12270,10 @@ def get_pull_list_facets():
             mapped = "s.mapped_path IS NOT NULL AND s.mapped_path != ''"
             cur.execute(f"SELECT COUNT(*) FROM series s WHERE {mapped}")
             out["total"] = cur.fetchone()[0]
+            if today:
+                where = " OR ".join(_pull_list_attention_sql(today).values())
+                cur.execute(f"SELECT COUNT(*) FROM series s WHERE {mapped} AND ({where})")
+                out["attention"] = cur.fetchone()[0]
             cur.execute(
                 f"SELECT DISTINCT UPPER(SUBSTR(s.name, 1, 1)) FROM series s WHERE {mapped}"
             )
@@ -11860,6 +12292,11 @@ def get_pull_list_facets():
                 """
             )
             out["publishers"] = [{"id": r[0], "name": r[1]} for r in cur.fetchall()]
+            cur.execute(
+                f"SELECT COUNT(*) FROM series s WHERE {mapped} AND {_NEW_ARRIVAL_SERIES_SQL}",
+                new_arrival_params(),
+            )
+            out["new_arrivals"] = cur.fetchone()[0]
     except Exception as e:
         app_logger.error(f"Failed to get pull list facets: {e}")
     return out
@@ -12064,6 +12501,7 @@ def _reading_list_covers(cursor, list_id, thumbnail_path):
         FROM reading_list_entries
         WHERE reading_list_id = ?
         AND COALESCE(manual_override_path, matched_file_path) IS NOT NULL
+        ORDER BY is_highlight DESC, id
         LIMIT 5
     """,
         (list_id,),
@@ -12086,8 +12524,30 @@ _READING_LIST_SORTS = {
     "date-asc": "rl.created_at ASC, rl.id ASC",
     "name-asc": "rl.name COLLATE NOCASE ASC, rl.id ASC",
     "name-desc": "rl.name COLLATE NOCASE DESC, rl.id DESC",
+    "progress-asc": "COALESCE(CAST(p.rd AS REAL) / NULLIF(p.tot, 0), 0) ASC, rl.id ASC",
 }
 READING_LIST_DEFAULT_SORT = "date-desc"
+
+# The grid's Show filter: how far the *viewer* has read each list. ``p`` is
+# _READING_LIST_PROGRESS (tot entries, rd of them read); a list with no
+# entries counts as not started.
+_READING_LIST_SHOWS = {
+    "in-progress": "COALESCE(p.rd, 0) > 0 AND p.rd < p.tot",
+    "not-started": "COALESCE(p.rd, 0) = 0",
+    "finished": "COALESCE(p.tot, 0) > 0 AND p.rd >= p.tot",
+}
+_READING_LIST_PROGRESS = """
+    WITH p AS (
+        SELECT rle.reading_list_id AS lid,
+               COUNT(DISTINCT rle.id) AS tot,
+               COUNT(DISTINCT ir.id) AS rd
+        FROM reading_list_entries rle
+        LEFT JOIN issues_read ir
+               ON COALESCE(rle.manual_override_path, rle.matched_file_path) = ir.issue_path
+              AND ir.user_id = ?
+        GROUP BY rle.reading_list_id)
+"""
+_READING_LIST_FROM = "reading_lists rl LEFT JOIN p ON p.lid = rl.id"
 
 
 def _reading_list_tags(raw):
@@ -12126,10 +12586,14 @@ def _reading_list_tag_where(tags):
     return (" AND ".join(clauses) or "1"), params
 
 
-def _reading_list_where(tags, query=None):
+def _reading_list_where(tags, query=None, show=None):
     """The tag filter plus the search box: the list's name contains ``query``
-    (SQLite LIKE: case-insensitive for ASCII; % and _ are matched literally)."""
+    (SQLite LIKE: case-insensitive for ASCII; % and _ are matched literally),
+    plus the Show filter (a _READING_LIST_SHOWS key; anything else is All).
+    Reads ``p``, so it goes after _READING_LIST_PROGRESS."""
     where, params = _reading_list_tag_where(tags)
+    if show in _READING_LIST_SHOWS:
+        where = f"({where}) AND {_READING_LIST_SHOWS[show]}"
     q = (query or "").strip()
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -12138,8 +12602,32 @@ def _reading_list_where(tags, query=None):
     return where, params
 
 
+def count_reading_lists_by_progress(viewer_id=None):
+    """{"all", "in-progress", "not-started", "finished"}: every list, by how
+    far the viewer has read it. The Show filter's counts and the page's
+    "N in progress" stat."""
+    counts = {"all": 0, "in-progress": 0, "not-started": 0, "finished": 0}
+    try:
+        uid = _resolve_user_id(viewer_id)
+        with db_conn() as conn:
+            if not conn:
+                return counts
+            c = conn.cursor()
+            cases = ", ".join(f"SUM(CASE WHEN {cond} THEN 1 ELSE 0 END)"
+                              for cond in _READING_LIST_SHOWS.values())
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT COUNT(*), {cases} "
+                      f"FROM {_READING_LIST_FROM}", [uid])
+            row = c.fetchone()
+            counts["all"] = row[0] or 0
+            for key, value in zip(_READING_LIST_SHOWS, row[1:]):
+                counts[key] = value or 0
+    except Exception as e:
+        app_logger.error(f"Error counting reading lists by progress: {e}")
+    return counts
+
+
 def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_SORT,
-                           page=1, per_page=40, query=None):
+                           page=1, per_page=40, query=None, show=None):
     """One page of the Reading Lists grid, filtered and sorted in SQL.
 
     Every list is visible to every user (so a reader can browse lists an
@@ -12155,7 +12643,7 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
     per_page = max(1, int(per_page or 40))
     page = max(1, int(page or 1))
     order = _READING_LIST_SORTS.get(sort) or _READING_LIST_SORTS[READING_LIST_DEFAULT_SORT]
-    where, params = _reading_list_where(tags, query)
+    where, params = _reading_list_where(tags, query, show)
     empty = {"lists": [], "total": 0, "page": 1, "per_page": per_page, "total_pages": 1}
     try:
         uid = _resolve_user_id(viewer_id)
@@ -12164,15 +12652,16 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
                 return empty
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute(f"SELECT COUNT(*) FROM reading_lists rl WHERE {where}", params)
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT COUNT(*) FROM {_READING_LIST_FROM} "
+                      f"WHERE {where}", [uid] + params)
             total = c.fetchone()[0]
             total_pages = max(1, -(-total // per_page))
             page = min(page, total_pages)
 
             c.execute(
-                f"SELECT rl.id FROM reading_lists rl WHERE {where} "
+                f"{_READING_LIST_PROGRESS} SELECT rl.id FROM {_READING_LIST_FROM} WHERE {where} "
                 f"ORDER BY {order} LIMIT ? OFFSET ?",
-                params + [per_page, (page - 1) * per_page],
+                [uid] + params + [per_page, (page - 1) * per_page],
             )
             ids = [row[0] for row in c.fetchall()]
             if not ids:
@@ -12182,7 +12671,10 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
                 f"""
                 SELECT rl.*,
                        COUNT(DISTINCT rle.id) as entry_count,
-                       COUNT(DISTINCT ir.id) as read_count
+                       COUNT(DISTINCT ir.id) as read_count,
+                       COUNT(DISTINCT CASE WHEN COALESCE(rle.manual_override_path,
+                                                         rle.matched_file_path) IS NOT NULL
+                                      THEN rle.id END) as owned_count
                 FROM reading_lists rl
                 LEFT JOIN reading_list_entries rle ON rl.id = rle.reading_list_id
                 LEFT JOIN issues_read ir
@@ -12205,19 +12697,21 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
         return empty
 
 
-def get_reading_list_matching_ids(tags=None, query=None):
+def get_reading_list_matching_ids(tags=None, query=None, show=None, viewer_id=None):
     """Every reading-list id carrying all of ``tags`` (and matching the search
-    ``query``), on every page.
+    ``query`` and the Show filter), on every page.
 
     Backs the grid's "Select All": a page holds only its own cards.
     """
-    where, params = _reading_list_where(tags, query)
+    where, params = _reading_list_where(tags, query, show)
     try:
+        uid = _resolve_user_id(viewer_id)
         with db_conn() as conn:
             if not conn:
                 return []
             c = conn.cursor()
-            c.execute(f"SELECT rl.id FROM reading_lists rl WHERE {where} ORDER BY rl.id", params)
+            c.execute(f"{_READING_LIST_PROGRESS} SELECT rl.id FROM {_READING_LIST_FROM} "
+                      f"WHERE {where} ORDER BY rl.id", [uid] + params)
             return [row[0] for row in c.fetchall()]
     except Exception as e:
         app_logger.error(f"Error getting reading list ids: {e}")
@@ -12390,6 +12884,45 @@ def clear_thumbnail_if_matches_entry(list_id, entry_id):
             f"Error checking/clearing thumbnail for list {list_id}: {str(e)}"
         )
         return False
+
+
+MAX_READING_LIST_HIGHLIGHTS = 3
+
+
+def set_entry_highlight(list_id, entry_id, highlight):
+    """Pin (or unpin) an entry's cover to the front of its list card.
+
+    Returns (ok, message). At most MAX_READING_LIST_HIGHLIGHTS mapped entries
+    per list; an entry with no file has no cover, so it is neither counted
+    nor pinnable.
+    """
+    with db_conn() as conn:
+        if not conn:
+            return False, "Database unavailable"
+        c = conn.cursor()
+        if highlight:
+            c.execute(
+                """
+                SELECT COUNT(*) FROM reading_list_entries
+                WHERE reading_list_id = ? AND is_highlight = 1 AND id != ?
+                AND COALESCE(manual_override_path, matched_file_path) IS NOT NULL
+                """,
+                (list_id, entry_id),
+            )
+            if c.fetchone()[0] >= MAX_READING_LIST_HIGHLIGHTS:
+                return False, f"Only {MAX_READING_LIST_HIGHLIGHTS} highlight covers per list"
+        c.execute(
+            """
+            UPDATE reading_list_entries SET is_highlight = ?
+            WHERE id = ? AND reading_list_id = ?
+            AND (? = 0 OR COALESCE(manual_override_path, matched_file_path) IS NOT NULL)
+            """,
+            (1 if highlight else 0, entry_id, list_id, 1 if highlight else 0),
+        )
+        conn.commit()
+        if not c.rowcount:
+            return False, "Entry not found or not mapped to a file"
+    return True, "Highlight updated"
 
 
 def delete_reading_list(list_id):
@@ -13757,6 +14290,27 @@ def import_series_row(entry):
         conn.close()
 
 
+def set_series_header_focus(series_id, focus):
+    """Store the banner slice (0-100) for a series, or None for the blurred cover.
+
+    Returns True when the series exists and was updated.
+    """
+    with db_conn() as conn:
+        if not conn:
+            return False
+        try:
+            cur = conn.execute(
+                "UPDATE series SET header_focus = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (focus, series_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            app_logger.error(f"Failed to set header focus for series {series_id}: {e}")
+            return False
+
+
 def update_series_desc(series_id, desc):
     """
     Update the description for a series.
@@ -13819,6 +14373,33 @@ def get_series_mapping(series_id):
     except Exception as e:
         app_logger.error(f"Failed to get series mapping for {series_id}: {e}")
         return None
+
+
+def get_series_slugs_for_folders(folders):
+    """{folder: series page slug} for the folders mapped to a series.
+
+    A folder is a series once a series row's ``mapped_path`` names it exactly
+    (Subscribe or Change Location). Folders with no series are left out, so
+    callers show a Series page link only where one exists. One query per 500
+    folders; when two series claim a folder, the lower id wins.
+    """
+    from helpers.series_slug import generate_series_slug
+    folders = [f for f in dict.fromkeys(folders) if f]
+    slugs = {}
+    with db_conn() as conn:
+        if not conn:
+            return slugs
+        for i in range(0, len(folders), 500):
+            chunk = folders[i:i + 500]
+            rows = conn.execute(
+                "SELECT id, name, volume, mapped_path FROM series"
+                " WHERE mapped_path IN (" + ",".join("?" * len(chunk)) + ")"
+                " ORDER BY id DESC",
+                chunk,
+            ).fetchall()
+            for sid, name, volume, path in rows:
+                slugs[path] = generate_series_slug(name, sid, volume)
+    return slugs
 
 
 def get_series_by_id(series_id):
@@ -14036,6 +14617,56 @@ def remove_series_mappings_bulk(series_ids):
     except Exception as e:
         app_logger.error(f"Failed to bulk-remove series mappings: {e}")
         return 0
+
+
+def unsubscribe_series_returning_path(series_id):
+    """Unsubscribe one series and return the folder it was mapped to.
+
+    Unsubscribing only clears ``mapped_path`` (monitored flag, lock and every
+    other column stay), so the returned path is all an Undo needs. Returns
+    None when the series was not subscribed or the write failed.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            row = conn.execute(
+                "SELECT mapped_path FROM series WHERE id = ?", (int(series_id),)
+            ).fetchone()
+            if not row or not row["mapped_path"]:
+                return None
+            conn.execute(
+                "UPDATE series SET mapped_path = NULL, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (int(series_id),),
+            )
+            conn.commit()
+            return row["mapped_path"]
+    except Exception as e:
+        app_logger.error(f"Failed to unsubscribe series {series_id}: {e}")
+        return None
+
+
+def restore_series_mapping(series_id, mapped_path):
+    """Undo an unsubscribe: put ``mapped_path`` back on a series that has none.
+
+    Never overwrites a mapping made since (the WHERE clause). Returns True when
+    the row was restored.
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            cur = conn.execute(
+                "UPDATE series SET mapped_path = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ? AND (mapped_path IS NULL OR mapped_path = '')",
+                (mapped_path, int(series_id)),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+    except Exception as e:
+        app_logger.error(f"Failed to restore series mapping for {series_id}: {e}")
+        return False
 
 
 # =============================================================================

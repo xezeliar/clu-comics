@@ -133,5 +133,8 @@ class TestStatusTemplate:
         with app.test_request_context("/status"):
             html = render_template("status.html")
         assert 'id="runs-tab"' in html
-        assert 'id="downloads-table"' in html
+        assert 'id="downloads-pane"' in html
+        assert 'id="queue-pane"' not in html  # merged into Downloads
+        assert "/api/usenet/downloads/ID/dismiss" in html
+        assert "/api/download-clients/downloads/clear" in html
         assert "/api/download-runs" in html

@@ -121,6 +121,7 @@
 
     <!-- Setup checklist: filled by loadOnboarding() while it has steps left -->
     <div id="onboarding-card" class="mb-4"></div>
+    <div id="whats-new-card" class="mb-4"></div>
 
     <!-- Dashboard Sections -->
     <div id="dashboard-sections" class="mb-5">
@@ -259,6 +260,8 @@
             </button>
             <span class="issue-badge" style="display: none;"><span class="issue-number"></span><i
                     class="bi bi-book read-icon"></i></span>
+            {# "New issue arrived" sticker on a folder card; renderPage fills it. #}
+            <span class="new-badge" aria-hidden="true" hidden></span>
             <span class="xml-badge" style="display: none;" title="No ComicInfo.xml">
                 <i class="bi bi-file-earmark-x fs-6"></i>
             </span>
@@ -515,6 +518,24 @@
     </div>
 </div>
 <!-- End of Text File Viewer Modal -->
+<!-- Issue actions for the home shelves (collection.js openIssueActions) -->
+<div class="modal fade clu-action-sheet" id="issueActionsModal" tabindex="-1" aria-labelledby="issueActionsTitle" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-6 text-truncate" id="issueActionsTitle"></h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="list-group list-group-flush">
+                <button type="button" class="list-group-item list-group-item-action" data-act="read"><i class="bi bi-book me-2"></i>Read</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="folder"><i class="bi bi-folder2-open me-2"></i>Open Folder</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="read-date"><i class="bi bi-calendar-check me-2"></i><span>Set Read Date</span></button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="unread" hidden><i class="bi bi-arrow-counterclockwise me-2"></i>Mark as Unread</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="list"><i class="bi bi-journal-plus me-2"></i>Add to Reading List</button>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- Set Read Date Modal -->
 <div class="modal fade" id="setReadDateModal" tabindex="-1">
     <div class="modal-dialog modal-sm modal-dialog-centered">
@@ -895,5 +916,52 @@
         } catch (e) { /* the card is optional; the page works without it */ }
     }
     loadOnboarding();
+
+    // "What's new" after an upgrade: a flat panel, dismissed per version.
+    async function loadWhatsNew() {
+        const host = document.getElementById('whats-new-card');
+        if (!host) return;
+        try {
+            const data = await (await fetch({{ url_for('collection.api_whats_new') | tojson | safe }})).json();
+            if (!data.visible) return;
+            const panel = document.createElement('section');
+            panel.className = 'border rounded p-3';
+            panel.setAttribute('aria-label', "What's new");
+            const head = document.createElement('div');
+            head.className = 'd-flex justify-content-between align-items-center mb-2';
+            const title = document.createElement('h2');
+            title.className = 'h5 m-0';
+            title.textContent = "What's new in CLU " + data.version;
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'btn btn-sm btn-outline-secondary';
+            dismiss.textContent = 'Dismiss';
+            dismiss.addEventListener('click', async () => {
+                try {
+                    const r = await fetch({{ url_for('collection.api_whats_new_dismiss') | tojson | safe }}, { method: 'POST' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    host.replaceChildren();
+                } catch (e) {
+                    CLU.toast("Could not dismiss What's new", 'danger');
+                }
+            });
+            head.append(title, dismiss);
+            const list = document.createElement('ul');
+            list.className = 'mb-2';
+            data.items.forEach(t => {
+                const li = document.createElement('li');
+                li.textContent = t;
+                list.appendChild(li);
+            });
+            const link = document.createElement('a');
+            link.href = data.changelog_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = 'Read the full changelog';
+            panel.append(head, list, link);
+            host.replaceChildren(panel);
+        } catch (e) { /* the card is optional; the page works without it */ }
+    }
+    loadWhatsNew();
 </script>
 {% endblock %}

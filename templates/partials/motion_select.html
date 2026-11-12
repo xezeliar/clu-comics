@@ -1,0 +1,7 @@
+{# The reduce_motion choice (core/settings.py REDUCE_MOTION), for /account and
+   /config. Callers pass select_id and selected_motion. #}
+<select class="form-select" id="{{ select_id }}" style="max-width: 20rem;">
+  {% for value, label in [('system', 'Follow system setting'), ('reduce', 'Reduce motion'), ('full', 'Full motion')] %}
+  <option value="{{ value }}"{% if (selected_motion or 'system') == value %} selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+</select>

@@ -55,10 +55,24 @@
     <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger" id="sc-delete-confirm">Delete</button></div>
   </div></div>
 </div>
+
+{% include 'partials/reader_modal.html' %}
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}">
+<style>
+  .sc-issue { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; }
+  .sc-issue:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: 4px; }
+</style>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/clu-streaming.js') }}"></script>
+<script src="{{ url_for('static', filename='js/reader.js') }}"></script>
 <script>
 (function () {
   var FIELDS = {{ fields|tojson }};
@@ -67,7 +81,7 @@
   var OPS = {is: 'is', is_not: 'is not', contains: 'contains', before: 'before', after: 'after', within_days: 'within last (days)'};
   var api = "{{ url_for('smart_collections.api_list') }}";
   var PAGE = 60;
-  var collections = [], current = null, loaded = 0;
+  var collections = [], current = null, loaded = 0, readerItems = [];
   var $ = function (id) { return document.getElementById(id); };
 
   function el(tag, cls, text) {
@@ -145,6 +159,7 @@
     renderList();
     $('sc-grid').textContent = '';
     loaded = 0;
+    readerItems = [];
     $('sc-total').textContent = '';
     $('sc-more').classList.add('d-none');
     $('sc-no-results').classList.add('d-none');
@@ -154,10 +169,27 @@
   function card(it) {
     var col = el('div', 'col-4 col-md-3 col-xl-2');
     var a = el('div', 'small');
+    // Cover and title open the issue in the reader; "Next issue" follows the
+    // collection as loaded so far.
+    var open = el('button', 'sc-issue');
+    open.type = 'button';
+    open.title = it.name;
     var img = el('img', 'img-fluid rounded mb-1');
     img.src = it.thumbnail_url; img.loading = 'lazy'; img.alt = '';
-    a.appendChild(img);
-    a.appendChild(el('div', 'text-truncate', it.series ? it.series + (it.number ? ' #' + it.number : '') : it.name));
+    open.appendChild(img);
+    open.appendChild(el('div', 'text-truncate', it.series ? it.series + (it.number ? ' #' + it.number : '') : it.name));
+    open.addEventListener('click', function () {
+      if (typeof window.openComicReader !== 'function') { CLU.toast('Reader failed to load. Try refreshing the page.', 'error'); return; }
+      window._readerAllItems = readerItems;
+      window.openComicReader(it.path);
+    });
+    a.appendChild(open);
+    // An issue whose folder is mapped to a series links to the series page.
+    if (it.series_url) {
+      var link = el('a', 'd-block text-truncate small', 'Series page');
+      link.href = it.series_url;
+      a.appendChild(link);
+    }
     a.appendChild(el('div', 'text-muted text-truncate', [it.publisher, it.year].filter(Boolean).join(' · ')));
     col.appendChild(a);
     return col;
@@ -167,7 +199,10 @@
     var id = current.id;
     fetch(api + '/' + id + '/issues?offset=' + loaded + '&limit=' + PAGE).then(function (r) { return r.json(); }).then(function (d) {
       if (!current || current.id !== id || !d.success) return;
-      d.items.forEach(function (it) { $('sc-grid').appendChild(card(it)); });
+      d.items.forEach(function (it) {
+        readerItems.push({ type: 'file', name: it.name, path: it.path, thumbnailUrl: it.thumbnail_url });
+        $('sc-grid').appendChild(card(it));
+      });
       loaded += d.items.length;
       $('sc-total').textContent = d.total + ' issue' + (d.total === 1 ? '' : 's');
       $('sc-more').classList.toggle('d-none', loaded >= d.total);

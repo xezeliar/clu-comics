@@ -1,8 +1,8 @@
-{% from 'partials/empty_state.html' import no_matches %}
+{% from 'partials/empty_state.html' import no_matches, empty_state %}
 {# One page of Pull List rows. Rendered by /pull-list for the first page and by
 /api/pull-list/rows for every later one, so the two cannot drift. #}
 {% for series in series_list %}
-<tr data-series-id="{{ series.id }}"
+<tr data-series-id="{{ series.id }}" data-series-name="{{ series.name }}" data-swipe-row
     data-status-color="{{ series.row_status }}"
     class="{{ {'complete':'table-success','missing':'table-danger','upcoming':'table-info','unmonitored':'table-secondary'}.get(series.row_status, '') }}">
     <td class="ps-4">
@@ -16,6 +16,8 @@
             <span class="text-muted fw-normal">Vol. {{ series.volume }}</span>
             {% endif %}
         </a>
+        <span class="pl-sub small text-muted">{{ [series.status, series.volume_year, series.publisher_name] | select | join(' · ') }}</span>
+        {% if series.attention %}<span class="d-block small text-danger-emphasis">{{ series.attention }}</span>{% endif %}
     </td>
     <td class="text-center" data-col="year">
         {% if series.volume_year %}
@@ -38,12 +40,16 @@
         <span class="text-muted">-</span>
         {% endif %}
     </td>
-    <td class="text-center">
-        {% if series.issue_count %}
-        <span class="badge bg-info">{{ series.issue_count }}</span>
+    <td class="pl-have">
+        {% if series.total_issues %}
+        <span class="pl-bar" aria-hidden="true">{% for owned, n in series.bar %}<i{% if not owned %} class="pl-miss"{% endif %} style="flex-grow: {{ n }}"></i>{% endfor %}</span>
+        <small class="text-muted text-nowrap">{{ series.have }} of {{ series.total_issues }}</small>
         {% else %}
         <span class="text-muted">-</span>
         {% endif %}
+    </td>
+    <td data-col="next" class="text-nowrap pl-next">
+        <small{% if series.next_overdue %} class="text-danger-emphasis"{% endif %}>{{ series.next_label }}</small>
     </td>
     <td data-col="collection">
         {% if series.row_status == 'unmonitored' %}
@@ -74,17 +80,51 @@
                 <i class="bi bi-eye"></i>
             </a>
         </div>
+        {# Row menu (UX polish): every row action, keyboard reachable. On phones
+        it opens as a bottom sheet, and a swipe left reveals its last two items
+        (clu-gestures.js); the page script handles data-pl-action. #}
+        <div class="dropdown d-inline-block clu-row-more">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown"
+                data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false"
+                aria-label="More actions for {{ series.name }}" title="More actions">
+                <i class="bi bi-three-dots"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ url_for('series.series_view', slug=generate_series_slug(series.name, series.id, series.volume)) }}">Open</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('series.wanted', q=series.name) }}">Open in Wanted</a></li>
+                <li><button type="button" class="dropdown-item" data-pl-action="monitor"
+                    data-monitored="{{ 'false' if series.row_status == 'unmonitored' else 'true' }}">{{ 'Monitor' if series.row_status == 'unmonitored' else 'Stop monitoring' }}</button></li>
+                <li><button type="button" class="dropdown-item" data-pl-action="unsubscribe">Unsubscribe</button></li>
+            </ul>
+        </div>
+        <div class="clu-swipe-acts" hidden>
+            <button type="button" tabindex="-1" data-pl-action="monitor"
+                data-monitored="{{ 'false' if series.row_status == 'unmonitored' else 'true' }}">{{ 'Monitor' if series.row_status == 'unmonitored' else 'Stop monitoring' }}</button>
+            <button type="button" tabindex="-1" data-pl-action="unsubscribe">Unsubscribe</button>
+        </div>
     </td>
 </tr>
 {% else %}
+{% set sugg = [] %}
+{% for s in (suggestions or []) %}
+{% set _ = sugg.append({'name': s.name, 'href': url_for('series.series_view', slug=generate_series_slug(s.name, s.id, s.volume))}) %}
+{% endfor %}
 <tr class="pl-no-match">
     {% if load_error %}
-    <td colspan="9" class="text-center text-danger py-4">{{ load_error }}</td>
+    <td colspan="10" class="text-center text-danger py-4">{{ load_error }}</td>
+    {% elif filters and filters.attention and not (filters.q or filters.publisher_id or filters.letter or filters.status) %}
+    {# Only when the filter itself empties the list; other filters say "no match". #}
+    <td colspan="10" class="border-0">
+        {% call empty_state('Nothing needs attention', 'No failed downloads, overdue issues or stale syncs.', 'bi-check-circle', tone='success') %}
+        <button type="button" class="btn btn-outline-secondary" id="plClear">Clear filters</button>
+        {% endcall %}
+    </td>
     {% else %}
-    <td colspan="9" class="border-0">
+    <td colspan="10" class="border-0">
         {{ no_matches('series', query=filters.q if filters else '',
-                      filtered=filters and (filters.publisher_id or filters.letter or filters.status),
-                      clear_id='plClear') }}
+                      filtered=filters and (filters.publisher_id or filters.letter or filters.status or filters.attention),
+                      clear_id='plClear', suggestions=sugg,
+                      suggestions_hidden=filters and (filters.publisher_id or filters.letter or filters.status or filters.attention)) }}
     </td>
     {% endif %}
 </tr>

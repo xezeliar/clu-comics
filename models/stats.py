@@ -286,7 +286,7 @@ def get_largest_comics(limit=20):
 
         # Get files with comic extensions, ordered by size
         c.execute("""
-            SELECT name, path, size FROM file_index
+            SELECT name, path, parent, size FROM file_index
             WHERE type = 'file'
             AND (LOWER(path) LIKE '%.cbz' OR LOWER(path) LIKE '%.cbr'
                  OR LOWER(path) LIKE '%.cb7' OR LOWER(path) LIKE '%.pdf')
@@ -295,7 +295,9 @@ def get_largest_comics(limit=20):
         """, (limit,))
 
         rows = c.fetchall()
-        data = [{'name': row['name'], 'size': row['size'] or 0} for row in rows]
+        # The folder's name only, never its path (Insights shows it under the file).
+        data = [{'name': row['name'], 'size': row['size'] or 0,
+                 'folder': os.path.basename((row['parent'] or '').rstrip('/'))} for row in rows]
 
         conn.close()
 

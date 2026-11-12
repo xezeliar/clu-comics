@@ -295,7 +295,7 @@ a.clu-stat:focus-visible .clu-stat-value {
 
 .clu-page-help > summary .bi {
     font-size: 0.75em;
-    transition: transform 0.15s ease-out;
+    transition: transform var(--clu-dur-fast) var(--clu-ease);
 }
 
 .clu-page-help[open] > summary .bi {
@@ -716,8 +716,9 @@ a.clu-stat:focus-visible .clu-stat-value {
     to   { background-position: -200% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .clu-skeleton { animation: none; }
+    :root:not([data-clu-motion="full"]) .clu-skeleton { animation: none; }
 }
+:root[data-clu-motion="reduce"] .clu-skeleton { animation: none; }
 
 /* ── Pull-to-refresh indicator (clu-pull-refresh.js) ─────────────────────── */
 .clu-ptr {
@@ -802,3 +803,319 @@ a.clu-stat:focus-visible .clu-stat-value {
     padding-left: env(safe-area-inset-left, 0px);
     padding-right: env(safe-area-inset-right, 0px);
 }
+
+/* Selection colours.
+   --clu-select is an outline: the theme's primary pushed 30% toward its
+   emphasis colour (black on light themes, white on dark), so it stands off the
+   page on either.
+   --clu-select-fill carries white ink (the check, the drop label), so it is
+   always pushed toward black - pushing it toward white on a dark theme would
+   leave Cyborg's or Solar's white check at about 2:1.
+   Plain primary first: a custom property holding an unsupported color-mix()
+   is not discarded at parse time, it is invalid wherever it is used. */
+:root {
+    --clu-select: var(--bs-primary);
+    --clu-select-fill: var(--bs-primary);
+}
+
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+    :root {
+        --clu-select: color-mix(in srgb, var(--bs-primary) 70%, var(--bs-emphasis-color));
+        --clu-select-fill: color-mix(in srgb, var(--bs-primary) 70%, #000);
+    }
+}
+
+/* Visible focus ring (UX polish): one ring everywhere, keyboard focus only.
+   Controls that fill with the accent (navbar, primary buttons) take the fill's
+   text colour; cover art gets white with a dark outer edge so it shows on any
+   artwork. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--clu-select, var(--bs-primary));
+  outline-offset: 2px;
+}
+.navbar :focus-visible,
+.btn-primary:focus-visible {
+  outline-color: currentColor;
+}
+.grid-item :focus-visible {
+  outline-color: #fff;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.75);
+}
+
+/* Touch shortcuts (clu-gestures.js). A held cover presses to 95%. :hover is
+   listed too: collection.css's .grid-item:hover lift has the same specificity,
+   loads later and would otherwise replace the press under a mouse. */
+.grid-item.clu-pressing,
+.grid-item.clu-pressing:hover,
+.dashboard-card.clu-pressing,
+.dashboard-card.clu-pressing:hover {
+  transform: scale(0.95);
+  transition: transform 0.12s ease-out;
+}
+.grid-item, .dashboard-card { -webkit-touch-callout: none; }
+/* The browser's own long-press on the cover (image drag, text selection) would
+   cancel the hold before it opens the menu. */
+.grid-item .thumbnail-container,
+.dashboard-card-img-container { -webkit-user-select: none; user-select: none; }
+.grid-item .thumbnail-container img,
+.dashboard-card-img-container img { -webkit-user-drag: none; }
+@media (prefers-reduced-motion: reduce) {
+  .grid-item.clu-pressing, .dashboard-card.clu-pressing { transition: none; }
+}
+
+/* Menus as a bottom sheet below 576px. !important beats Popper's inline
+   placement. */
+.clu-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1055;
+  background: rgba(0, 0, 0, 0.3);
+  animation: clu-sheet-fade 0.2s ease-out;
+}
+.clu-sheet-host {
+  transform: none !important;
+  filter: none !important;
+  will-change: auto !important;
+  contain: none !important;
+  z-index: auto !important;
+}
+.dropdown-menu.clu-sheet {
+  position: fixed !important;
+  inset: auto 0 0 0 !important;
+  transform: none !important;
+  margin: 0 !important;
+  width: 100%;
+  max-height: 70vh;
+  overflow-y: auto;
+  /* !important: page rules such as .item-actions .dropdown-menu (1050) have
+     the same specificity and load later, which put the sheet under its scrim. */
+  z-index: 1056 !important;
+  border-radius: 1rem 1rem 0 0;
+  padding: 1.5rem 0 max(0.5rem, env(safe-area-inset-bottom));
+  animation: clu-sheet-up 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes clu-sheet-up { from { translate: 0 100%; } }
+@keyframes clu-sheet-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-clu-motion="full"]) .dropdown-menu.clu-sheet { animation: none; }
+  :root:not([data-clu-motion="full"]) .clu-sheet-scrim { animation: none; }
+}
+/* The in-app "Reduce motion" setting, whatever the OS says. */
+:root[data-clu-motion="reduce"] .dropdown-menu.clu-sheet { animation: none; }
+:root[data-clu-motion="reduce"] .clu-sheet-scrim { animation: none; }
+.dropdown-menu.clu-sheet::before {
+  content: "";
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  width: 2.5rem;
+  height: 0.25rem;
+  margin-left: -1.25rem;
+  border-radius: 0.125rem;
+  background: var(--bs-secondary-color);
+  opacity: 0.5;
+}
+.dropdown-menu.clu-sheet .dropdown-item {
+  padding: 0.75rem 1.5rem;
+}
+
+/* Swipe rows (clu-gestures.js). The cells slide left by --clu-sw-x; the
+   action strip lives in the last cell and slides back by the same amount, so
+   it stays pinned to the row's right edge. Unsubscribe is undoable, so it is
+   not drawn in danger red. */
+[data-swipe-row] { touch-action: pan-x pan-y; }
+[data-swipe-row].clu-swiping > td {
+  transform: translateX(var(--clu-sw-x, 0));
+  transition: transform 0.25s ease-out;
+}
+[data-swipe-row].clu-swipe-drag > td { transition: none; }
+.clu-swipe-acts {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 176px;
+  display: flex;
+  transform: translateX(calc(-1 * var(--clu-sw-x, 0px)));
+}
+.clu-swipe-acts[hidden] { display: none; }
+.clu-swipe-acts button {
+  flex: 1;
+  border: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--bs-secondary-color);
+  color: var(--bs-body-bg);
+}
+.clu-swipe-acts button + button { background: var(--bs-emphasis-color); }
+@media (prefers-reduced-motion: reduce) {
+  [data-swipe-row].clu-swiping > td { transition: none; }
+}
+
+/* ---- Motion tokens (design board "Motion") ---------------------------
+   One scale. A literal duration or easing in page CSS is drift: use these.
+   Spring is for toast arrival and press release only (overshoot of a pixel
+   or two); sheets use ease-out, since an overshooting sheet shows a gap. */
+:root {
+    --clu-dur-press: 120ms;
+    --clu-dur-fast: 150ms;
+    --clu-dur-base: 250ms;
+    --clu-dur-travel-in: 400ms;
+    --clu-dur-travel-back: 300ms;
+    --clu-dur-long: 500ms;
+    --clu-ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --clu-spring: cubic-bezier(0.34, 1.35, 0.64, 1);
+    --clu-stagger: 40ms;
+}
+
+/* Press feedback: scale to 97% on touch-down, back on the spring. :active
+   also covers the keyboard's pressed state. */
+.btn,
+.dashboard-card,
+.grid-item {
+    transition-property: transform, color, background-color, border-color, box-shadow, opacity;
+    transition-duration: var(--clu-dur-base);
+    transition-timing-function: var(--clu-spring);
+}
+.btn:active:not(:disabled),
+.dashboard-card:active,
+.grid-item:active {
+    transform: scale(0.97);
+    transition-duration: var(--clu-dur-press);
+    transition-timing-function: var(--clu-ease);
+}
+
+/* Toast arrival: rise 16px on the spring. Leaving is Bootstrap's own 150ms
+   .fade. */
+@keyframes clu-toast-in {
+    from { transform: translateY(16px); }
+}
+.clu-toast.show {
+    animation: clu-toast-in var(--clu-dur-base) var(--clu-spring);
+}
+
+/* Collapsibles (Bootstrap .collapse): the height transition on the token. */
+.collapsing {
+    transition-duration: var(--clu-dur-base);
+    transition-timing-function: var(--clu-ease);
+}
+
+/* Reduced motion: no movement or scale, only colour and opacity fades at
+   150ms, so an action is still acknowledged. Status indicators (the
+   Active Operations spinner, loading pulse) keep running: they report state.
+   Same pair of selectors the board specifies for the reduce_motion setting. */
+@media (prefers-reduced-motion: reduce) {
+    :root:not([data-clu-motion="full"]) *,
+    :root:not([data-clu-motion="full"]) *::before,
+    :root:not([data-clu-motion="full"]) *::after {
+        transition-property: opacity, color, background-color, border-color, filter !important;
+        transition-duration: var(--clu-dur-fast) !important;
+        scroll-behavior: auto !important;
+    }
+    :root:not([data-clu-motion="full"]) .clu-toast.show { animation: none; }
+    :root:not([data-clu-motion="full"]) .btn:active:not(:disabled),
+    :root:not([data-clu-motion="full"]) .dashboard-card:active,
+    :root:not([data-clu-motion="full"]) .grid-item:active,
+    :root:not([data-clu-motion="full"]) .grid-item:hover,
+    :root:not([data-clu-motion="full"]) .dashboard-card:hover {
+        transform: none !important;
+        filter: brightness(0.88);
+    }
+}
+:root[data-clu-motion="reduce"] *,
+:root[data-clu-motion="reduce"] *::before,
+:root[data-clu-motion="reduce"] *::after {
+    transition-property: opacity, color, background-color, border-color, filter !important;
+    transition-duration: var(--clu-dur-fast) !important;
+    scroll-behavior: auto !important;
+}
+:root[data-clu-motion="reduce"] .clu-toast.show { animation: none; }
+:root[data-clu-motion="reduce"] .btn:active:not(:disabled),
+:root[data-clu-motion="reduce"] .dashboard-card:active,
+:root[data-clu-motion="reduce"] .grid-item:active,
+:root[data-clu-motion="reduce"] .grid-item:hover,
+:root[data-clu-motion="reduce"] .dashboard-card:hover {
+    transform: none !important;
+    filter: brightness(0.88);
+}
+
+/* ---- Cross-document view transitions -----------------------------------
+   CLU is a multi-page app, so the shared cover (grid -> series header) and
+   the phone tab pill move with @view-transition. Only named elements travel;
+   the page itself cross-fades at Fast. Browsers without cross-document
+   transitions cut over as before. clu-motion.js names the tapped cover and
+   adds .clu-vt-back on a back navigation so the return takes 300ms. */
+@view-transition { navigation: auto; }
+.clu-shared-cover { view-transition-name: clu-cover; }
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: var(--clu-dur-fast); }
+::view-transition-group(clu-cover) {
+    animation-duration: var(--clu-dur-travel-in);
+    animation-timing-function: var(--clu-ease);
+}
+:root.clu-vt-back::view-transition-group(clu-cover) { animation-duration: var(--clu-dur-travel-back); }
+::view-transition-group(clu-tab-pill) {
+    animation-duration: var(--clu-dur-base);
+    animation-timing-function: var(--clu-ease);
+}
+
+/* Sliding pill on the phone tab bar: one layer behind the active tab, so no
+   tab changes size and no label moves. The label's colour changes at once;
+   the pill is never the only sign of the active tab. */
+.clu-tabbar a { position: relative; }
+.clu-tabbar a > i,
+.clu-tabbar a > span:not(.clu-tabbar-pill) { position: relative; }
+.clu-tabbar-pill {
+    position: absolute;
+    inset: 3px 8%;
+    border-radius: 0.75rem;
+    background: color-mix(in srgb, var(--bs-primary) 16%, transparent);
+    view-transition-name: clu-tab-pill;
+}
+.clu-tabbar a.active { font-weight: 600; }
+
+/* Reader close ghost (clu-motion.js): above the page, never hit-tested. */
+.clu-motion-ghost {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    margin: 0;
+}
+
+/* Favourite burst: Favourite Amber, a fixed colour, because the dots sit on
+   cover art. */
+.clu-spark {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    margin: -2.5px;
+    border-radius: 50%;
+    background: #ffc107;
+    pointer-events: none;
+}
+
+/* Count-up: tabular figures keep the line from shifting while it counts. */
+[data-clu-count] { font-variant-numeric: tabular-nums; }
+
+/* Toast swipe-to-dismiss (clu-toast.js): sideways drags are ours, vertical
+   scrolling stays the browser's. */
+.clu-toast { touch-action: pan-y; }
+
+/* Reduced motion: view transitions keep only the browser's plain cross-fade
+   (the pill jumps, the cover does not travel). JS animations check
+   CLU.reducedMotion(), which reads the same two selectors' inputs. */
+@media (prefers-reduced-motion: reduce) {
+    :root:not([data-clu-motion="full"])::view-transition-group(*) { animation: none; }
+}
+:root[data-clu-motion="reduce"]::view-transition-group(*) { animation: none; }
+
+/* Series header ring: the owned arc fills from zero on load (Long, ease-out).
+   Reduced motion: drawn at its value straight away. */
+@keyframes clu-ring-fill { from { stroke-dasharray: 0 87.96; } }
+.sh-ring .val { animation: clu-ring-fill var(--clu-dur-long) var(--clu-ease); }
+@media (prefers-reduced-motion: reduce) {
+    :root:not([data-clu-motion="full"]) .sh-ring .val { animation: none; }
+}
+:root[data-clu-motion="reduce"] .sh-ring .val { animation: none; }

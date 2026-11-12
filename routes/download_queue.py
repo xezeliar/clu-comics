@@ -19,8 +19,8 @@ download_queue_bp = Blueprint("download_queue", __name__)
 
 @download_queue_bp.route("/download-queue")
 def page():
-    # The queue lives in the Queue tab of the Download Status page.
-    return redirect(url_for("status") + "#queue")
+    # The queue is the Downloads tab of the Download Status page.
+    return redirect(url_for("status"))
 
 
 @download_queue_bp.route("/api/download-queue", methods=["GET"])

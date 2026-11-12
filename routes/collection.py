@@ -45,7 +45,8 @@ from core.database import (
     search_file_index, get_user_preference, get_files_recursive_paged,
     count_files_recursive,
     get_user_setting, get_folder_pin, set_folder_pin, delete_folder_pin,
-    set_directory_has_thumbnail,
+    set_directory_has_thumbnail, get_series_slugs_for_folders,
+    get_first_indexed_times, get_new_arrival_counts, mark_series_visited,
 )
 
 collection_bp = Blueprint('collection', __name__)
@@ -466,6 +467,38 @@ def api_onboarding_dismiss():
     return jsonify({"success": set_setting("ONBOARDING_DISMISSED", True)})
 
 
+# The card on Home after an upgrade: at most three changes, in plain words.
+# Edit with each release; dismissal is remembered per version.
+WHATS_NEW_ITEMS = [
+    "Long-press a cover for quick actions.",
+    "Pull List search suggests the nearest series when nothing matches.",
+    "Settings has a search box that filters by label.",
+]
+CHANGELOG_URL = "https://github.com/allaboutduncan/clu-comics/releases"
+WHATS_NEW_KEY = "whats_new_dismissed"  # a user_settings key, per user
+
+
+@collection_bp.route('/api/whats-new')
+def api_whats_new():
+    """The "What's new" card; visible until this user dismisses this version's card."""
+    from core.database import get_user_setting_override
+    from core.version import __version__
+    return jsonify({
+        "visible": get_user_setting_override(WHATS_NEW_KEY) != __version__,
+        "version": __version__,
+        "items": WHATS_NEW_ITEMS[:3],
+        "changelog_url": CHANGELOG_URL,
+    })
+
+
+@collection_bp.route('/api/whats-new/dismiss', methods=['POST'])
+def api_whats_new_dismiss():
+    """Per user: one reader dismissing the card must not hide it for everyone."""
+    from core.database import set_user_setting
+    from core.version import __version__
+    return jsonify({"success": set_user_setting(WHATS_NEW_KEY, __version__)})
+
+
 @collection_bp.route('/api/browse')
 def api_browse():
     """
@@ -498,6 +531,12 @@ def api_browse():
         # Cached art for every listed folder in one query; only folders the
         # index flags as having art but which are not cached touch the disk.
         cached_art = folder_art.get_art_batch([d['path'] for d in directories])
+        # "New issue arrived" sticker per folder, for this user. Opening a
+        # folder is a visit, so this one's own count is cleared here.
+        new_counts = get_new_arrival_counts([d['path'] for d in directories])
+        mark_series_visited(path)
+        # A folder mapped to a series links to its series page.
+        series_slugs = get_series_slugs_for_folders([d['path'] for d in directories])
 
         processed_directories = []
         for d in directories:
@@ -506,7 +545,8 @@ def api_browse():
                 'has_thumbnail': d.get('has_thumbnail', False),
                 'has_files': None,
                 'folder_count': None,
-                'file_count': None
+                'file_count': None,
+                'new_count': new_counts.get(d['path'], 0),
             }
 
             # core.folder_art, not a local lookup: the indexer sets
@@ -522,6 +562,10 @@ def api_browse():
             elif d.get('has_thumbnail'):
                 # Indexed flag is stale (art deleted since the last scan).
                 dir_info['has_thumbnail'] = False
+
+            if d['path'] in series_slugs:
+                dir_info['series_url'] = url_for(
+                    'series.series_view', slug=series_slugs[d['path']])
 
             processed_directories.append(dir_info)
 
@@ -700,6 +744,9 @@ def api_scan_directory():
         # re-added below. delete_file_index_entry, NOT forget_deleted_path --
         # clearing reading-list mappings here would wipe every match under this
         # folder every time someone rescans it.
+        # Not an arrival either: files already indexed keep their time, so
+        # only a file the rescan finds for the first time reads as new.
+        arrived = get_first_indexed_times(path)
         delete_file_index_entry(path)
 
         dir_count = 0
@@ -754,7 +801,8 @@ def api_scan_directory():
                     path=full_path,
                     entry_type='file',
                     parent=root,
-                    size=size
+                    size=size,
+                    first_indexed_at=arrived.get(full_path),
                 )
                 file_count += 1
 

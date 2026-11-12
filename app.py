@@ -90,7 +90,6 @@ from core.memory_utils import (
     get_global_monitor,
 )
 from core.app_logging import app_logger, APP_LOG, MONITOR_LOG, read_log_tail
-from core.metadata_normalize import normalize_credit_list, strip_provider_ids
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from core.version import __version__
@@ -165,9 +164,6 @@ from models.stats import (
     get_file_type_distribution,
     get_top_publishers,
     get_reading_history_stats,
-    get_largest_comics,
-    get_top_series_by_count,
-    get_reading_heatmap_data,
 )
 from models.timeline import get_reading_timeline
 
@@ -193,36 +189,9 @@ def basename_filter(path):
     return ""
 
 
-def generate_series_slug(series_name, metron_id, volume=None):
-    """
-    Generate a URL-friendly slug for a series or issue page.
-    Format: series-name-vVOLUME-ID (e.g., amazing-spider-man-v1-4984)
-
-    The metron_id is a series_id or issue_id depending on the route:
-    - For issue_view: issue_id (resolves to series_id then redirects)
-    - For series_view: series_id (used directly)
-    """
-
-    # Ensure we have a valid ID
-    if not metron_id:
-        return None
-
-    if not series_name:
-        return str(metron_id)
-
-    # Convert to lowercase and replace spaces/special chars with hyphens
-    slug = str(series_name).lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = slug.strip("-")
-
-    # Add volume if provided
-    if volume:
-        slug = f"{slug}-v{volume}"
-
-    # Always append ID for reliable lookup
-    slug = f"{slug}-{metron_id}"
-
-    return slug
+# Lives in helpers (core.database builds series links too, and app.py cannot be
+# imported there); routes still import it from here.
+from helpers.series_slug import generate_series_slug
 
 
 # Make it available in templates
@@ -405,6 +374,9 @@ app.register_blueprint(download_queue_bp)
 from routes.smart_collections import smart_collections_bp
 
 app.register_blueprint(smart_collections_bp)
+from routes.insights import insights_bp
+
+app.register_blueprint(insights_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()
@@ -1211,7 +1183,7 @@ MAX_DOWNLOADS_PER_SWEEP = 150
 
 # Function to perform scheduled GetComics auto-download
 def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
-                                 trigger=None):
+                                 trigger=None, only_issues=None):
     """Auto-download wanted issues from GetComics on schedule.
 
     Args:
@@ -1233,6 +1205,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         trigger: How the run started, for its report on the Status page
                  (core/download_runs): "manual" from Run Now. Defaults to
                  "series" for a scoped run and "scheduled" otherwise.
+        only_issues: A set of ``(series_id, issue_number)`` pairs picked on the
+                 Wanted page. Scoped like ``only_series_id`` (explicit request:
+                 Monitor toggle and cooldown ignored, no reading lists, no
+                 last-run stamp), narrowed to exactly those issues.
 
     Returns:
         ``{"searched": int, "queued": int}``, or the simulation list when
@@ -1241,7 +1217,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
     """
     from core import download_runs
 
-    if not dry_run and only_series_id is None:
+    if not dry_run and only_series_id is None and only_issues is None:
         from core.creators import apply_follows
         apply_follows()  # followed creators' new series join Wanted first
 
@@ -1261,7 +1237,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
     # what must never overlap.
     sweep_scope = None
     if not dry_run:
-        sweep_scope = app_state.getcomics_sweep_scope(only_series_id)
+        sweep_scope = app_state.getcomics_sweep_scope(
+            only_series_id, only_issues is not None)
         if not app_state.claim_getcomics_sweep(sweep_scope):
             age = app_state.getcomics_sweep_age(sweep_scope)
             app_logger.warning(
@@ -1290,17 +1267,20 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         run = download_runs.start_run(
             download_runs.KIND_GETCOMICS,
             trigger or (
-                download_runs.TRIGGER_SERIES if only_series_id is not None
+                download_runs.TRIGGER_SERIES
+                if only_series_id is not None or only_issues is not None
                 else download_runs.TRIGGER_SCHEDULED
             ),
         )
 
-    def _record(item, outcome, provider="getcomics", detail=None, download_id=None):
+    def _record(item, outcome, provider="getcomics", detail=None, download_id=None,
+                search_info=None):
         """One searched issue's outcome, for the run report."""
         run.item(
             item["series_name"], item["issue_num"], outcome,
             series_id=item.get("series_id"), source=item.get("source"),
             provider=provider, detail=detail, download_id=download_id,
+            search_info=search_info,
         )
 
     try:
@@ -1404,9 +1384,11 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         # Search review: hold borderline picks for approval. Never on a scoped
         # run -- that button is an explicit request and downloads at once, but
         # its candidates are still recorded.
-        review_on = get_bool("REVIEW_BEFORE_DOWNLOAD") and only_series_id is None
+        review_on = (get_bool("REVIEW_BEFORE_DOWNLOAD")
+                     and only_series_id is None and only_issues is None)
         attempt_trigger = (
             "series" if only_series_id is not None
+            else "wanted" if only_issues is not None
             else ("wanted" if trigger == "manual" else "nightly")
         )
 
@@ -1419,6 +1401,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             mapped_series = [s for s in mapped_series if s.get("id") == only_series_id]
             if mapped_series:
                 run.set_scope(mapped_series[0].get("name"))
+        if only_issues is not None:
+            picked_series = {sid for sid, _ in only_issues}
+            mapped_series = [s for s in mapped_series if s.get("id") in picked_series]
+            run.set_scope(f"{len(only_issues)} issues from Wanted")
 
         # Track downloaded ranges per series to avoid re-downloading the same range
         # Format: {series_name: [(start_issue, end_issue), ...]}
@@ -1454,7 +1440,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             # Skip series the user isn't monitoring (NULL on legacy rows => on).
             # A scoped run is an explicit request for this one series, so the
             # toggle -- which only governs the unattended sweep -- doesn't apply.
-            if only_series_id is None and series.get("monitored") == 0:
+            if (only_series_id is None and only_issues is None
+                    and series.get("monitored") == 0):
                 run.count(download_runs.COUNT_UNMONITORED)
                 continue
 
@@ -1491,7 +1478,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             # "Check for Missing Issues" is an explicit request, the same reason
             # that run also ignores the Monitor toggle.
             queue_stamps = (
-                get_wanted_queue_stamps(series_id) if only_series_id is None else {}
+                get_wanted_queue_stamps(series_id)
+                if only_series_id is None and only_issues is None else {}
             )
 
             # Collect this series' wanted issues as work items. The search
@@ -1502,6 +1490,10 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 issue_num = str(issue.get("number", ""))
                 status = issue_status.get(issue_num, {})
                 store_date = issue.get("store_date")
+
+                # Picked on the Wanted page: only those issues, no skip count.
+                if only_issues is not None and (series_id, issue_num) not in only_issues:
+                    continue
 
                 # Skip if already found in collection
                 if status.get("found"):
@@ -1553,7 +1545,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
         # process_incoming_wanted_issues cannot file a finished download back
         # onto it; re-matching picks up whatever the WATCH/TARGET pipeline has
         # since filed into the library, so it is no longer searched for.
-        if only_series_id is None:
+        if only_series_id is None and only_issues is None:
             try:
                 from core.reading_list_match import rematch_tracked_lists
                 from core.wanted_reading_lists import build_reading_list_work_items
@@ -1670,6 +1662,9 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 # the fallback sources below have had their turn -- an issue a
                 # fallback found must not also be reported as not found.
                 gc_miss = None
+                # (source, queries, scored candidates) per source tried, for
+                # the miss record's search_info ("Why not found").
+                tried = []
                 for src_name, src_label, src_try in pre_sources:
                     u = src_try(
                         series_name, issue_num,
@@ -1681,6 +1676,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                         series_aliases=series_aliases,
                         dry_run=bool(dry_run),
                     )
+                    tried.append((src_name, None, u.get("all_results")))
                     if dry_run and u.get("status") == "match_found":
                         simulation_results.append({
                             "series": series_name,
@@ -1735,6 +1731,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 # nothing about the issue. Read the flag before `or []`
                 # replaces the object that carries it.
                 search_failed = bool(getattr(results, "failed", False))
+                gc_queries = list(getattr(results, "queries", ()))
                 results = results or []
 
                 if not results:
@@ -1813,6 +1810,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                 refine_year = issue_year or series_year
                 if accept_count > 1 and refine_year:
                     refined_query = f"{series_name} {issue_num} {refine_year}"
+                    gc_queries.append(refined_query)
                     app_logger.info(
                         f"Multiple ACCEPT matches ({accept_count}) for {series_name} #{issue_num} "
                         f"— refining with year: {refined_query} {search_context}"
@@ -1869,6 +1867,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             f"Refinement did not improve match — keeping original best ACCEPT {search_context}"
                         )
 
+                tried.append(("getcomics", gc_queries, scored_results))
                 chosen = best_accept or best_fallback
                 if chosen:
                     best_result, best_score = chosen
@@ -2179,6 +2178,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             search_variants=search_variants,
                             series_aliases=series_aliases,
                         )
+                        tried.append((src_name, None, u.get("all_results")))
                         if u.get("submitted"):
                             download_count += 1
                             app_logger.info(
@@ -2197,7 +2197,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
                             break
 
                 if gc_miss:
-                    _record(item, gc_miss[0], detail=gc_miss[1])
+                    _record(item, gc_miss[0], detail=gc_miss[1],
+                            search_info=download_runs.search_info(tried))
                     if attempt_outcome is None:
                         attempt_outcome = (
                             "search_error" if search_failed and not results
@@ -2231,7 +2232,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
 
         # Update last run timestamp -- the *schedule's*, so a scoped run
         # (one series, on demand) must not move it.
-        if only_series_id is None:
+        if only_series_id is None and only_issues is None:
             update_last_getcomics_run()
 
         elapsed = time.time() - start_time
@@ -6134,97 +6135,6 @@ def api_reading_trends(field):
     return jsonify(trends)
 
 
-@app.route("/api/backfill-reading-metadata", methods=["POST"])
-def api_backfill_reading_metadata():
-    """Re-read ComicInfo.xml for all issues_read entries and update metadata fields."""
-    from core.comicinfo import read_comicinfo_from_zip
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        c = conn.cursor()
-        c.execute("SELECT id, issue_path FROM issues_read")
-        rows = c.fetchall()
-
-        updated_count = 0
-        skipped_count = 0
-        skipped_issues = []
-
-        for row in rows:
-            issue_id = row[0]
-            issue_path = row[1]
-            filename = os.path.basename(issue_path)
-
-            # Skip if file doesn't exist
-            if not os.path.exists(issue_path):
-                skipped_count += 1
-                skipped_issues.append({"file": filename, "reason": "File not found"})
-                continue
-
-            # Skip if not a CBZ/ZIP
-            if not issue_path.lower().endswith((".cbz", ".zip")):
-                skipped_count += 1
-                skipped_issues.append(
-                    {"file": filename, "reason": "Not a CBZ/ZIP file"}
-                )
-                continue
-
-            try:
-                comic_info = read_comicinfo_from_zip(issue_path)
-                if comic_info:
-                    # Strip "[3258]"-style provider IDs, or this route would
-                    # re-dirty issues_read after the migration cleaned it.
-                    writer = normalize_credit_list(comic_info.get("Writer", ""))
-                    penciller = normalize_credit_list(comic_info.get("Penciller", ""))
-                    characters = normalize_credit_list(comic_info.get("Characters", ""))
-                    publisher = strip_provider_ids(comic_info.get("Publisher", ""))
-
-                    c.execute(
-                        """
-                        UPDATE issues_read
-                        SET writer = ?, penciller = ?, characters = ?, publisher = ?
-                        WHERE id = ?
-                    """,
-                        (writer, penciller, characters, publisher, issue_id),
-                    )
-                    updated_count += 1
-                else:
-                    skipped_count += 1
-                    skipped_issues.append(
-                        {"file": filename, "reason": "No ComicInfo.xml"}
-                    )
-            except Exception as e:
-                app_logger.warning(
-                    f"Could not read ComicInfo.xml for {issue_path}: {e}"
-                )
-                skipped_count += 1
-                skipped_issues.append({"file": filename, "reason": f"Error: {str(e)}"})
-
-        conn.commit()
-        conn.close()
-
-        # Clear stats cache
-        clear_stats_cache_prefix(f"u{current_user_id()}:")  # per-user reading caches
-
-        app_logger.info(
-            f"Backfill complete: {updated_count} updated, {skipped_count} skipped"
-        )
-        return jsonify(
-            {
-                "success": True,
-                "updated": updated_count,
-                "skipped": skipped_count,
-                "skipped_issues": skipped_issues,
-            }
-        )
-
-    except Exception as e:
-        app_logger.error(f"Error during backfill: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/api/recently-read")
 def api_recently_read():
     """Get recently read issues with metadata for display."""
@@ -7313,6 +7223,7 @@ def config_page():
         enableDebugLogging=st["ENABLE_DEBUG_LOGGING"],
         bootstrapTheme=get_user_preference("bootstrap_theme", default="default"),
         pageWidth=st["PAGE_WIDTH"],
+        reduceMotion=st["REDUCE_MOTION"],
         timezone=get_user_preference("timezone", default="UTC"),
         # Named exactly, for the Komga schedule card: the preference is a fixed
         # offset with no DST.
@@ -7930,29 +7841,9 @@ def trigger_gcd_import():
 
 @app.route("/insights")
 def insights_page():
-    from core.database import get_reading_totals
+    from core.insights import get_collection_overview
 
-    library_stats = get_library_stats()
-    file_types = get_file_type_distribution()
-    top_publishers = get_top_publishers()
-    reading_history = get_reading_history_stats()
-    largest_comics = get_largest_comics()
-    top_series = get_top_series_by_count()
-    reading_heatmap = get_reading_heatmap_data()
-    reading_totals = get_reading_totals()
-
-    return render_template(
-        "insights.html",
-        library_stats=library_stats,
-        file_types=file_types,
-        top_publishers=top_publishers,
-        reading_history=reading_history,
-        largest_comics=largest_comics,
-        top_series=top_series,
-        reading_heatmap=reading_heatmap,
-        reading_totals=reading_totals,
-        rec_enabled=get_user_preference("rec_enabled", default=True),
-    )
+    return render_template("insights.html", collection=get_collection_overview())
 
 
 @app.route("/api/insights")

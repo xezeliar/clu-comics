@@ -340,6 +340,7 @@ _READER_WRITE_PREFIXES = (
     "/api/reading-position",
     "/api/reader-prefs",       # the reader's own layout preference (per user)
     "/api/reading-stats",
+    "/api/backfill-reading-metadata",  # re-reads credits of the user's own reads
     "/api/favorites",          # favorites_bp
     "/api/smart-collections",  # a user's own saved filters (per user)
     "/api/to-read",
@@ -347,6 +348,7 @@ _READER_WRITE_PREFIXES = (
     "/api/continue-reading",
     "/api/on-the-stack",
     "/api/account/",           # a user managing their OWN API tokens (self-service)
+    "/api/whats-new/dismiss",  # hides the Home card for this user only
 )
 
 # Read-only endpoints that use POST purely to carry a request body (a batch of
@@ -365,7 +367,8 @@ _CLERK_PREFIXES = (
     "/api/getcomics",
     "/api/download-clients",
     "/api/search-review",      # candidate review (Search review page)
-    "/api/gaps",               # gap report (Clerk-only /gaps page)
+    "/api/gaps",               # gap report (Wanted's By series view)
+    "/api/wanted/",            # Wanted page search and ignore
     "/api/download-runs",      # automatic download run reports (Status page)
     "/api/activity",           # activity feed
     "/api/download-queue",     # download queue page
@@ -394,7 +397,7 @@ _CLERK_PAGE_PATHS = frozenset({
     "/releases",         # Weekly Releases
     "/wanted",           # Wanted Issues
     "/search-review",    # Search review
-    "/gaps",             # Gap report
+    "/gaps",             # Gap report (redirects to Wanted)
     "/status",           # Download Status
     "/activity",         # Activity feed
     "/download-queue",   # Download queue

@@ -159,7 +159,57 @@
       if (el.parentNode && !el.classList.contains('show')) el.parentNode.removeChild(el);
     });
     toast.show();
+    swipeToDismiss(el, toast);
     return el;
+  }
+
+  // Swipe sideways to dismiss: past 80px it goes, short of that it springs
+  // back. The countdown pauses while dragged (Bootstrap pauses on mouseover
+  // and resumes on mouseout, so the drag sends those). The close button and
+  // the keyboard are untouched. Reduced motion: it fades out or snaps back.
+  function swipeToDismiss(el, toast) {
+    if (!window.PointerEvent) return;
+    var x0 = null, dx = 0, id = null;
+    function reduced() { return CLU.reducedMotion && CLU.reducedMotion(); }
+    // The tokens in clu-page.css, via clu-motion.js (fallbacks: the same values).
+    function ms(name, d) { return CLU.motion ? CLU.motion.ms(name) : d; }
+    var spring = (CLU.motion && CLU.motion.tok('spring')) || 'cubic-bezier(0.34, 1.35, 0.64, 1)';
+    el.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || e.target.closest('button, a')) return;
+      x0 = e.clientX; dx = 0; id = e.pointerId;
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (x0 === null || e.pointerId !== id) return;
+      dx = e.clientX - x0;
+      if (Math.abs(dx) > 4 && !el.hasPointerCapture(id)) el.setPointerCapture(id);
+      el.style.transform = reduced() ? '' : 'translateX(' + dx + 'px)';
+      el.style.opacity = String(1 - Math.min(1, Math.abs(dx) / 200));
+    });
+    function end() {
+      if (x0 === null) return;
+      x0 = null;
+      var from = { transform: el.style.transform || 'none', opacity: el.style.opacity || '1' };
+      el.style.transform = '';
+      el.style.opacity = '';
+      if (Math.abs(dx) > 80) {
+        // Bootstrap's own .fade takes the opacity; this carries it off sideways.
+        if (!reduced() && el.animate) {
+          el.animate([from, { transform: 'translateX(' + (dx > 0 ? 120 : -120) + '%)', opacity: 0 }],
+            { duration: ms('fast', 150), easing: 'ease-in', fill: 'forwards' });
+        }
+        toast.hide();
+        return;
+      }
+      if (el.animate && dx) {
+        el.animate([from, { transform: 'none', opacity: 1 }], reduced()
+          ? { duration: ms('fast', 150) }
+          : { duration: ms('base', 250), easing: spring });
+      }
+      el.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: null }));
+    }
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
 
   CLU.toast = function (message, type, opts) {
