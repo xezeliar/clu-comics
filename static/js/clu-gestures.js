@@ -83,6 +83,9 @@
         var btn = e.target, menu = menuFor(btn);
         if (!phone.matches || !menu || !btn.closest('.item-actions, .clu-page-more, .clu-row-more')) return;
         menu.classList.add('clu-sheet');
+        // A transformed ancestor (a tapped card keeps :hover, translateY) would
+        // contain the fixed sheet and trap it under the scrim; neutralise them.
+        for (var a = menu.parentElement; a && a !== document.body; a = a.parentElement) a.classList.add('clu-sheet-host');
         scrim = document.createElement('div');
         scrim.className = 'clu-sheet-scrim';
         scrim.addEventListener('click', function () { bootstrap.Dropdown.getOrCreateInstance(btn).hide(); btn.focus(); });
@@ -101,6 +104,7 @@
         var menu = menuFor(e.target);
         if (menu) { menu.classList.remove('clu-sheet'); menu.style.translate = ''; }
         if (scrim) { scrim.remove(); scrim = null; }
+        document.querySelectorAll('.clu-sheet-host').forEach(function (a) { a.classList.remove('clu-sheet-host'); });
     });
 
     // ── Swipe rows ──────────────────────────────────────────────────────────
