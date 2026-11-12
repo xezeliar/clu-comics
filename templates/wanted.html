@@ -1,9 +1,45 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, search_input, result_count %}
+{% from 'partials/filters.html' import toolbar, search_input, result_count, filter_bar %}
 
 {% block title %}Wanted Issues{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Missing issues: series rows that open to issue rows. Theme variables only. */
+    .wanted-list { list-style: none; margin: 0; padding: 0; }
+    .wanted-series + .wanted-series, .wanted-list.flat > .wanted-issue + .wanted-issue { border-top: 1px solid var(--bs-border-color); }
+    .wanted-sh, .wanted-issue { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .75rem; padding: .5rem 1rem; }
+    .wanted-issues { list-style: none; margin: 0; padding: 0 0 .25rem 2.75rem; }
+    .wanted-issues > .wanted-issue { padding-left: 0; }
+    .wanted-exp { display: flex; align-items: center; gap: .5rem; flex: 1 1 16rem; min-width: 0;
+        background: none; border: 0; padding: 0; color: inherit; text-align: start; }
+    .wanted-exp .bi-chevron-right { transition: transform .15s; }
+    .wanted-exp[aria-expanded="true"] .bi-chevron-right { transform: rotate(90deg); }
+    .wanted-main { flex: 1 1 12rem; min-width: 0; }
+    .wanted-st { flex: 0 1 16rem; color: var(--bs-secondary-color); font-size: .875rem; }
+    .wanted-st .text-danger { font-weight: 500; }
+    .wanted-act { display: flex; flex-wrap: wrap; gap: .25rem; margin-left: auto; }
+    .wanted-sum { color: var(--bs-secondary-color); font-size: .875rem; }
+    .wanted-ck { display: inline-flex; align-items: center; justify-content: center; margin: 0; }
+    .wanted-why { flex-basis: 100%; display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem;
+        margin: .25rem 0 0; padding: .5rem .75rem; background: var(--bs-tertiary-bg); border-radius: var(--bs-border-radius); font-size: .875rem; }
+    .wanted-why dt { font-weight: 500; }
+    .wanted-why dd { margin: 0; }
+    .wanted-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .5rem 1rem;
+        border-bottom: 1px solid var(--bs-border-color); background: rgba(var(--bs-primary-rgb), .08); }
+    @media (prefers-reduced-motion: reduce) { .wanted-exp .bi-chevron-right { transition: none; } }
+    /* Phone: the state takes its own line and every target is 44px. */
+    @media (max-width: 575.98px) {
+        .wanted-st { flex-basis: 100%; order: 3; }
+        .wanted-act { order: 4; margin-left: 0; }
+        .wanted-issues { padding-left: .5rem; }
+        .wanted-ck { min-width: 44px; min-height: 44px; }
+        #missingCard .btn, .wanted-bulk .btn { min-height: 44px; }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
 <div>
@@ -15,19 +51,21 @@
                                      {'value': reading_list_wanted|length, 'label': 'from reading lists'}]) %}
         {% if slot == 'actions' %}
             <button class="btn btn-sm btn-primary" id="checkMissingBtn" onclick="checkForMissing()">
-                <i class="bi bi-search me-1" aria-hidden="true"></i>Check for Missing Issues
+                <i class="bi bi-search me-1" aria-hidden="true"></i>Check for missing issues
             </button>
-            <button class="btn btn-sm btn-outline-secondary" id="refreshBtn" onclick="refreshWanted()" {% if refreshing
-                %}disabled{% endif %}>
-                {% if refreshing %}
-                <span class="spinner-border spinner-border-sm me-1"></span>Refreshing...
-                {% else %}
-                <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
-                {% endif %}
-            </button>
-            <button class="btn btn-sm btn-outline-secondary" id="scanDownloadsBtn" onclick="scanDownloads()">
-                <i class="bi bi-folder-check me-1" aria-hidden="true"></i>Scan Download Directory
-            </button>
+        {% elif slot == 'more' %}
+            <li>
+                <button class="dropdown-item" id="refreshBtn" type="button" onclick="refreshWanted()" {% if refreshing %}disabled{% endif %}>
+                    <i class="bi bi-arrow-clockwise me-2" aria-hidden="true"></i><span>{{ 'Refreshing…' if refreshing else 'Refresh the list' }}</span>
+                    <small class="d-block text-muted">Re-reads every mapped series against its folder.</small>
+                </button>
+            </li>
+            <li>
+                <button class="dropdown-item" id="scanDownloadsBtn" type="button" onclick="scanDownloads()">
+                    <i class="bi bi-folder-check me-2" aria-hidden="true"></i><span>Scan download directory</span>
+                    <small class="d-block text-muted">Files issues that are already downloaded.</small>
+                </button>
+            </li>
         {% endif %}
     {% endcall %}
 
@@ -43,7 +81,7 @@
         <p class="text-muted mb-4 lead">Scanning your collection for missing issues...</p>
         <p class="text-muted small">This may take a moment on first load.</p>
     </div>
-    {% elif total_wanted == 0 and not reading_list_wanted %}
+    {% elif total_wanted == 0 and not reading_list_wanted and not ignored %}
     {% call empty_state('Nothing wanted', 'Every tracked series is complete, or none are tracked yet.', 'bi-check-circle', tone='success') %}
         <a href="{{ url_for('config_page') }}#libraries" class="btn btn-outline-secondary">
             <i class="bi bi-hdd me-1" aria-hidden="true"></i>Link a library
@@ -56,90 +94,71 @@
     {% set wanted_rows = missing|length + upcoming|length + reading_list_wanted|length %}
     {% call toolbar('Filter wanted issues', id='wantedToolbar') %}
         <div class="clu-toolbar-row">
-            {{ search_input('wantedSearch', 'Search series and reading lists') }}
+            {{ search_input('wantedSearch', 'Search series and reading lists', value=request.args.get('q', '')) }}
             <div class="clu-toolbar-end">
                 {{ result_count('wantedCount', wanted_rows, 'wanted issues', one='wanted issue') }}
+                {% if missing or ignored %}
+                <div class="btn-group btn-group-sm" role="group" aria-label="Group missing issues" id="wantedView">
+                    <button type="button" class="btn btn-outline-secondary" data-view="series" aria-pressed="true">By series</button>
+                    <button type="button" class="btn btn-outline-secondary" data-view="issue" aria-pressed="false">By issue</button>
+                </div>
+                {% endif %}
             </div>
         </div>
+        {% if missing or ignored %}
+        <div class="clu-toolbar-row">
+            {{ filter_bar('wantedStateFilter', [{'value': '', 'label': 'All'},
+                                                {'value': 'not_found', 'label': 'Not found'},
+                                                {'value': 'not_searched', 'label': 'Not searched'},
+                                                {'value': 'in', 'label': 'In Downloads'},
+                                                {'value': 'failed', 'label': 'Failed'},
+                                                {'value': 'ignored', 'label': 'Ignored'}], label='Show') }}
+        </div>
+        {% endif %}
     {% endcall %}
     <div id="wantedNoMatches" hidden></div>
 
-    <!-- Missing Issues Section -->
-    {% if missing %}
-    <div class="card border-0 shadow-sm mb-4 wanted-section">
-        <div class="card-header bg-danger bg-opacity-10 d-flex justify-content-between align-items-center">
+    <!-- Missing Issues Section: drawn by the script below from #wantedData -->
+    {% if missing or ignored %}
+    {% set rows = [] %}
+    {% for item in missing + ignored %}
+        {% set is_ignored = loop.index > missing|length %}
+        {% set sid = item.series_id %}
+        {% set sname = item.series_name %}
+        {% set vol = item.series_volume %}
+        {% set num = (item.issue.number if not is_ignored else item.issue_number)|string %}
+        {% set sd = item.issue.store_date if not is_ignored else item.store_date %}
+        {% set cd = item.issue.cover_date if not is_ignored else item.cover_date %}
+        {# The issue's own publication year narrows the hand search -- never the
+           series start year, since a wrong year filters results out. #}
+        {% set _ = rows.append({
+            'series_id': sid, 'series': sname, 'volume': vol,
+            'url': url_for('series.series_view', slug=generate_series_slug(sname, sid, vol)),
+            'number': num, 'name': (item.issue.name if not is_ignored else item.issue_name) or '',
+            'date': sd or '', 'year': (sd|string)[:4] if sd else ((cd|string)[:4] if cd else ''),
+            'issue_id': item.issue.id if not is_ignored else item.issue_id,
+            'state': {'code': 'ignored', 'label': 'Ignored'} if is_ignored else item.state}) %}
+    {% endfor %}
+    <script type="application/json" id="wantedData">{{ rows|tojson }}</script>
+    <div class="card border-0 shadow-sm mb-4 wanted-section" id="missingCard">
+        <div class="card-header bg-danger bg-opacity-10 d-flex flex-wrap gap-2 justify-content-between align-items-center">
             <h5 class="mb-0">
-                <i class="bi bi-x-circle me-2 text-danger"></i>Missing Issues
-                <span class="badge bg-danger ms-2 wanted-section-count">{{ missing|length }}</span>
+                <i class="bi bi-x-circle me-2 text-danger" aria-hidden="true"></i>Missing Issues
+                <span class="badge bg-danger ms-2" id="missingCount">{{ missing|length }}</span>
             </h5>
-            <button aria-label="Show or hide missing issues" title="Show or hide missing issues" class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
-                data-bs-target="#missingCollapse" aria-expanded="true">
-                <i class="bi bi-chevron-down"></i>
-            </button>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" type="button" id="searchNotFoundBtn">
+                    <i class="bi bi-search me-1" aria-hidden="true"></i>Search all not found
+                </button>
+                <button aria-label="Show or hide missing issues" title="Show or hide missing issues" class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                    data-bs-target="#missingCollapse" aria-expanded="true">
+                    <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                </button>
+            </div>
         </div>
         <div class="collapse show" id="missingCollapse">
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th scope="col" class="ps-4">Series</th>
-                                <th scope="col">Issue</th>
-                                <th scope="col">Store Date</th>
-                                <th scope="col" class="text-end pe-4">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in missing %}
-                            <tr class="wanted-row" data-search="{{ (item.series_name ~ ' ' ~ (item.issue.name or ''))|lower }}">
-                                <td class="ps-4">
-                                    <a href="{{ url_for('series.series_view', slug=generate_series_slug(item.series_name, item.series_id, item.series_volume)) }}"
-                                        class="text-decoration-none fw-bold">
-                                        {{ item.series_name }}
-                                        {% if item.series_volume %}
-                                        <span class="text-muted fw-normal">Vol. {{ item.series_volume }}</span>
-                                        {% endif %}
-                                    </a>
-                                </td>
-                                <td>
-                                    <span class="badge bg-danger">#{{ item.issue.number }}</span>
-                                    {% if item.issue.name %}
-                                    <span class="text-muted ms-1">{{ item.issue.name }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if item.issue.store_date %}
-                                    <i class="bi bi-calendar me-1 text-muted"></i>
-                                    {{ item.issue.store_date }}
-                                    {% else %}
-                                    <span class="text-muted">-</span>
-                                    {% endif %}
-                                </td>
-                                <td class="text-end pe-4">
-                                    {# The issue's own publication year narrows both sources —
-                                       never the series start year, since a wrong year now
-                                       filters results out. #}
-                                    {% set issue_year = (item.issue.store_date|string)[:4] if item.issue.store_date
-                                    else ((item.issue.cover_date|string)[:4] if item.issue.cover_date else '') %}
-                                    <button aria-label="Search GetComics" class="btn btn-sm btn-outline-primary me-1"
-                                        data-series="{{ item.series_name }}"
-                                        data-issue="{{ item.issue.number }}"
-                                        data-year="{{ issue_year }}"
-                                        onclick="searchGetComics(this.dataset.series, this.dataset.issue, this.dataset.year)"
-                                        title="Search GetComics">
-                                        <i class="bi bi-search"></i>
-                                    </button>
-                                    <a aria-label="View on Metron" href="https://metron.cloud/issue/{{ item.issue.id }}/" target="_blank"
-                                        class="btn btn-sm btn-outline-secondary" title="View on Metron">
-                                        <i class="bi bi-box-arrow-up-right"></i>
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <div class="wanted-bulk" id="wantedBulk" role="region" aria-label="Selection" hidden></div>
+            <div id="wantedMissing"></div>
         </div>
     </div>
     {% endif %}
@@ -382,57 +401,44 @@
         return div.innerHTML;
     }
 
+    // A More-menu item's label (the <span>), so the item keeps its icon and help line.
+    function setLabel(btn, text, disabled) {
+        btn.disabled = !!disabled;
+        btn.querySelector('span').textContent = text;
+    }
+
+    function postJson(url, method, body) {
+        return fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body)
+        }).then(r => r.json().catch(() => ({})).then(d => {
+            if (!r.ok || !d.success) throw new Error(d.error || ('HTTP ' + r.status));
+            return d;
+        }));
+    }
+
     // Trigger GetComics auto-download for missing issues
     function checkForMissing() {
         const btn = document.getElementById('checkMissingBtn');
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking...';
-
-        fetch('/api/run-getcomics-now', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    btn.innerHTML = '<i class="bi bi-check me-1"></i>Started';
-                    CLU.toast(data.message, 'success');
-                    setTimeout(() => {
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="bi bi-search me-1"></i>Check for Missing Issues';
-                    }, 3000);
-                } else {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-search me-1"></i>Check for Missing Issues';
-                    CLU.toast('Error: ' + data.error, 'danger');
-                }
-            })
-            .catch(e => {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-search me-1"></i>Check for Missing Issues';
-                CLU.toast('Error: ' + e.message, 'danger');
-            });
+        postJson('/api/run-getcomics-now', 'POST')
+            .then(data => CLU.toast(data.message, 'success'))
+            .catch(e => CLU.toast('Error: ' + e.message, 'danger'))
+            .finally(() => setTimeout(() => { btn.disabled = false; }, 3000));
     }
 
     // Scan download directory for wanted issues
     function scanDownloads() {
         const btn = document.getElementById('scanDownloadsBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning...';
-
-        fetch('/api/scan-downloads', { method: 'POST' })
-            .then(r => r.json())
+        setLabel(btn, 'Scanning…', true);
+        postJson('/api/scan-downloads', 'POST')
             .then(data => {
-                if (data.success) {
-                    btn.innerHTML = '<i class="bi bi-check me-1"></i>Done';
-                    CLU.toast(data.message, 'success');
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-folder-check me-1"></i>Scan Download Directory';
-                    CLU.toast('Error: ' + data.error, 'danger');
-                }
+                CLU.toast(data.message, 'success');
+                setTimeout(() => location.reload(), 1500);
             })
             .catch(e => {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-folder-check me-1"></i>Scan Download Directory';
+                setLabel(btn, 'Scan download directory', false);
                 CLU.toast('Error: ' + e.message, 'danger');
             });
     }
@@ -440,23 +446,11 @@
     // Refresh wanted issues cache
     function refreshWanted() {
         const btn = document.getElementById('refreshBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Refreshing...';
-
-        fetch('/api/refresh-wanted', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    pollRefreshStatus();
-                } else {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh';
-                    CLU.toast('Error: ' + data.error, 'danger');
-                }
-            })
+        setLabel(btn, 'Refreshing…', true);
+        postJson('/api/refresh-wanted', 'POST')
+            .then(() => pollRefreshStatus())
             .catch(e => {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh';
+                setLabel(btn, 'Refresh the list', false);
                 CLU.toast('Error: ' + e.message, 'danger');
             });
     }
@@ -482,15 +476,393 @@
             .finally(() => clearTimeout(t));
     }
 
-    // The search narrows every section's rows by series (and, for reading-list
-    // rows, the list's name). A section with nothing left hides, and its
-    // header badge counts what is shown.
+    // ---- Missing issues: state, grouping, selection, Search and Ignore ----
+    // Every issue carries one state (core/wanted_state.py): the newest run
+    // item for it, or "not searched". Drawn here so the view, filter and
+    // selection change without a reload.
+    function initWanted() {
+        const dataEl = document.getElementById('wantedData');
+        if (!dataEl) return null;
+        const items = JSON.parse(dataEl.textContent);
+        const DOWNLOADS = "{{ url_for('status') }}";
+        const SEARCH_DELAY = 5000;  // the Undo window before a search starts
+        const key = it => it.series_id + ':' + it.number;
+        items.forEach(it => { it.key = key(it); });
+        const byKey = new Map(items.map(it => [it.key, it]));
+        const sel = new Set();
+        const open = new Set();
+        const whyOpen = new Set();
+        let view = 'series', filter = '', needle = '';
+
+        const ignored = it => it.state.code === 'ignored';
+        const searchable = it => it.state.code === 'not_found' || it.state.code === 'not_searched';
+        function matches(it, f) {
+            if (f === 'ignored') return ignored(it);
+            if (ignored(it)) return false;
+            if (!f) return true;
+            if (f === 'in') return it.state.code === 'waiting' || it.state.code === 'downloading';
+            return it.state.code === f;
+        }
+        const searched = it => !needle || (it.series + ' ' + it.name).toLowerCase().indexOf(needle) !== -1;
+        const shown = () => items.filter(it => searched(it) && matches(it, filter));
+
+        // core.gaps.missing_ranges: ['#4', '#6–#14', '#1.MU']
+        function ranges(nums) {
+            const ints = [...new Set(nums.filter(n => /^\d+$/.test(n)).map(Number))].sort((a, b) => a - b);
+            const other = [...new Set(nums.filter(n => !/^\d+$/.test(n)))];
+            const out = [];
+            for (let i = 0; i < ints.length;) {
+                let j = i;
+                while (j + 1 < ints.length && ints[j + 1] === ints[j] + 1) j++;
+                out.push(i === j ? '#' + ints[i] : '#' + ints[i] + '–#' + ints[j]);
+                i = j + 1;
+            }
+            return out.concat(other.map(o => '#' + o)).join(', ');
+        }
+
+        function el(tag, cls, text) {
+            const e = document.createElement(tag);
+            if (cls) e.className = cls;
+            if (text !== undefined && text !== null) e.textContent = text;
+            return e;
+        }
+        function btn(label, cls, onClick, aria) {
+            const b = el('button', 'btn btn-sm ' + (cls || 'btn-outline-secondary'), label);
+            b.type = 'button';
+            if (aria) b.setAttribute('aria-label', aria);
+            b.addEventListener('click', onClick);
+            return b;
+        }
+        function link(text, href) {
+            const a = el('a', null, text);
+            a.href = href;
+            return a;
+        }
+        function day(when) {
+            // Run timestamps are UTC (scheduled-times rule).
+            const d = when ? new Date(when.replace(' ', 'T') + 'Z') : null;
+            return d && !isNaN(d) ? d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+        }
+
+        function stateCell(it) {
+            const s = it.state, cell = el('div', 'wanted-st');
+            if (s.code === 'not_found') {
+                const n = s.tries || 1;
+                cell.textContent = 'Not found · ' + n + ' search' + (n === 1 ? '' : 'es') +
+                    (s.when ? ', last ' + day(s.when) : '');
+            } else if (s.code === 'waiting' || s.code === 'downloading') {
+                cell.appendChild(link(s.label, DOWNLOADS));
+            } else if (s.code === 'failed') {
+                cell.appendChild(el('span', 'text-danger', 'Failed' + (s.detail ? ': ' + s.detail : '')));
+                cell.appendChild(document.createTextNode(' · '));
+                cell.appendChild(link('Open in Downloads', DOWNLOADS));
+            } else {
+                cell.textContent = s.label;
+            }
+            return cell;
+        }
+
+        function whyPanel(it, id) {
+            const s = it.state, dl = el('dl', 'wanted-why');
+            dl.id = id;
+            if (s.code === 'not_searched' && !s.when) {
+                dl.append(el('dt', null, 'Searched'), el('dd', null, 'Not yet. The next run or Search looks for it.'));
+            } else if (s.code !== 'ignored') {
+                dl.append(el('dt', null, 'Searched'),
+                    el('dd', null, [s.provider, day(s.when)].filter(Boolean).join(' · ') || 'Yes'));
+                const q = s.search || {};
+                if (Array.isArray(q.sources) && q.sources.length) {
+                    dl.append(el('dt', null, 'Sources tried'), el('dd', null, q.sources.join(', ')));
+                }
+                if (Array.isArray(q.queries) && q.queries.length) {
+                    const ul = el('ul', 'list-unstyled mb-0 small font-monospace');
+                    q.queries.forEach(x => ul.appendChild(el('li', null,
+                        (q.sources.length > 1 ? x.source + ': ' : '') + x.query)));
+                    const dd = el('dd');
+                    dd.appendChild(ul);
+                    dl.append(el('dt', null, 'Searched for'), dd);
+                }
+                if (q.nearest) {
+                    const n = q.nearest;
+                    dl.append(el('dt', null, 'Nearest rejected'), el('dd', null,
+                        n.title + ' (score ' + n.score + ')' + (n.reason ? ': ' + n.reason : '')));
+                }
+                dl.append(el('dt', null, s.code === 'not_found' ? 'Closest result' : 'Result'),
+                    el('dd', null, s.detail || (s.code === 'not_found'
+                        ? 'Nothing close enough to show. The issue may not be posted yet, or it is listed under another name.'
+                        : s.label)));
+            }
+            const acts = el('dd', 'd-flex flex-wrap gap-2');
+            acts.appendChild(btn('Search sources by hand', 'btn-outline-secondary',
+                () => searchGetComics(it.series, it.number, it.year)));
+            if (it.issue_id) {
+                const m = link('View on Metron', 'https://metron.cloud/issue/' + encodeURIComponent(it.issue_id) + '/');
+                m.className = 'btn btn-sm btn-outline-secondary';
+                m.target = '_blank';
+                m.rel = 'noopener';
+                acts.appendChild(m);
+            }
+            dl.append(el('dt', null, 'More'), acts);
+            return dl;
+        }
+
+        function checkbox(label, checked, onChange, mixed) {
+            const wrap = el('label', 'wanted-ck');
+            const c = el('input', 'form-check-input m-0');
+            c.type = 'checkbox';
+            c.checked = checked;
+            c.indeterminate = !!mixed;
+            c.setAttribute('aria-label', label);
+            c.addEventListener('change', () => onChange(c.checked));
+            wrap.appendChild(c);
+            return wrap;
+        }
+
+        function issueRow(it, flat) {
+            const li = el('li', 'wanted-issue');
+            const title = '#' + it.number + (flat ? ' ' + it.series : '');
+            li.appendChild(checkbox('Select ' + it.series + ' #' + it.number, sel.has(it.key),
+                on => { on ? sel.add(it.key) : sel.delete(it.key); render(); }));
+            const main = el('div', 'wanted-main');
+            if (flat) {
+                main.appendChild(el('b', null, '#' + it.number + ' '));
+                main.appendChild(link(it.series, it.url));
+            } else {
+                main.appendChild(el('b', null, '#' + it.number));
+            }
+            if (it.name) main.appendChild(el('span', 'text-muted ms-1', it.name));
+            if (it.date) main.appendChild(el('span', 'text-muted small ms-2', it.date));
+            li.appendChild(main);
+            li.appendChild(stateCell(it));
+            const act = el('div', 'wanted-act');
+            if (ignored(it)) {
+                act.appendChild(btn('Bring back', null, () => bringBack([it]), 'Bring back ' + it.series + ' #' + it.number));
+            } else {
+                const whyId = 'why-' + it.key.replace(/[^\w-]/g, '_');
+                const w = btn(it.state.code === 'not_found' ? 'Why not found' : 'Details', 'btn-link',
+                    () => { whyOpen.has(it.key) ? whyOpen.delete(it.key) : whyOpen.add(it.key); render(); });
+                w.setAttribute('aria-expanded', whyOpen.has(it.key) ? 'true' : 'false');
+                w.setAttribute('aria-controls', whyId);
+                act.appendChild(w);
+                if (searchable(it)) act.appendChild(btn('Search', null, () => search([it]), 'Search ' + it.series + ' #' + it.number));
+                act.appendChild(btn('Ignore', null, () => ignore([it]), 'Ignore ' + it.series + ' #' + it.number));
+                li.appendChild(act);
+                if (whyOpen.has(it.key)) li.appendChild(whyPanel(it, whyId));
+                return li;
+            }
+            li.appendChild(act);
+            return li;
+        }
+
+        function summary(list) {
+            const words = { not_found: 'not found', not_searched: 'not searched', waiting: 'waiting',
+                            downloading: 'downloading', failed: 'failed' };
+            const c = {};
+            list.forEach(it => { const w = words[it.state.code]; if (w) c[w] = (c[w] || 0) + 1; });
+            return Object.keys(c).map(k => c[k] + ' ' + k).join(' · ');
+        }
+
+        function seriesRow(sid, list) {
+            const first = list[0], li = el('li', 'wanted-series');
+            const head = el('div', 'wanted-sh');
+            const on = list.filter(it => sel.has(it.key)).length;
+            head.appendChild(checkbox('Select all ' + list.length + ' shown issues of ' + first.series,
+                on > 0 && on === list.length,
+                yes => { list.forEach(it => yes ? sel.add(it.key) : sel.delete(it.key)); render(); },
+                on > 0 && on < list.length));
+            const exp = el('button', 'wanted-exp');
+            exp.type = 'button';
+            exp.setAttribute('aria-expanded', open.has(sid) ? 'true' : 'false');
+            const chev = el('i', 'bi bi-chevron-right');
+            chev.setAttribute('aria-hidden', 'true');
+            const label = el('span', 'text-truncate');
+            label.appendChild(el('b', null, first.series + (first.volume ? ' Vol. ' + first.volume : '')));
+            label.appendChild(el('span', 'text-muted ms-2', filter === 'ignored'
+                ? list.length + ' ignored'
+                : list.length + ' missing · ' + ranges(list.map(it => it.number))));
+            exp.append(chev, label);
+            exp.addEventListener('click', () => { open.has(sid) ? open.delete(sid) : open.add(sid); render(); });
+            head.appendChild(exp);
+            if (filter !== 'ignored') head.appendChild(el('span', 'wanted-sum', summary(list)));
+            const todo = list.filter(searchable);
+            if (todo.length) head.appendChild(btn('Search', null, () => search(todo), 'Search ' + first.series));
+            li.appendChild(head);
+            if (open.has(sid)) {
+                const ul = el('ul', 'wanted-issues');
+                list.forEach(it => ul.appendChild(issueRow(it, false)));
+                li.appendChild(ul);
+            }
+            return li;
+        }
+
+        const host = document.getElementById('wantedMissing');
+        const bulk = document.getElementById('wantedBulk');
+        const filterBar = document.getElementById('wantedStateFilter');
+        const viewGroup = document.getElementById('wantedView');
+        const countBadge = document.getElementById('missingCount');
+        const searchAllBtn = document.getElementById('searchNotFoundBtn');
+
+        function render() {
+            // Keep focus on the same control across the redraw (by aria-label).
+            const f = document.activeElement;
+            const fKey = f && host.contains(f) ? f.getAttribute('aria-label') || f.textContent : null;
+
+            const live = items.filter(it => searched(it) && !ignored(it));
+            const counts = { '': live.length, ignored: items.filter(it => searched(it) && ignored(it)).length };
+            ['not_found', 'not_searched', 'in', 'failed'].forEach(k => {
+                counts[k] = live.filter(it => matches(it, k)).length;
+            });
+            CLU.renderFilterOptions(filterBar, [
+                { value: '', label: 'All', count: counts[''] },
+                { value: 'not_found', label: 'Not found', count: counts.not_found },
+                { value: 'not_searched', label: 'Not searched', count: counts.not_searched },
+                { value: 'in', label: 'In Downloads', count: counts.in },
+                { value: 'failed', label: 'Failed', count: counts.failed },
+                { value: 'ignored', label: 'Ignored', count: counts.ignored }
+            ], filter);
+            countBadge.textContent = CLU.formatCount(items.filter(it => !ignored(it)).length);
+            searchAllBtn.disabled = !live.some(searchable);
+            viewGroup.querySelectorAll('[data-view]').forEach(b => {
+                const on = b.dataset.view === view;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
+
+            // Selection only ever holds what is on screen.
+            const list = shown();
+            const visible = new Set(list.map(it => it.key));
+            [...sel].forEach(k => { if (!visible.has(k)) sel.delete(k); });
+
+            bulk.replaceChildren();
+            bulk.hidden = sel.size === 0;
+            if (sel.size) {
+                const picked = [...sel].map(k => byKey.get(k));
+                bulk.appendChild(el('b', null, CLU.formatCount(sel.size) + ' selected'));
+                if (filter === 'ignored') {
+                    bulk.appendChild(btn('Bring back selected', null, () => bringBack(picked)));
+                } else {
+                    const todo = picked.filter(searchable);
+                    const s = btn('Search selected', null, () => search(todo));
+                    s.disabled = !todo.length;
+                    bulk.append(s, btn('Ignore selected', null, () => ignore(picked)));
+                }
+                bulk.appendChild(btn('Clear selection', null, () => { sel.clear(); render(); }));
+            }
+
+            host.replaceChildren();
+            if (!list.length) {
+                if (!needle) {
+                    host.appendChild(el('p', 'text-muted m-0 px-3 py-3', 'Nothing in this state now.'));
+                }
+            } else if (view === 'series') {
+                const groups = new Map();
+                list.forEach(it => {
+                    if (!groups.has(it.series_id)) groups.set(it.series_id, []);
+                    groups.get(it.series_id).push(it);
+                });
+                const ul = el('ul', 'wanted-list');
+                groups.forEach((g, sid) => ul.appendChild(seriesRow(sid, g)));
+                host.appendChild(ul);
+            } else {
+                const ul = el('ul', 'wanted-list flat');
+                list.forEach(it => ul.appendChild(issueRow(it, true)));
+                host.appendChild(ul);
+            }
+            if (fKey) {
+                const t = [...host.querySelectorAll('button, input')].find(
+                    n => (n.getAttribute('aria-label') || n.textContent) === fKey);
+                if (t) t.focus({ preventScroll: true });
+            }
+            return list.length;
+        }
+
+        function payload(list) {
+            return { issues: list.map(it => ({ series_id: it.series_id, issue_number: it.number })) };
+        }
+        const plural = n => CLU.formatCount(n) + ' issue' + (n === 1 ? '' : 's');
+
+        // Starts after the Undo window, so a slip costs nothing.
+        function search(list) {
+            list = list.filter(searchable);
+            if (!list.length) return;
+            sel.clear();
+            render();
+            const timer = setTimeout(() => {
+                postJson('/api/wanted/search', 'POST', payload(list))
+                    .then(() => CLU.toast('Searching ' + plural(list.length) +
+                        '. Their state updates here when the run finishes.', 'success'))
+                    .catch(e => CLU.toast('Search failed: ' + e.message, 'danger'));
+            }, SEARCH_DELAY);
+            CLU.toast('Searching ' + plural(list.length) + ' in a moment.', 'info', {
+                duration: SEARCH_DELAY,
+                action: { label: 'Undo', onClick: () => { clearTimeout(timer); CLU.toast('Search cancelled.', 'info'); } }
+            });
+        }
+
+        function setIgnored(list, on) {
+            list.forEach(it => {
+                if (on) { it.prev = it.state; it.state = { code: 'ignored', label: 'Ignored' }; }
+                else { it.state = it.prev || { code: 'not_searched', label: 'Not searched yet' }; }
+            });
+            sel.clear();
+            render();
+        }
+
+        function ignore(list) {
+            if (!list.length) return;
+            postJson('/api/wanted/ignore', 'POST', payload(list))
+                .then(() => {
+                    setIgnored(list, true);
+                    CLU.toast(plural(list.length) + ' ignored. ' + (list.length === 1 ? 'It leaves' : 'They leave') +
+                        ' the counts.', 'success', { action: { label: 'Undo', onClick: () => bringBack(list) } });
+                })
+                .catch(e => CLU.toast('Could not ignore: ' + e.message, 'danger'));
+        }
+
+        function bringBack(list) {
+            if (!list.length) return;
+            postJson('/api/wanted/ignore', 'DELETE', payload(list))
+                .then(() => {
+                    setIgnored(list, false);
+                    CLU.toast('Back on the Wanted list.', 'success');
+                })
+                .catch(e => CLU.toast('Could not bring back: ' + e.message, 'danger'));
+        }
+
+        CLU.filterBar(filterBar, { onChange: v => { filter = v; sel.clear(); render(); } });
+        viewGroup.addEventListener('click', e => {
+            const b = e.target.closest('[data-view]');
+            if (!b) return;
+            view = b.dataset.view;
+            try { localStorage.setItem('clu-wanted-view', view); } catch (err) { /* per-browser nicety */ }
+            render();
+        });
+        searchAllBtn.addEventListener('click', () => search(items.filter(it => !ignored(it))));
+
+        // ?view= (the old Gap report link) wins over the remembered choice.
+        const urlView = new URLSearchParams(location.search).get('view');
+        let saved = null;
+        try { saved = localStorage.getItem('clu-wanted-view'); } catch (err) { /* private window */ }
+        view = ['series', 'issue'].indexOf(urlView) !== -1 ? urlView
+            : (['series', 'issue'].indexOf(saved) !== -1 ? saved : 'series');
+
+        return {
+            setNeedle: q => { needle = q; return render(); },
+            total: () => items.filter(it => !ignored(it)).length
+        };
+    }
+
+    // The search narrows every section by series (and, for reading-list rows,
+    // the list's name). A section with nothing left hides, and its header
+    // badge counts what is shown.
     document.addEventListener('DOMContentLoaded', function () {
         const box = document.getElementById('wantedSearch');
         if (!box) return;
         const rows = Array.from(document.querySelectorAll('.wanted-row'));
         const countEl = document.getElementById('wantedCount');
         const noMatches = document.getElementById('wantedNoMatches');
+        const missingCard = document.getElementById('missingCard');
+        const Wanted = initWanted();
 
         function apply(value) {
             const q = (value || '').trim();
@@ -502,13 +874,21 @@
                 if (ok) shown += 1;
             });
             document.querySelectorAll('.wanted-section').forEach(function (section) {
+                if (section === missingCard) return;
                 const visible = section.querySelectorAll('.wanted-row:not(.d-none)').length;
                 section.classList.toggle('d-none', visible === 0);
                 const badge = section.querySelector('.wanted-section-count');
                 if (badge) badge.textContent = CLU.formatCount(visible);
             });
+            let total = rows.length;
+            if (Wanted) {
+                const n = Wanted.setNeedle(needle);
+                shown += n;
+                total += Wanted.total();
+                missingCard.classList.toggle('d-none', needle !== '' && n === 0);
+            }
             CLU.setCount(countEl, {
-                total: rows.length, noun: 'wanted issues', one: 'wanted issue', shown: shown
+                total: total, noun: 'wanted issues', one: 'wanted issue', shown: shown
             });
             if (shown === 0 && q) {
                 noMatches.replaceChildren(CLU.noMatches({
@@ -526,10 +906,9 @@
         }
 
         CLU.bindSearch(box, apply, { delay: 0 });
-
-        // The Pull List's "Open in Wanted" arrives as ?q=<series name>.
-        const preset = new URLSearchParams(location.search).get('q');
-        if (preset) { box.value = preset; apply(preset); }
+        // The Pull List's "Open in Wanted" arrives as ?q=<series name>; the
+        // box is already filled server-side, this applies it.
+        apply(box.value);
     });
 
     // Auto-poll when in loading state

@@ -149,6 +149,38 @@ class TestScopedRunBehaviour:
         assert completing, "no except handler completes the operation"
 
 
+class TestWantedIssueScope:
+    """``only_issues``: the Wanted page's Search, narrowed to exactly the picked
+    issues. Every unattended-only step must also stand down for it."""
+
+    def test_defaults_to_none(self, func_node):
+        args = func_node.args.args
+        defaults = dict(zip([a.arg for a in args[-len(func_node.args.defaults):]],
+                            func_node.args.defaults))
+        assert isinstance(defaults["only_issues"], ast.Constant)
+        assert defaults["only_issues"].value is None
+
+    @pytest.mark.parametrize("call", [
+        "update_last_getcomics_run", "build_reading_list_work_items",
+        "apply_follows",
+    ])
+    def test_unattended_steps_are_skipped(self, func_node, call):
+        guarded = [stmt for stmt in _guards_on(func_node, "only_issues")
+                   if _calls_named(stmt, call)]
+        assert guarded, f"{call}() runs on a Wanted-page search"
+
+    def test_cooldown_is_ignored(self, func_node):
+        guarded = [e for e in ast.walk(func_node) if isinstance(e, ast.IfExp)
+                   and _calls_named(e.body, "get_wanted_queue_stamps")
+                   and any(isinstance(n, ast.Name) and n.id == "only_issues"
+                           for n in ast.walk(e.test))]
+        assert guarded, "the queue cooldown would hold back a picked issue"
+
+    def test_issues_outside_the_pick_are_skipped(self, func_node):
+        src = ast.unparse(func_node)
+        assert "(series_id, issue_num) not in only_issues" in src
+
+
 class TestReadingListSource:
     """The sweep's second source of wanted issues.
 

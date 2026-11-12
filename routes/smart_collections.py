@@ -2,10 +2,11 @@
 
 Smart collections are per user (``smart_collections.user_id``); a Reader may
 manage their own (``/api/smart-collections`` is in ``_READER_WRITE_PREFIXES``).
-The gap report is a Clerk feature like Wanted (``/gaps``, ``/api/gaps``).
+The gap report is Wanted's By series view: ``/api/gaps`` is its data and
+``/gaps`` redirects there (both Clerk-only, like Wanted).
 """
 
-from flask import Blueprint, jsonify, render_template, request, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 
 from core import smart_collections as sc
 from core.app_logging import app_logger
@@ -86,7 +87,8 @@ def api_issues(coll_id):
 
 @smart_collections_bp.route("/gaps")
 def gaps_page():
-    return render_template("gaps.html")
+    # The gap report is now Wanted's By series view; old bookmarks land there.
+    return redirect(url_for("series.wanted", view="series"))
 
 
 @smart_collections_bp.route("/api/gaps")

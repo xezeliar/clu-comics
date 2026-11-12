@@ -712,6 +712,8 @@ class SearchResults(list):
     """
 
     failed = False
+    # The live-search queries sent, for the run report's "Why not found".
+    queries = ()
 
 
 # A 429 means GetComics is throttling the whole client, so the right answer is
@@ -5782,4 +5784,5 @@ def search_getcomics_for_issue(
     # the second as a search error, not as a missing issue.
     out = SearchResults(results)
     out.failed = search_failed.is_set()
+    out.queries = tuple(queries_to_try)
     return out

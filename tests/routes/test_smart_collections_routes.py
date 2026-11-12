@@ -1,4 +1,4 @@
-"""Routes: smart collections (/api/smart-collections) and the gap report (/gaps)."""
+"""Routes: smart collections (/api/smart-collections) and the gap report (/api/gaps; /gaps redirects to Wanted)."""
 import time
 
 import pytest
@@ -109,7 +109,12 @@ class TestRules:
 class TestPages:
     def test_pages_render(self, client, library):
         assert client.get("/smart-collections").status_code == 200
-        assert client.get("/gaps").status_code == 200
+
+    def test_gap_report_redirects_to_wanted_by_series(self, client, library):
+        """The gap report is Wanted's By series view now; bookmarks land there."""
+        resp = client.get("/gaps")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/wanted?view=series")
 
 
 class TestGaps:

@@ -42,6 +42,14 @@ registers its own `op_id` when the caller supplies none, so the cron job and
 `/api/run-getcomics-now` are visible too — a run that can last hours used to be
 invisible unless it came from the per-series button.
 
+A third caller is the Wanted page's Search (`POST /api/wanted/search`,
+`only_issues={(series_id, issue_number), ...}`). It is scoped the same way
+(Monitor toggle and queue cooldown ignored, no reading lists, no follows, no
+last-run stamp) and narrowed to exactly the picked issues; every Wanted search
+shares the claim key `"issues"`. The page's per-issue state is read back from
+`download_run_items` by `core/wanted_state.py`, so a capped run (past
+`RUN_ITEM_CAP`) leaves the unlisted issues "Not searched yet".
+
 #### One sweep per scope, and a ceiling on what one sweep may queue
 
 **Every de-duplication the sweep does is in a local.** `queued_download_urls`

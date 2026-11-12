@@ -131,6 +131,28 @@ class TestGetComicsSweep:
         assert len(orelse) == 1 and isinstance(orelse[0], ast.If)
         assert ast.unparse(orelse[0].test) == "results"
 
+    def test_the_miss_record_carries_search_info(self):
+        misses = [
+            c for c in _calls(self.fn, "_record")
+            if c.args and ast.unparse(c.args[1]) == "gc_miss[0]"
+        ]
+        assert len(misses) == 1
+        kw = {k.arg: ast.unparse(k.value) for k in misses[0].keywords}
+        assert kw.get("search_info") == "download_runs.search_info(tried)"
+
+    def test_every_source_tried_is_collected(self):
+        """Pre-sources, GetComics and post-sources each append to `tried`."""
+        appends = [ast.unparse(c.args[0]) for c in _calls(self.fn, "tried.append")]
+        assert appends.count("(src_name, None, u.get('all_results'))") == 2
+        assert "('getcomics', gc_queries, scored_results)" in appends
+
+    def test_getcomics_queries_are_read_before_results_is_replaced(self):
+        reads = [n for n in ast.walk(self.fn) if isinstance(n, ast.Assign)
+                 and ast.unparse(n.targets[0]) == "gc_queries"]
+        replace = next(n for n in ast.walk(self.fn) if isinstance(n, ast.Assign)
+                       and ast.unparse(n) == "results = results or []")
+        assert reads and reads[0].lineno < replace.lineno
+
     def test_per_issue_error_is_recorded(self):
         handlers = [
             h for n in ast.walk(self.fn) if isinstance(n, ast.Try)

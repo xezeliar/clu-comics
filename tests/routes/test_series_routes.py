@@ -1069,13 +1069,23 @@ class TestWantedPage:
             "store_date": store_date, "cover_date": cover_date, "image": None,
         }])
 
-    def test_search_button_carries_issue_year(self, app, client_with_data):
+    @staticmethod
+    def _rows(html):
+        """The Missing section's data (#wantedData), which its script draws."""
+        import json
+        import re
+        m = re.search(r'<script type="application/json" id="wantedData">(.*?)</script>', html, re.S)
+        assert m, "the Missing section's data is missing"
+        return json.loads(m.group(1))
+
+    def test_search_carries_issue_year(self, app, client_with_data):
         self._register_slug_global(app)
         self._seed_wanted()
 
         html = client_with_data.get("/wanted").get_data(as_text=True)
-        assert 'data-year="2026"' in html
-        assert "searchGetComics(this.dataset.series, this.dataset.issue, this.dataset.year)" in html
+        assert self._rows(html)[0]["year"] == "2026"
+        # The hand search seeds its query with that year.
+        assert "searchGetComics(it.series, it.number, it.year)" in html
 
     def test_search_box_count_and_rows(self, app, client_with_data):
         self._register_slug_global(app)
@@ -1084,9 +1094,10 @@ class TestWantedPage:
         assert 'id="wantedToolbar" aria-label="Filter wanted issues"' in html
         assert 'placeholder="Search series and reading lists…"' in html
         assert 'id="wantedCount" aria-live="polite">1 wanted issue</span>' in html
-        # Each row carries what the search matches; sections hide when empty.
-        assert 'class="wanted-row" data-search="iron man chapter eight"' in html
-        assert "wanted-section-count" in html
+        # The script searches each issue's series and name.
+        row = self._rows(html)[0]
+        assert (row["series"], row["name"], row["number"]) == ("Iron Man", "Chapter Eight", "8")
+        assert "(it.series + ' ' + it.name).toLowerCase()" in html
         assert "CLU.bindSearch(box, apply, { delay: 0 })" in html
         assert "CLU.noMatches({" in html and "noun: 'wanted issues'" in html
 
@@ -1095,7 +1106,7 @@ class TestWantedPage:
         self._seed_wanted(store_date=None, cover_date="2019-05-01")
 
         html = client_with_data.get("/wanted").get_data(as_text=True)
-        assert 'data-year="2019"' in html
+        assert self._rows(html)[0]["year"] == "2019"
 
     def test_no_dates_sends_no_year(self, app, client_with_data):
         self._register_slug_global(app)
@@ -1103,7 +1114,7 @@ class TestWantedPage:
 
         html = client_with_data.get("/wanted").get_data(as_text=True)
         # Better to search without a year than to guess the wrong one.
-        assert 'data-year=""' in html
+        assert self._rows(html)[0]["year"] == ""
 
 
 # The section's own marker. "From Reading Lists" alone is also the stat-card
@@ -2296,4 +2307,5 @@ class TestPullListRedesign:
 
     def test_wanted_accepts_a_series_preset(self, app, client_with_data):
         html = client_with_data.get("/wanted?q=Batman").get_data(as_text=True)
-        assert "new URLSearchParams(location.search).get('q')" in html
+        # Filled server-side (feat/wanted-redesign), then applied on load.
+        assert 'value="Batman"' in html and "apply(box.value)" in html

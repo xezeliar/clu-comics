@@ -749,6 +749,11 @@ def _init_db_locked():
             "CREATE INDEX IF NOT EXISTS idx_download_run_items_download "
             "ON download_run_items(download_id)"
         )
+        # Migration: why a search missed (queries, sources, nearest reject),
+        # as bounded JSON for the Wanted page's "Why not found".
+        c.execute("PRAGMA table_info(download_run_items)")
+        if "search_info" not in [col[1] for col in c.fetchall()]:
+            c.execute("ALTER TABLE download_run_items ADD COLUMN search_info TEXT")
 
         # Activity feed (core/activity.py): one row per operation, UTC ts,
         # pruned by count and age on insert.

@@ -76,6 +76,7 @@ MAX_AGE_DAYS = 90
 DEFAULT_KEEP = 30
 DETAIL_MAX = 300
 FLUSH_EVERY = 100
+SEARCH_INFO_QUERIES = 8
 
 
 def _now():
@@ -88,6 +89,30 @@ def _clip(text, limit=DETAIL_MAX):
         return None
     text = str(text)
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def search_info(tried):
+    """Why one issue's search missed, as bounded JSON (or None).
+
+    ``tried`` is ``[(source, queries, scored_candidates)]`` in the order the
+    sources ran. Kept: the sources, at most ``SEARCH_INFO_QUERIES`` queries, and
+    the highest-scoring rejected candidate with the scorer's reason.
+    """
+    sources, queries, nearest = [], [], None
+    for source, qs, cands in tried or ():
+        sources.append(source)
+        for q in qs or ():
+            if len(queries) < SEARCH_INFO_QUERIES:
+                queries.append({"source": source, "query": _clip(q, 160)})
+        for c in cands or ():
+            score = c.get("score")
+            if c.get("decision") == "REJECT" and isinstance(score, (int, float)) and (
+                    nearest is None or score > nearest["score"]):
+                nearest = {"source": source, "title": _clip(c.get("title"), 200),
+                           "score": score, "reason": _clip(c.get("reason"), 200)}
+    if not sources:
+        return None
+    return json.dumps({"sources": sources, "queries": queries, "nearest": nearest})
 
 
 def _keep_runs():
@@ -177,7 +202,8 @@ class RunRecorder:
             self._flush()
 
     def item(self, series_name, issue_number, outcome, *, series_id=None,
-             source=None, provider=None, detail=None, download_id=None):
+             source=None, provider=None, detail=None, download_id=None,
+             search_info=None):
         """One searched issue. Past ``RUN_ITEM_CAP`` only the counters move."""
         self.count(f"outcome_{outcome}")
         if self._item_total >= RUN_ITEM_CAP:
@@ -188,6 +214,7 @@ class RunRecorder:
             self.run_id, series_id, _clip(series_name, 200),
             _clip(issue_number, 40), source, provider, outcome, _clip(detail),
             download_id, OUTCOME_QUEUED if download_id else None, _now(),
+            search_info,
         ))
         if len(self._pending) >= FLUSH_EVERY:
             self._flush()
@@ -205,8 +232,8 @@ class RunRecorder:
                         INSERT INTO download_run_items (
                             run_id, series_id, series_name, issue_number, source,
                             provider, outcome, detail, download_id,
-                            download_status, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            download_status, updated_at, search_info
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         self._pending,
                     )

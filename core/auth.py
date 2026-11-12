@@ -365,7 +365,8 @@ _CLERK_PREFIXES = (
     "/api/getcomics",
     "/api/download-clients",
     "/api/search-review",      # candidate review (Search review page)
-    "/api/gaps",               # gap report (Clerk-only /gaps page)
+    "/api/gaps",               # gap report (Wanted's By series view)
+    "/api/wanted/",            # Wanted page search and ignore
     "/api/download-runs",      # automatic download run reports (Status page)
     "/api/activity",           # activity feed
     "/api/download-queue",     # download queue page
@@ -394,7 +395,7 @@ _CLERK_PAGE_PATHS = frozenset({
     "/releases",         # Weekly Releases
     "/wanted",           # Wanted Issues
     "/search-review",    # Search review
-    "/gaps",             # Gap report
+    "/gaps",             # Gap report (redirects to Wanted)
     "/status",           # Download Status
     "/activity",         # Activity feed
     "/download-queue",   # Download queue

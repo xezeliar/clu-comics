@@ -115,7 +115,7 @@
         </li>
         {% if metron_available and _nav_is_clerk %}
         <li class="nav-item dropdown" id="pull-list-dropdown">
-          <a class="nav-link dropdown-toggle position-relative {% if current_page in [url_for('series.pull_list'), url_for('series.releases'), url_for('series.wanted'), url_for('smart_collections.gaps_page'), url_for('search_review.search_review_page'), url_for('series.publishers_page'), url_for('series.series_search'), url_for('downloads.weekly_packs'), url_for('status')] %}active{% endif %}"
+          <a class="nav-link dropdown-toggle position-relative {% if current_page in [url_for('series.pull_list'), url_for('series.releases'), url_for('series.wanted'), url_for('search_review.search_review_page'), url_for('series.publishers_page'), url_for('series.series_search'), url_for('downloads.weekly_packs'), url_for('status')] %}active{% endif %}"
             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Pull List
             <span id="download-badge"
@@ -140,12 +140,6 @@
               <a href="{{ url_for('series.wanted') }}"
                 class="dropdown-item {% if current_page == url_for('series.wanted') %}active{% endif %}">
                 <i class="bi bi-star me-2"></i>Wanted
-              </a>
-            </li>
-            <li>
-              <a href="{{ url_for('smart_collections.gaps_page') }}"
-                class="dropdown-item {% if current_page == url_for('smart_collections.gaps_page') %}active{% endif %}">
-                <i class="bi bi-slash-square me-2"></i>Gap report
               </a>
             </li>
             <li>
