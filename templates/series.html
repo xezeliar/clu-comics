@@ -14,10 +14,15 @@
     {#- Series header (DESIGN board "Series page header"): a banner strip from
         folder art, the cover overlapping it, the run as owned/missing cells,
         and credits from the owned files' ComicInfo.xml. -#}
-    <section class="series-header{% if header_banner %} has-banner{% endif %}" id="series" aria-label="Series overview">
+    {#- No header.* art: the banner is generated from the cover, blurred across
+        the strip (series-header.css). Decorative, so hidden from screen readers. -#}
+    <section class="series-header{% if header_banner or first_issue_image %} has-banner{% endif %}" id="series" aria-label="Series overview">
         {% if header_banner %}
         <div class="sh-banner" role="img" aria-label="Banner art for {{ series.name }}"
              style="background-image: url('{{ header_banner }}')"></div>
+        {% elif first_issue_image %}
+        <div class="sh-banner sh-banner-generated" aria-hidden="true"
+             style="--sh-banner-img: url('{{ first_issue_image }}')"></div>
         {% endif %}
         <div class="sh-body">
             <div class="sh-cover">
