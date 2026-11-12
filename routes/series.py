@@ -971,6 +971,57 @@ def issue_view(slug):
         return redirect(url_for(".releases"))
 
 
+@series_bp.route("/api/series/for-folder")
+def series_for_folder():
+    """Find the series page for a library folder.
+
+    The Library asks this for a folder that holds a ``series.json`` or
+    ``cvinfo`` but is not mapped to a series yet, then navigates to ``url`` or
+    shows ``error``. The sidecar cascade is the one Scan Library uses; nothing
+    is mapped or subscribed by asking.
+    """
+    import os
+    from core.auth import enforce_path_access
+    from core.database import get_series_slugs_for_folders
+    from helpers.library import is_valid_library_path
+    from helpers.series_slug import generate_series_slug
+    from helpers.comicvine_ids import is_comicvine_series_id
+    from models import comicvine_source, library_automap
+
+    path = (request.args.get("path") or "").strip()
+    if not path or not is_valid_library_path(path) or not os.path.isdir(path):
+        return jsonify({"success": False, "error": "Folder not found in your library"}), 404
+    denied = enforce_path_access(path, mode="browse")
+    if denied:
+        return denied
+
+    slug = get_series_slugs_for_folders([path]).get(path)
+    if slug:
+        return jsonify({"success": True, "url": url_for(".series_view", slug=slug)})
+
+    try:
+        ident = library_automap._resolve_identity(
+            path, metron.get_flask_api(),
+            cv_available=comicvine_source.is_available(),
+        )
+    except Exception as e:
+        app_logger.warning(f"series_for_folder: could not read sidecar in {path}: {e}")
+        ident = None
+    if not ident or not ident.get("metron_id"):
+        reason = (ident or {}).get("reason") or "No series.json or cvinfo in this folder"
+        return jsonify({"success": False, "error": reason})
+
+    series_id = ident["metron_id"]
+    # series_view can only fetch from Metron; a ComicVine-only series needs the
+    # local copy that Add to Pull List creates.
+    if is_comicvine_series_id(series_id) and not get_series_by_id(series_id):
+        return jsonify({"success": False, "error": (
+            "This series is on ComicVine only. Add the folder to the Pull List "
+            "to open its series page.")})
+    slug = generate_series_slug(ident.get("series_name") or "series", series_id, None)
+    return jsonify({"success": True, "url": url_for(".series_view", slug=slug)})
+
+
 @series_bp.route("/series/<slug>")
 def series_view(slug):
     """

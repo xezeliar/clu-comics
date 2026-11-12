@@ -527,7 +527,8 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
                         fileCount: dir.file_count || 0,
                         metadataPending: hasPendingMetadata,
                         thumbnailPending: hasPendingThumbnail,
-                        seriesUrl: dir.series_url || null
+                        seriesUrl: dir.series_url || null,
+                        seriesResolveUrl: dir.series_resolve_url || null
                     });
                     if (hasPendingMetadata) {
                         pendingMetadataPaths.push(itemPath);
@@ -1886,8 +1887,8 @@ function renderGrid(items) {
                     } else {
                         // For folders with files, show full menu. A folder mapped
                         // to a series links to its series page first.
-                        dropdownMenu.innerHTML = (item.seriesUrl ? `
-                        <li><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl}"><i class="bi bi-collection"></i> Series Page</a></li>
+                        dropdownMenu.innerHTML = ((item.seriesUrl || item.seriesResolveUrl) ? `
+                        <li><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl || '#'}"><i class="bi bi-collection"></i> Series Page</a></li>
                         <li><hr class="dropdown-divider"></li>` : '') + `
                         <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
@@ -1904,6 +1905,21 @@ function renderGrid(items) {
                         `;
 
                         // Bind Generate Thumbnail action
+                        // A folder with a series.json/cvinfo but no mapped
+                        // series: ask the server which series page it names.
+                        const seriesPageAction = dropdownMenu.querySelector('.folder-action-series-page');
+                        if (seriesPageAction && !item.seriesUrl) {
+                            seriesPageAction.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                fetch(item.seriesResolveUrl)
+                                    .then(r => r.json())
+                                    .then(d => {
+                                        if (d.success && d.url) window.location.href = d.url;
+                                        else CLU.toast(d.error || 'No series page for this folder', 'warning');
+                                    })
+                                    .catch(() => CLU.toast('Could not open the series page', 'error'));
+                            });
+                        }
                         const thumbnailAction = dropdownMenu.querySelector('.folder-action-thumbnail');
                         if (thumbnailAction) {
                             thumbnailAction.onclick = (e) => {
