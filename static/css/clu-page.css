@@ -842,9 +842,12 @@ a.clu-stat:focus-visible .clu-stat-value {
   box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.75);
 }
 
-/* Touch shortcuts (clu-gestures.js). A held cover presses to 97%. */
-.grid-item.clu-pressing {
-  transform: scale(0.97);
+/* Touch shortcuts (clu-gestures.js). A held cover presses to 95%. :hover is
+   listed too: collection.css's .grid-item:hover lift has the same specificity,
+   loads later and would otherwise replace the press under a mouse. */
+.grid-item.clu-pressing,
+.grid-item.clu-pressing:hover {
+  transform: scale(0.95);
   transition: transform 0.12s ease-out;
 }
 .grid-item { -webkit-touch-callout: none; }
