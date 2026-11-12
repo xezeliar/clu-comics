@@ -63,3 +63,19 @@ def test_swipe_rows_are_wired_to_the_row_menu():
     # Undo restores through the server, never by faking the row back.
     assert "'restore-subscription'" in page and "label: 'Undo'" in page
     assert "'unsubscribe'" in page
+
+
+def test_home_shelf_issue_cards_have_a_more_actions_menu():
+    js = _read("static/js/collection.js")
+    html = _read("templates/collection.html")
+    gestures = _read("static/js/clu-gestures.js")
+    # Every shelf card that opens the reader carries the button.
+    cards = js.count("onclick=\"openReaderForFile(")
+    assert cards >= 4 and js.count("${issueMoreButton()}") == cards
+    # Capture phase, so the card's own onclick never opens the reader.
+    assert "closest('.dashboard-card [data-clu-more]')" in js
+    assert 'id="issueActionsModal"' in html
+    for act in ("read", "folder", "read-date", "unread", "list"):
+        assert f'data-act="{act}"' in html and f"'{act}':" in js
+    # Long-press and right-click reach the same button.
+    assert "'.grid-item, .dashboard-card'" in gestures and "[data-clu-more]" in gestures

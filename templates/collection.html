@@ -518,6 +518,24 @@
     </div>
 </div>
 <!-- End of Text File Viewer Modal -->
+<!-- Issue actions for the home shelves (collection.js openIssueActions) -->
+<div class="modal fade clu-action-sheet" id="issueActionsModal" tabindex="-1" aria-labelledby="issueActionsTitle" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-6 text-truncate" id="issueActionsTitle"></h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="list-group list-group-flush">
+                <button type="button" class="list-group-item list-group-item-action" data-act="read"><i class="bi bi-book me-2"></i>Read</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="folder"><i class="bi bi-folder2-open me-2"></i>Open Folder</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="read-date"><i class="bi bi-calendar-check me-2"></i><span>Set Read Date</span></button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="unread" hidden><i class="bi bi-arrow-counterclockwise me-2"></i>Mark as Unread</button>
+                <button type="button" class="list-group-item list-group-item-action" data-act="list"><i class="bi bi-journal-plus me-2"></i>Add to Reading List</button>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- Set Read Date Modal -->
 <div class="modal fade" id="setReadDateModal" tabindex="-1">
     <div class="modal-dialog modal-sm modal-dialog-centered">

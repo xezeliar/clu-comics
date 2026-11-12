@@ -846,17 +846,21 @@ a.clu-stat:focus-visible .clu-stat-value {
    listed too: collection.css's .grid-item:hover lift has the same specificity,
    loads later and would otherwise replace the press under a mouse. */
 .grid-item.clu-pressing,
-.grid-item.clu-pressing:hover {
+.grid-item.clu-pressing:hover,
+.dashboard-card.clu-pressing,
+.dashboard-card.clu-pressing:hover {
   transform: scale(0.95);
   transition: transform 0.12s ease-out;
 }
-.grid-item { -webkit-touch-callout: none; }
+.grid-item, .dashboard-card { -webkit-touch-callout: none; }
 /* The browser's own long-press on the cover (image drag, text selection) would
    cancel the hold before it opens the menu. */
-.grid-item .thumbnail-container { -webkit-user-select: none; user-select: none; }
-.grid-item .thumbnail-container img { -webkit-user-drag: none; }
+.grid-item .thumbnail-container,
+.dashboard-card-img-container { -webkit-user-select: none; user-select: none; }
+.grid-item .thumbnail-container img,
+.dashboard-card-img-container img { -webkit-user-drag: none; }
 @media (prefers-reduced-motion: reduce) {
-  .grid-item.clu-pressing { transition: none; }
+  .grid-item.clu-pressing, .dashboard-card.clu-pressing { transition: none; }
 }
 
 /* Menus as a bottom sheet below 576px. !important beats Popper's inline

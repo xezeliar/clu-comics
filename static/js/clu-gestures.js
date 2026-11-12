@@ -3,8 +3,9 @@
  * visible button already does (nothing is reachable by touch alone).
  *
  *   Long-press (450ms, finger or mouse) or right-click a cover opens its
- *   "More actions" menu, the same one the round button on the card opens
- *   from the keyboard.
+ *   "More actions" menu, the same one the card's More actions button opens
+ *   from the keyboard: a grid card's dropdown, or a home-shelf card's
+ *   [data-clu-more] button (collection.js, a modal).
  *
  *   Below 576px the card menu and the page header's More menu open as a
  *   bottom sheet: drag handle, scrim, drag down 80px or tap the scrim to
@@ -19,8 +20,10 @@
 
     var HOLD_MS = 450, MOVE_PX = 10, DRAG_PX = 80;
 
+    // A grid card's menu toggle, or a home-shelf card's More actions button.
+    var CARD = '.grid-item, .dashboard-card';
     function toggleOf(card) {
-        return card.querySelector('.item-actions [data-bs-toggle="dropdown"]');
+        return card.querySelector('.item-actions [data-bs-toggle="dropdown"], [data-clu-more]');
     }
 
     // ── Long-press / right-click a cover ────────────────────────────────────
@@ -28,7 +31,8 @@
 
     function openMenu(card) {
         var btn = toggleOf(card);
-        if (btn && window.bootstrap) bootstrap.Dropdown.getOrCreateInstance(btn).show();
+        if (btn && btn.hasAttribute('data-clu-more')) btn.click();
+        else if (btn && window.bootstrap) bootstrap.Dropdown.getOrCreateInstance(btn).show();
         return !!btn;
     }
     function release() {
@@ -42,7 +46,7 @@
         // last one would swallow this tap (on a menu item, usually).
         swallowClick = false;
         if (e.button !== 0 || e.target.closest('button, a, input')) return;
-        var card = e.target.closest('.grid-item');
+        var card = e.target.closest(CARD);
         if (!card || !toggleOf(card)) return;
         release();
         pressed = card;
@@ -65,7 +69,7 @@
         e.stopPropagation();
     }, true);
     document.addEventListener('contextmenu', function (e) {
-        var card = e.target.closest('.grid-item');
+        var card = e.target.closest(CARD);
         if (card && toggleOf(card) && !e.target.closest('input, textarea')) {
             e.preventDefault();
             openMenu(card);

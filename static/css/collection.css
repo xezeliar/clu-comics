@@ -984,6 +984,38 @@ body.collection-select-mode .new-badge {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* The issue shelves' More actions button (collection.js issueMoreButton). */
+.dashboard-card-body:has(.dash-more) {
+    position: relative;
+    padding-right: 1.25rem;
+}
+
+.dashboard-card-body .dash-more {
+    position: absolute;
+    top: 0;
+    right: 0;
+    line-height: 1;
+}
+
+/* On a phone the actions modal docks to the bottom, like the card menus. */
+@media (max-width: 575.98px) {
+    .clu-action-sheet .modal-dialog {
+        position: fixed;
+        inset: auto 0 0 0;
+        margin: 0;
+        max-width: none;
+        min-height: 0;
+        align-items: flex-end;
+    }
+    .clu-action-sheet .modal-content {
+        border-radius: 1rem 1rem 0 0;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .clu-action-sheet .list-group-item {
+        padding: 0.75rem 1.5rem;
+    }
+}
+
 .dashboard-card-body h6 {
     margin-bottom: 2px;
     font-weight: 600;

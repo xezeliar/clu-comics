@@ -4335,6 +4335,55 @@ function applyReadIconsToGrid() {
  * Mark a read issue as unread by removing it from issues_read
  * @param {string} path - Full path to the comic file
  */
+/**
+ * "More actions" for an issue on a home shelf. The same modal opens from the
+ * card's button and from a long-press or right-click (clu-gestures.js finds
+ * [data-clu-more]). A modal, not a dropdown: Swiper's transformed,
+ * overflow-hidden track would clip a menu.
+ */
+function issueMoreButton() {
+    return '<button type="button" class="btn btn-link btn-sm p-0 text-body dash-more" data-clu-more'
+        + ' aria-label="More actions" title="More actions"><i class="bi bi-three-dots-vertical"></i></button>';
+}
+
+function openIssueActions(path) {
+    const modal = document.getElementById('issueActionsModal');
+    if (!modal || !path) return;
+    const isRead = readIssuesSet.has(path);
+    modal.dataset.path = path;
+    modal.querySelector('.modal-title').textContent = path.split('/').pop();
+    modal.querySelector('[data-act="read-date"] span').textContent = isRead ? 'Update Read Date' : 'Set Read Date';
+    modal.querySelector('[data-act="unread"]').hidden = !isRead;
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+}
+
+// Capture phase: stopping the click here keeps the card's own onclick (open
+// the reader) from running.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.dashboard-card [data-clu-more]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openIssueActions(btn.closest('.dashboard-card').dataset.path);
+}, true);
+
+document.addEventListener('click', (e) => {
+    const act = e.target.closest('#issueActionsModal [data-act]');
+    if (!act) return;
+    const modal = document.getElementById('issueActionsModal');
+    const path = modal.dataset.path;
+    const run = {
+        'read': () => openReaderForFile(path),
+        'folder': () => loadDirectory(path.substring(0, path.lastIndexOf('/'))),
+        'read-date': () => openSetReadDateModal(path, readIssuesSet.has(path)),
+        'unread': () => markIssueAsUnread(path),
+        'list': () => openAddToReadingListModal(path),
+    }[act.dataset.act];
+    // The next modal (or the reader) opens once this one has gone.
+    modal.addEventListener('hidden.bs.modal', run, { once: true });
+    bootstrap.Modal.getOrCreateInstance(modal).hide();
+});
+
 async function markIssueAsUnread(path) {
     try {
         const response = await fetch('/api/favorites/issues', {
@@ -4783,6 +4832,7 @@ async function loadRecentlyAddedSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="${thumbnailUrl}" alt="${name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                         <small class="text-muted">${timeAgo}</small>
                     </div>
@@ -4830,6 +4880,7 @@ async function loadNewThisWeekSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="/api/thumbnail?path=${encodeURIComponent(path)}" alt="${name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                     </div>
                 </div>
@@ -4893,6 +4944,7 @@ async function loadContinueReadingSwiper() {
                         </button>
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${name}">${name}</div>
                         <small class="text-muted">${pageInfo}<br/>${timeAgo}</small>
                     </div>
@@ -4954,6 +5006,7 @@ async function loadOnTheStackSwiper() {
                         <img src="/static/images/loading.svg" data-thumbnail="${thumbnailUrl}" alt="${item.file_name}" class="thumbnail">
                     </div>
                     <div class="dashboard-card-body">
+                        ${issueMoreButton()}
                         <div class="text-truncate item-name" title="${item.file_name}">${item.file_name}</div>
                         <small class="text-muted">${item.series_name} #${item.issue_number}<br/>${timeAgo}</small>
                         ${listBadge}
