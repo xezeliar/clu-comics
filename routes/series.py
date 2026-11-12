@@ -1189,6 +1189,7 @@ def series_view(slug):
         from core.series_header import banner_url, run_summary
 
         header_banner = banner_url(mapped_path)
+        header_focus = (cached_series or {}).get("header_focus")
         run = None
         series_credits = None
         if mapped_path and os.path.isdir(mapped_path):
@@ -1318,6 +1319,7 @@ def series_view(slug):
             char_map=load_char_map(),
             missing_line=missing_line,
             header_banner=header_banner,
+            header_focus=header_focus,
             run=run,
             series_credits=series_credits,
         )
@@ -1867,6 +1869,27 @@ def get_series_manual_status(series_id):
 
     manual_status = get_manual_status_for_series(series_id)
     return jsonify({"success": True, "manual_status": manual_status})
+
+
+@series_bp.route("/api/series/<int:series_id>/header", methods=["POST"])
+def set_series_header(series_id):
+    """Pick the slice of the cover the series header banner shows.
+
+    ``focus`` is the vertical position, 0 (top) to 100 (bottom); null goes
+    back to the blurred cover. Header art (header.* folder art) still wins.
+    """
+    from core.database import set_series_header_focus
+
+    data = request.get_json(silent=True) or {}
+    focus = data.get("focus")
+    if focus is not None:
+        if isinstance(focus, bool) or not isinstance(focus, (int, float)) \
+                or not 0 <= focus <= 100:
+            return jsonify({"error": "focus must be a number from 0 to 100, or null"}), 400
+        focus = round(float(focus), 1)
+    if not set_series_header_focus(series_id, focus):
+        return jsonify({"error": "Series not found"}), 404
+    return jsonify({"success": True, "focus": focus})
 
 
 @series_bp.route(

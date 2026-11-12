@@ -1001,12 +1001,48 @@ class TestSeriesPageHeader:
         conn.commit()
         conn.close()
         html = self._page(app, client_with_data)
-        assert 'class="sh-banner sh-banner-generated" aria-hidden="true"' in html
+        assert 'class="sh-banner sh-banner-generated" id="shBanner" aria-hidden="true"' in html
         assert "--sh-banner-img: url('https://img.example/batman-1.jpg')" in html
         assert "has-banner" in html
         # Real header art still wins over the generated one.
         html = self._page(app, client_with_data, banner="/api/folder-thumbnail?kind=header")
         assert 'class="sh-banner"' in html and "sh-banner-generated" not in html
+
+    def _set_cover(self):
+        from core.database import get_db_connection
+        conn = get_db_connection()
+        conn.execute("UPDATE series SET cover_image = ? WHERE id = 100",
+                     ("https://img.example/batman-1.jpg",))
+        conn.commit()
+        conn.close()
+
+    def test_set_header_saves_the_slice(self, app, client_with_data):
+        self._set_cover()
+        html = self._page(app, client_with_data)
+        assert 'data-bs-target="#shHeaderModal"' in html and 'id="shHeaderModal"' in html
+
+        resp = client_with_data.post("/api/series/100/header", json={"focus": 62.25})
+        assert resp.status_code == 200 and resp.get_json()["focus"] == 62.2
+        html = self._page(app, client_with_data)
+        assert 'class="sh-banner sh-banner-slice" id="shBanner"' in html
+        assert "background-position: center 62.2%" in html
+        assert 'class="sh-banner sh-banner-generated"' not in html
+
+        resp = client_with_data.post("/api/series/100/header", json={"focus": None})
+        assert resp.status_code == 200 and resp.get_json()["focus"] is None
+        assert 'class="sh-banner sh-banner-generated"' in self._page(app, client_with_data)
+
+    def test_set_header_validates(self, app, client_with_data):
+        for bad in (-1, 101, "50", True):
+            resp = client_with_data.post("/api/series/100/header", json={"focus": bad})
+            assert resp.status_code == 400
+        assert client_with_data.post("/api/series/999999/header",
+                                     json={"focus": 10}).status_code == 404
+
+    def test_set_header_hidden_when_header_art_exists(self, app, client_with_data):
+        self._set_cover()
+        html = self._page(app, client_with_data, banner="/api/folder-thumbnail?kind=header")
+        assert "shHeaderModal" not in html
 
     def test_actions_follow_the_header_rule(self, app, client_with_data):
         html = self._page(app, client_with_data)
