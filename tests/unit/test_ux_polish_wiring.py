@@ -26,6 +26,8 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     # the fixed sheet on its first open.
     assert "clu-sheet-host" in js and ".clu-sheet-host {" in css
     # Built before the first paint, or the menu flashes as a dropdown.
+    # Above its scrim (1055) whatever page rule sets a menu z-index.
+    assert "z-index: 1056 !important" in css
     assert "'show.bs.dropdown'" in js and "'shown.bs.dropdown'" not in js
 
 
