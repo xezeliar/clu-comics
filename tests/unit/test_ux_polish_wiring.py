@@ -13,6 +13,14 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     assert "js/clu-gestures.js" in _read("templates/base.html")
     js = _read("static/js/clu-gestures.js")
     assert ".item-actions" in js and "contextmenu" in js and "HOLD_MS = 450" in js
+    # Mouse as well as touch; a stale click guard is cleared on the next press;
+    # native image drag cannot cancel the hold unnoticed.
+    assert "e.pointerType !== 'touch'" not in js and "e.button !== 0" in js
+    press = js[js.index("addEventListener('pointerdown'"):]
+    assert press.index("swallowClick = false") < press.index("e.button !== 0")
+    assert "'dragstart'" in js
+    css = _read("static/css/clu-page.css")
+    assert "user-select: none" in css and "-webkit-user-drag: none" in css
     assert "clu-sheet" in _read("static/css/clu-page.css")
 
 
