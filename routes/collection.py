@@ -466,15 +466,6 @@ def api_onboarding_dismiss():
     return jsonify({"success": set_setting("ONBOARDING_DISMISSED", True)})
 
 
-def _has_series_sidecar(folder):
-    """True when a folder holds a series.json or cvinfo.
-
-    shortcut: two stats per unmapped folder, since sidecars are not in
-    file_index; index them if large publisher folders browse slowly.
-    """
-    return any(os.path.isfile(os.path.join(folder, n)) for n in ('series.json', 'cvinfo'))
-
-
 @collection_bp.route('/api/browse')
 def api_browse():
     """
@@ -537,10 +528,6 @@ def api_browse():
             if d['path'] in series_slugs:
                 dir_info['series_url'] = url_for(
                     'series.series_view', slug=series_slugs[d['path']])
-            elif _has_series_sidecar(d['path']):
-                # Not mapped yet: the series route resolves the sidecar.
-                dir_info['series_resolve_url'] = url_for(
-                    'series.series_for_folder', path=d['path'])
 
             processed_directories.append(dir_info)
 

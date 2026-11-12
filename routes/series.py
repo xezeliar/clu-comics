@@ -975,10 +975,12 @@ def issue_view(slug):
 def series_for_folder():
     """Find the series page for a library folder.
 
-    The Library asks this for a folder that holds a ``series.json`` or
-    ``cvinfo`` but is not mapped to a series yet, then navigates to ``url`` or
-    shows ``error``. The sidecar cascade is the one Scan Library uses; nothing
-    is mapped or subscribed by asking.
+    The Library asks this for a folder that is not mapped to a series yet.
+    ``check=1`` only answers whether it holds a ``series.json`` or ``cvinfo``
+    (asked when the folder's menu opens: sidecars are not indexed, and a
+    listing must not touch the disk for every folder). Otherwise the answer is
+    ``url`` or ``error``. The sidecar cascade is the one Scan Library uses;
+    nothing is mapped or subscribed by asking.
     """
     import os
     from core.auth import enforce_path_access
@@ -994,6 +996,10 @@ def series_for_folder():
     denied = enforce_path_access(path, mode="browse")
     if denied:
         return denied
+
+    if request.args.get("check"):
+        has = any(os.path.isfile(os.path.join(path, n)) for n in ("series.json", "cvinfo"))
+        return jsonify({"success": True, "has_sidecar": has})
 
     slug = get_series_slugs_for_folders([path]).get(path)
     if slug:
