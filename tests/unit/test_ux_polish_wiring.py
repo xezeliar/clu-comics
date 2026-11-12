@@ -25,6 +25,8 @@ def test_gestures_script_is_loaded_everywhere_and_opens_the_existing_menu():
     # A transformed ancestor (sticky :hover on a tapped card) must not contain
     # the fixed sheet on its first open.
     assert "clu-sheet-host" in js and ".clu-sheet-host {" in css
+    # Built before the first paint, or the menu flashes as a dropdown.
+    assert "'show.bs.dropdown'" in js and "'shown.bs.dropdown'" not in js
 
 
 def test_settings_search_is_wired():

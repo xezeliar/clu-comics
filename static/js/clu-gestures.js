@@ -79,7 +79,9 @@
     function menuFor(btn) {
         return btn.parentElement && btn.parentElement.querySelector('.dropdown-menu');
     }
-    document.addEventListener('shown.bs.dropdown', function (e) {
+    // On show, not shown: the sheet must exist before the menu first paints,
+    // or it flashes as a dropdown for a frame.
+    document.addEventListener('show.bs.dropdown', function (e) {
         var btn = e.target, menu = menuFor(btn);
         if (!phone.matches || !menu || !btn.closest('.item-actions, .clu-page-more, .clu-row-more')) return;
         menu.classList.add('clu-sheet');
