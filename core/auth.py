@@ -340,6 +340,7 @@ _READER_WRITE_PREFIXES = (
     "/api/reading-position",
     "/api/reader-prefs",       # the reader's own layout preference (per user)
     "/api/reading-stats",
+    "/api/backfill-reading-metadata",  # re-reads credits of the user's own reads
     "/api/favorites",          # favorites_bp
     "/api/smart-collections",  # a user's own saved filters (per user)
     "/api/to-read",

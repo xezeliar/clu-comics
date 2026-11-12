@@ -90,7 +90,6 @@ from core.memory_utils import (
     get_global_monitor,
 )
 from core.app_logging import app_logger, APP_LOG, MONITOR_LOG, read_log_tail
-from core.metadata_normalize import normalize_credit_list, strip_provider_ids
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from core.version import __version__
@@ -165,9 +164,6 @@ from models.stats import (
     get_file_type_distribution,
     get_top_publishers,
     get_reading_history_stats,
-    get_largest_comics,
-    get_top_series_by_count,
-    get_reading_heatmap_data,
 )
 from models.timeline import get_reading_timeline
 
@@ -378,6 +374,9 @@ app.register_blueprint(download_queue_bp)
 from routes.smart_collections import smart_collections_bp
 
 app.register_blueprint(smart_collections_bp)
+from routes.insights import insights_bp
+
+app.register_blueprint(insights_bp)
 
 # Start unified scheduler
 app_state.scheduler.start()
@@ -6136,97 +6135,6 @@ def api_reading_trends(field):
     return jsonify(trends)
 
 
-@app.route("/api/backfill-reading-metadata", methods=["POST"])
-def api_backfill_reading_metadata():
-    """Re-read ComicInfo.xml for all issues_read entries and update metadata fields."""
-    from core.comicinfo import read_comicinfo_from_zip
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        c = conn.cursor()
-        c.execute("SELECT id, issue_path FROM issues_read")
-        rows = c.fetchall()
-
-        updated_count = 0
-        skipped_count = 0
-        skipped_issues = []
-
-        for row in rows:
-            issue_id = row[0]
-            issue_path = row[1]
-            filename = os.path.basename(issue_path)
-
-            # Skip if file doesn't exist
-            if not os.path.exists(issue_path):
-                skipped_count += 1
-                skipped_issues.append({"file": filename, "reason": "File not found"})
-                continue
-
-            # Skip if not a CBZ/ZIP
-            if not issue_path.lower().endswith((".cbz", ".zip")):
-                skipped_count += 1
-                skipped_issues.append(
-                    {"file": filename, "reason": "Not a CBZ/ZIP file"}
-                )
-                continue
-
-            try:
-                comic_info = read_comicinfo_from_zip(issue_path)
-                if comic_info:
-                    # Strip "[3258]"-style provider IDs, or this route would
-                    # re-dirty issues_read after the migration cleaned it.
-                    writer = normalize_credit_list(comic_info.get("Writer", ""))
-                    penciller = normalize_credit_list(comic_info.get("Penciller", ""))
-                    characters = normalize_credit_list(comic_info.get("Characters", ""))
-                    publisher = strip_provider_ids(comic_info.get("Publisher", ""))
-
-                    c.execute(
-                        """
-                        UPDATE issues_read
-                        SET writer = ?, penciller = ?, characters = ?, publisher = ?
-                        WHERE id = ?
-                    """,
-                        (writer, penciller, characters, publisher, issue_id),
-                    )
-                    updated_count += 1
-                else:
-                    skipped_count += 1
-                    skipped_issues.append(
-                        {"file": filename, "reason": "No ComicInfo.xml"}
-                    )
-            except Exception as e:
-                app_logger.warning(
-                    f"Could not read ComicInfo.xml for {issue_path}: {e}"
-                )
-                skipped_count += 1
-                skipped_issues.append({"file": filename, "reason": f"Error: {str(e)}"})
-
-        conn.commit()
-        conn.close()
-
-        # Clear stats cache
-        clear_stats_cache_prefix(f"u{current_user_id()}:")  # per-user reading caches
-
-        app_logger.info(
-            f"Backfill complete: {updated_count} updated, {skipped_count} skipped"
-        )
-        return jsonify(
-            {
-                "success": True,
-                "updated": updated_count,
-                "skipped": skipped_count,
-                "skipped_issues": skipped_issues,
-            }
-        )
-
-    except Exception as e:
-        app_logger.error(f"Error during backfill: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
 @app.route("/api/recently-read")
 def api_recently_read():
     """Get recently read issues with metadata for display."""
@@ -7933,29 +7841,9 @@ def trigger_gcd_import():
 
 @app.route("/insights")
 def insights_page():
-    from core.database import get_reading_totals
+    from core.insights import get_collection_overview
 
-    library_stats = get_library_stats()
-    file_types = get_file_type_distribution()
-    top_publishers = get_top_publishers()
-    reading_history = get_reading_history_stats()
-    largest_comics = get_largest_comics()
-    top_series = get_top_series_by_count()
-    reading_heatmap = get_reading_heatmap_data()
-    reading_totals = get_reading_totals()
-
-    return render_template(
-        "insights.html",
-        library_stats=library_stats,
-        file_types=file_types,
-        top_publishers=top_publishers,
-        reading_history=reading_history,
-        largest_comics=largest_comics,
-        top_series=top_series,
-        reading_heatmap=reading_heatmap,
-        reading_totals=reading_totals,
-        rec_enabled=get_user_preference("rec_enabled", default=True),
-    )
+    return render_template("insights.html", collection=get_collection_overview())
 
 
 @app.route("/api/insights")

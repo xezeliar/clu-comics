@@ -1062,6 +1062,10 @@ def _init_db_locked():
         if "hide" not in columns:
             app_logger.info("Migrating issues_read table: adding hide column")
             c.execute("ALTER TABLE issues_read ADD COLUMN hide INTEGER DEFAULT 0")
+        # Set by Insights' "Read credits from ComicInfo" on every row it re-read,
+        # so a file with no credits stops counting as a credits gap.
+        if "credits_read" not in columns:
+            c.execute("ALTER TABLE issues_read ADD COLUMN credits_read INTEGER DEFAULT 0")
         c.execute(
             "CREATE INDEX IF NOT EXISTS idx_issues_read_path ON issues_read(issue_path)"
         )
@@ -1974,11 +1978,13 @@ def _init_db_locked():
                 characters TEXT DEFAULT '',
                 publisher TEXT DEFAULT '',
                 hide INTEGER DEFAULT 0,
+                credits_read INTEGER DEFAULT 0,
                 UNIQUE(user_id, issue_path)
             )
             """,
             {"id", "user_id", "issue_path", "read_at", "page_count", "time_spent",
-             "writer", "penciller", "characters", "publisher", "hide"},
+             "writer", "penciller", "characters", "publisher", "hide",
+             "credits_read"},
             [
                 "CREATE INDEX IF NOT EXISTS idx_issues_read_path ON issues_read(issue_path)",
                 "CREATE INDEX IF NOT EXISTS idx_issues_read_user ON issues_read(user_id)",
