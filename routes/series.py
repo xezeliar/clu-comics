@@ -1271,7 +1271,9 @@ def series_view(slug):
 
             sorted_issues = sorted(all_issues, key=sort_key)
             if sorted_issues:
-                first_issue_image = get_attr(sorted_issues[0], "image")
+                # Metron models give a pydantic HttpUrl, which tojson can't serialize.
+                img = get_attr(sorted_issues[0], "image")
+                first_issue_image = str(img) if img else None
 
         # Check for existing mapping
         mapped_path = get_series_mapping(series_id)
