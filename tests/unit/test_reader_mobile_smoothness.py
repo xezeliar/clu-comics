@@ -69,7 +69,10 @@ class TestScrollModePinch:
     def test_pinch_is_clamped_and_keeps_the_place(self, js):
         b = body(js, "attachScrollPinch")
         assert "SCROLL_PINCH_MIN" in b and "SCROLL_PINCH_MAX" in b
-        assert "withScrollAnchor" in b
+        # It zooms around the fingers' midpoint, on both axes; anchoring only
+        # the page top grew the strip out of its top-left corner.
+        assert "midpoint(e.touches)" in b
+        assert "scrollLeft +=" in b and "scrollTop +=" in b
 
     def test_end_of_pinch_does_not_toggle_chrome(self, js):
         assert "suppressClickUntil" in js
