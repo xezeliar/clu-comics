@@ -5,8 +5,6 @@ let currentDestinationPath = '';
 // (deleteTarget/deletePanel removed – delete handled by clu-delete.js)
 // Global variable to hold selected file paths.
 let selectedFiles = new Set();
-// Global variable to track the last clicked file element (for SHIFT selection).
-let lastClickedFile = null;
 // Global variables to store series data for sorting in GCD modal
 let currentSeriesData = [];
 let currentFilePath = '';
@@ -250,135 +248,34 @@ async function fetchDirectoryMetadataForPanel(dirPath, dirName, panel) {
   CLU.fetchDirectoryMetadata(dirPath, dirName);
 }
 
-// Helper function to create drop target item
-// An empty listing must say so: a blank panel reads as "still loading" or
-// "broken". The row is not a drop target or a selectable item.
-function appendEmptyListing(container, title, message, icon) {
-  const li = document.createElement('li');
-  li.className = 'list-group-item files-empty-listing';
-  li.appendChild(CLU.emptyState({ icon: icon || 'bi-folder2-open', title: title, message: message, compact: true }));
-  container.appendChild(li);
-}
-
-// A letter or a search hid every entry: the shared no-matches state, compact,
-// in a list row. "Clear filters" also resets the letter; "Clear search" only
-// the panel's search box.
-function appendNoMatchesListing(container, panel, letterOn) {
-  const query = panelSearch[panel];
-  const li = document.createElement('li');
-  li.className = 'list-group-item files-empty-listing';
-  li.appendChild(CLU.noMatches({
-    noun: 'folders', query: query, filtered: letterOn, compact: true,
-    onClear: () => clearDirectoryNarrowing(panel, letterOn),
-  }));
-  container.appendChild(li);
-}
-
-function clearDirectoryNarrowing(panel, clearLetter) {
-  const data = panel === 'source' ? sourceDirectoriesData : destinationDirectoriesData;
-  if (clearLetter) {
-    currentFilter[panel] = 'all';
-    if (data) updateFilterBar(panel, data.directories, data.files);
-  }
-  const box = document.getElementById(panel + '-directory-search');
-  if (box) {
-    box.value = '';
-    box.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  panelSearch[panel] = '';
-  if (data) renderDirectoryListing(data, panel);
-}
-
-function createDropTargetItem(container, currentPath, panel) {
-  let dropTargetItem = document.createElement("li");
-  dropTargetItem.className = "list-group-item text-center drop-target-item";
-  dropTargetItem.textContent = "... Drop Files Here";
-
-  dropTargetItem.addEventListener("dragover", function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    dropTargetItem.classList.add("folder-hover");
-  });
-  dropTargetItem.addEventListener("dragleave", function (e) {
-    e.stopPropagation();
-    dropTargetItem.classList.remove("folder-hover");
-  });
-  dropTargetItem.addEventListener("drop", function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    dropTargetItem.classList.remove("folder-hover");
-    clearAllDropHoverStates();
-    let dataStr = e.dataTransfer.getData("text/plain");
-    let items;
-    try {
-      items = JSON.parse(dataStr);
-      if (!Array.isArray(items)) {
-        items = [items];
-      }
-    } catch (err) {
-      items = [{ path: dataStr, type: "unknown" }];
-    }
-    let paths = items.map(item => item.path);
-    moveMultipleItems(paths, currentPath, panel);
-    selectedFiles.clear();
-    if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-  });
-
-  container.appendChild(dropTargetItem);
-}
-
 // Normalize file object (handles both {name, size} or string)
 function normalizeFile(file) {
   if (typeof file === 'object' && file.name) return file;
   return { name: file, size: null };
 }
 
-// Function to send a rename request.
+// Send a rename request. Resolves { ok } or { ok: false, error } so the inline
+// rename can show the server's refusal under the field; a success reloads the pane.
 function renameItem(oldPath, newName, panel) {
-  if (typeof oldPath !== "string" || typeof newName !== "string") {
-    console.error("Invalid oldPath or newName:", { oldPath, newName });
-    CLU.toast("Rename failed: Internal path error (non-string input)", 'error');
-    return;
-  }
-
-  const trimmedName = newName.trim();
-  if (!trimmedName) {
-    CLU.toast("Filename cannot be empty.", 'warning');
-    return;
-  }
-
-  let pathParts = oldPath.split('/');
-  pathParts[pathParts.length - 1] = trimmedName;
-  const newPath = pathParts.join('/');
-
-  console.log("renameItem called:");
-  console.log("  oldPath:", oldPath);
-  console.log("  newName:", newName);
-  console.log("  newPath:", newPath);
-
-  fetch('/rename', {
+  const trimmedName = String(newName).trim();
+  if (!trimmedName) return Promise.resolve({ ok: false, error: 'A name can’t be empty.' });
+  const newPath = dirName(oldPath) + '/' + trimmedName;
+  return fetch('/rename', {
     method: 'POST',
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ old: oldPath, new: newPath })
   })
     .then(response => response.json())
     .then(result => {
-      if (result.success) {
-        if (panel === 'source') {
-          loadDirectories(currentSourcePath, 'source');
-        } else {
-          loadDirectories(currentDestinationPath, 'destination');
-        }
-      } else {
-        CLU.toast("Error renaming item: " + result.error, 'error');
-      }
+      if (!result.success) return { ok: false, error: result.error || 'Rename failed.' };
+      refreshFilePanel(panel);
+      return { ok: true };
     })
     .catch(error => {
       console.error("Error in rename request:", error);
-      CLU.toast("Rename failed due to a network or server error.", 'error');
+      return { ok: false, error: 'Rename failed due to a network or server error.' };
     });
 }
-
 
 // ==========================================
 // Want to Read
@@ -399,30 +296,9 @@ function refreshWantToReadPaths() {
     });
 }
 
-// Build the dropdown entry that flags a file or folder for the "Want to Read"
-// swiper on the collection page. itemType is 'file' or 'folder'.
-function createWantToReadItem(fullPath, name, itemType) {
-  const item = document.createElement("li");
-  const link = document.createElement("a");
-  link.className = "dropdown-item";
-  link.href = "#";
-  applyWantToReadLabel(link, wantToReadPaths.has(fullPath));
-  link.onclick = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleWantToRead(fullPath, name, itemType, link);
-  };
-  item.appendChild(link);
-  return item;
-}
-
-function applyWantToReadLabel(link, isMarked) {
-  link.innerHTML = isMarked
-    ? '<i class="bi bi-bookmark-dash me-2"></i>Remove from Want to Read'
-    : '<i class="bi bi-bookmark-plus me-2"></i>Add to Want to Read';
-}
-
-function toggleWantToRead(fullPath, name, itemType, link) {
+// Flag a file or folder for the "Want to Read" swiper on the collection page.
+// itemType is 'file' or 'folder'. The menus read wantToReadPaths when opened.
+function toggleWantToRead(fullPath, name, itemType) {
   const isMarked = wantToReadPaths.has(fullPath);
   const method = isMarked ? 'DELETE' : 'POST';
 
@@ -441,7 +317,6 @@ function toggleWantToRead(fullPath, name, itemType, link) {
           wantToReadPaths.add(fullPath);
           CLU.showSuccess(`${name} added to Want to Read`);
         }
-        applyWantToReadLabel(link, !isMarked);
       } else {
         CLU.showError('Failed to update Want to Read: ' + (data.error || 'Unknown error'));
       }
@@ -454,965 +329,6 @@ function toggleWantToRead(fullPath, name, itemType, link) {
 
 document.addEventListener('DOMContentLoaded', refreshWantToReadPaths);
 
-// Function to create a list item with edit and delete functionality.
-function createListItem(itemName, fullPath, type, panel, isDraggable) {
-  let li = document.createElement("li");
-  li.className = "list-group-item d-flex align-items-center justify-content-between";
-  li.dataset.fullpath = fullPath;
-
-  let fileData = typeof itemName === "object" ? itemName : { name: itemName, size: null };
-
-  let leftContainer = document.createElement("div");
-  leftContainer.className = "d-flex align-items-center";
-
-  // Create icon container early to avoid undefined reference
-  let iconContainer = document.createElement("div");
-  iconContainer.className = "btn-group";
-  iconContainer.setAttribute("role", "group");
-  iconContainer.setAttribute("aria-label", "File actions");
-
-  if (fileData.name.toLowerCase() !== "parent") {
-    let icon = document.createElement("i");
-    icon.className = (type === "directory") ? "bi bi-folder me-2" : "bi bi-file-earmark-zip me-2";
-    if (type === "directory") icon.style.color = "#bf9300";
-    leftContainer.appendChild(icon);
-
-    // Track file additions for rename button visibility (only actual files, not directories)
-    console.log(`createListItem: type=${type}, name=${fileData.name}, panel=${panel}`);
-    if (type === "file") {
-      trackFileForRename(panel);
-    }
-  }
-
-  // The name is text, never markup: a file name can contain "<".
-  let nameSpan = document.createElement("span");
-  nameSpan.textContent = fileData.name;
-  if (type === "file" && fileData.size != null) {
-    const sizeSpan = document.createElement("span");
-    sizeSpan.className = "text-info-emphasis small ms-2";
-    sizeSpan.textContent = `(${formatSize(fileData.size)})`;
-    nameSpan.append(" ", sizeSpan);
-  }
-  leftContainer.appendChild(nameSpan);
-
-  // Auto-compress is rewriting this comic in place: say so, so nobody moves it
-  // half-written (the server refuses the move too).
-  if (type === "file" && fileData.compressing) {
-    const compressingBadge = document.createElement("span");
-    compressingBadge.className = "badge text-bg-warning ms-2 compressing-badge";
-    compressingBadge.title = "Being compressed. Wait for this to finish before moving it.";
-    compressingBadge.innerHTML =
-      '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Compressing…';
-    leftContainer.appendChild(compressingBadge);
-    li.classList.add("opacity-75");
-  }
-
-  console.log('Checking CBZ condition:', {
-    type: type,
-    filename: fileData.name,
-    lowercaseEnds: fileData.name.toLowerCase().endsWith('.cbz'),
-    lowercase: fileData.name.toLowerCase()
-  });
-
-  // Add CBZ info functionality
-  if (
-    type === "file" &&
-    ['.cbz', '.zip'].some(ext => fileData.name.toLowerCase().endsWith(ext))
-  ) {
-    console.log('Creating CBZ buttons for:', fileData.name);
-
-    // Add info button for detailed CBZ information
-    const infoBtn = document.createElement("button");
-    infoBtn.className = "btn btn-sm btn-outline-info";
-    infoBtn.innerHTML = '<i class="bi bi-eye"></i>';
-    infoBtn.title = "CBZ Information";
-    infoBtn.setAttribute('aria-label', infoBtn.title);
-    infoBtn.setAttribute("type", "button");
-    infoBtn.onclick = function (e) {
-      e.stopPropagation();
-      // Get the current directory's CBZ file list
-      const directoryPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-      const cbzFiles = (panel === 'source' ? sourceDirectoriesData : destinationDirectoriesData)
-        .files
-        .filter(f => {
-          const fileName = typeof f === 'object' ? f.name : f;
-          return fileName.toLowerCase().endsWith('.cbz') || fileData.name.toLowerCase().endsWith('.zip') || fileName.toLowerCase().endsWith('.cbr');
-        })
-        .map(f => typeof f === 'object' ? f.name : f)
-        .sort();
-
-      showCBZInfo(fullPath, fileData.name, directoryPath, cbzFiles);
-    };
-    iconContainer.appendChild(infoBtn);
-    console.log('Info button added');
-
-    // Get providers configured for this library
-    const providers = getProvidersForPanel(panel);
-    const hasGCD = providers.some(p => p.provider_type === 'gcd');
-    const hasAnyProvider = providers.length > 0;
-
-    // Add cloud-download button for cascade metadata search (if any providers configured)
-    if (hasAnyProvider) {
-      const metadataBtn = document.createElement("button");
-      metadataBtn.className = "btn btn-sm btn-outline-success";
-      metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-      metadataBtn.title = "Fetch Metadata (search providers by priority)";
-      metadataBtn.setAttribute('aria-label', metadataBtn.title);
-      metadataBtn.setAttribute("type", "button");
-      metadataBtn.onclick = function (e) {
-        e.stopPropagation();
-        searchMetadataForFile(fullPath, fileData.name, panel);
-      };
-      iconContainer.appendChild(metadataBtn);
-    }
-
-    // Add GCD-specific button (database-down icon) if GCD is available
-    if (hasGCD) {
-      const gcdBtn = document.createElement("button");
-      gcdBtn.className = "btn btn-sm btn-outline-info";
-      gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
-      gcdBtn.title = "Search GCD Database Only";
-      gcdBtn.setAttribute('aria-label', gcdBtn.title);
-      gcdBtn.setAttribute("type", "button");
-      gcdBtn.onclick = function (e) {
-        e.stopPropagation();
-        searchGCDMetadata(fullPath, fileData.name);
-      };
-      iconContainer.appendChild(gcdBtn);
-      console.log('GCD-specific button added');
-    }
-
-    // Fallback: if no providers but legacy availability flags are set, show legacy buttons
-    if (!hasAnyProvider && (gcdAvailable || comicVineAvailable)) {
-      if (gcdAvailable) {
-        const gcdBtn = document.createElement("button");
-        gcdBtn.className = "btn btn-sm btn-outline-success";
-        gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-        gcdBtn.title = "Search GCD for Metadata (legacy)";
-        gcdBtn.setAttribute('aria-label', gcdBtn.title);
-        gcdBtn.setAttribute("type", "button");
-        gcdBtn.onclick = function (e) {
-          e.stopPropagation();
-          searchGCDMetadata(fullPath, fileData.name);
-        };
-        iconContainer.appendChild(gcdBtn);
-      }
-    }
-  }
-
-  if (type === "directory") {
-    const infoWrapper = document.createElement("span");
-    infoWrapper.className = "me-2";
-
-    const infoIcon = document.createElement("button");
-    infoIcon.className = "btn btn-sm btn-outline-info";
-    infoIcon.innerHTML = '<i class="bi bi-info-circle"></i>';
-    infoIcon.title = "Show folder information";
-    infoIcon.setAttribute('aria-label', infoIcon.title);
-    infoIcon.setAttribute("type", "button");
-
-    const sizeDisplay = document.createElement("span");
-    sizeDisplay.className = "text-info-emphasis small ms-2";
-
-    infoIcon.onclick = function (e) {
-      e.stopPropagation();
-      infoIcon.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-
-      fetch(`/folder-size?path=${encodeURIComponent(fullPath)}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.size != null) {
-            let displayText = formatSize(data.size);
-            const parts = [];
-
-            if (data.comic_count && data.comic_count > 0) {
-              parts.push(`${data.comic_count} comic${data.comic_count !== 1 ? 's' : ''}`);
-            }
-
-            if (data.magazine_count && data.magazine_count > 0) {
-              parts.push(`${data.magazine_count} magazine${data.magazine_count !== 1 ? 's' : ''}`);
-            }
-
-            if (parts.length > 0) {
-              displayText += " – " + parts.join(" – ");
-            }
-
-            sizeDisplay.textContent = `(${displayText})`;
-          } else {
-            sizeDisplay.textContent = "(error)";
-          }
-
-          // Remove the icon after success
-          infoWrapper.removeChild(infoIcon);
-        })
-        .catch(err => {
-          console.error("Error calculating folder size:", err);
-          sizeDisplay.textContent = "(error)";
-          infoIcon.innerHTML = '<i class="bi bi-info-circle"></i>'; // restore fallback
-        });
-    };
-
-    infoWrapper.appendChild(infoIcon);
-    infoWrapper.appendChild(sizeDisplay);
-    iconContainer.appendChild(infoWrapper);
-
-    // Get providers configured for this library
-    const providers = getProvidersForPanel(panel);
-    const hasGCD = providers.some(p => p.provider_type === 'gcd');
-    const hasAnyProvider = providers.length > 0;
-
-    // Add cloud-download button for directory cascade metadata fetch
-    if (fileData.name !== "Parent" && hasAnyProvider) {
-      const metadataBtn = document.createElement("button");
-      metadataBtn.className = "btn btn-sm btn-outline-success";
-      metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-      metadataBtn.title = "Fetch Metadata for All Comics in Directory";
-      metadataBtn.setAttribute('aria-label', metadataBtn.title);
-      metadataBtn.setAttribute("type", "button");
-      metadataBtn.onclick = function (e) {
-        e.stopPropagation();
-        fetchDirectoryMetadataForPanel(fullPath, fileData.name, panel);
-      };
-      iconContainer.appendChild(metadataBtn);
-    }
-
-    // Add GCD-specific button for directory (database-down icon)
-    if (fileData.name !== "Parent" && hasGCD) {
-      const gcdBtn = document.createElement("button");
-      gcdBtn.className = "btn btn-sm btn-outline-info";
-      gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
-      gcdBtn.title = "Fetch GCD Metadata for All Comics";
-      gcdBtn.setAttribute('aria-label', gcdBtn.title);
-      gcdBtn.setAttribute("type", "button");
-      gcdBtn.onclick = function (e) {
-        e.stopPropagation();
-        searchGCDMetadataForDirectory(fullPath, fileData.name);
-      };
-      iconContainer.appendChild(gcdBtn);
-    }
-
-    // Fallback: if no providers but legacy availability flags are set, show legacy button
-    if (fileData.name !== "Parent" && !hasAnyProvider && (gcdAvailable || comicVineAvailable || metronAvailable)) {
-      const metadataBtn = document.createElement("button");
-      metadataBtn.className = "btn btn-sm btn-outline-success";
-      metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-      metadataBtn.title = "Fetch Metadata for All Comics (legacy)";
-      metadataBtn.setAttribute('aria-label', metadataBtn.title);
-      metadataBtn.setAttribute("type", "button");
-      metadataBtn.onclick = function (e) {
-        e.stopPropagation();
-        fetchDirectoryMetadataForPanel(fullPath, fileData.name, panel);
-      };
-      iconContainer.appendChild(metadataBtn);
-    }
-
-    // Add rename button for directories (but not for Parent directory)
-    if (fileData.name !== "Parent") {
-      const renameBtn = document.createElement("button");
-      renameBtn.className = "btn btn-sm btn-outline-primary";
-      renameBtn.innerHTML = '<i class="bi bi-input-cursor-text"></i>';
-      renameBtn.title = "Rename files in this directory";
-      renameBtn.setAttribute('aria-label', renameBtn.title);
-      renameBtn.setAttribute("type", "button");
-      renameBtn.addEventListener("click", function (e) {
-        if (e) e.stopPropagation();
-        console.log('Rename button clicked for directory:', fullPath);
-        // Call the rename_files function from rename.py
-        fetch('/rename-directory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ directory: fullPath })
-        })
-          .then(response => {
-            console.log('Rename response status:', response.status);
-            return response.json();
-          })
-          .then(result => {
-            console.log('Rename result:', result);
-            if (result.success) {
-              // The server reports how many files actually changed, so a
-              // no-op rename is not presented as a success (#716).
-              const renamedCount = result.renamed || 0;
-              CLU.showToast(
-                renamedCount ? 'Rename Successful' : 'Nothing to Rename',
-                result.message || `Renamed ${renamedCount} file(s) in ${fileData.name}`,
-                renamedCount ? 'success' : 'info'
-              );
-              // Refresh the current directory listing
-              if (panel === 'source') {
-                loadDirectories(currentSourcePath, 'source');
-              } else {
-                loadDirectories(currentDestinationPath, 'destination');
-              }
-            } else {
-              CLU.showToast('Rename Error', result.error, 'error');
-            }
-          })
-          .catch(error => {
-            console.error("Error calling rename function:", error);
-            CLU.showToast('Rename Error', error.message, 'error');
-          });
-      });
-      iconContainer.appendChild(renameBtn);
-
-      // Add three-dot dropdown menu for directory operations
-      const dropdownContainer = document.createElement("div");
-      dropdownContainer.className = "dropdown d-inline-block";
-
-      const dropdownBtn = document.createElement("button");
-      dropdownBtn.className = "btn btn-sm";
-      dropdownBtn.setAttribute("type", "button");
-      dropdownBtn.setAttribute("data-bs-toggle", "dropdown");
-      dropdownBtn.setAttribute("aria-expanded", "false");
-      dropdownBtn.setAttribute("aria-label", "More actions");
-      dropdownBtn.title = "More actions";
-      dropdownBtn.innerHTML = '<i class="bi bi-three-dots-vertical"></i>';
-      dropdownBtn.onclick = (e) => e.stopPropagation();
-
-      const dropdownMenu = document.createElement("ul");
-      dropdownMenu.className = "dropdown-menu";
-
-      // Convert CBR-->CBZ option
-      const convertItem = document.createElement("li");
-      const convertLink = document.createElement("a");
-      convertLink.className = "dropdown-item";
-      convertLink.href = "#";
-      convertLink.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Convert CBR→CBZ';
-      convertLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('convert', fullPath, panel);
-      };
-      convertItem.appendChild(convertLink);
-      dropdownMenu.appendChild(convertItem);
-
-      // Rebuild All Files option
-      const rebuildItem = document.createElement("li");
-      const rebuildLink = document.createElement("a");
-      rebuildLink.className = "dropdown-item";
-      rebuildLink.href = "#";
-      rebuildLink.innerHTML = '<i class="bi bi-hammer me-2"></i>Rebuild All Files';
-      rebuildLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('rebuild', fullPath, panel);
-      };
-      rebuildItem.appendChild(rebuildLink);
-      dropdownMenu.appendChild(rebuildItem);
-
-      // PDFs-->CBZ option
-      const pdfItem = document.createElement("li");
-      const pdfLink = document.createElement("a");
-      pdfLink.className = "dropdown-item";
-      pdfLink.href = "#";
-      pdfLink.innerHTML = '<i class="bi bi-file-earmark-pdf me-2"></i>PDFs→CBZ';
-      pdfLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('pdf', fullPath, panel);
-      };
-      pdfItem.appendChild(pdfLink);
-      dropdownMenu.appendChild(pdfItem);
-
-      // Missing File Check option
-      const missingItem = document.createElement("li");
-      const missingLink = document.createElement("a");
-      missingLink.className = "dropdown-item";
-      missingLink.href = "#";
-      missingLink.innerHTML = '<i class="bi bi-search me-2"></i>Missing File Check';
-      missingLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('missing', fullPath, panel);
-      };
-      missingItem.appendChild(missingLink);
-      dropdownMenu.appendChild(missingItem);
-
-      // Update XML option
-      const updateXmlItem = document.createElement("li");
-      const updateXmlLink = document.createElement("a");
-      updateXmlLink.className = "dropdown-item";
-      updateXmlLink.href = "#";
-      updateXmlLink.innerHTML = '<i class="bi bi-code-slash me-2"></i>Update XML';
-      updateXmlLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        CLU.openUpdateXmlModal(fullPath, fileData.name);
-      };
-      updateXmlItem.appendChild(updateXmlLink);
-      dropdownMenu.appendChild(updateXmlItem);
-
-      // Re-tag with a single provider (#626) -- only when the library has one
-      // to offer; the modal lists exactly the library's enabled providers.
-      if (getProvidersForPanel(panel).length > 0) {
-        const retagItem = document.createElement("li");
-        const retagLink = document.createElement("a");
-        retagLink.className = "dropdown-item";
-        retagLink.href = "#";
-        retagLink.innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Re-tag with provider…';
-        retagLink.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          CLU.openRetagModal(fullPath, fileData.name, getLibraryIdForPanel(panel),
-            function () { refreshPanelForPath(fullPath); });
-        };
-        retagItem.appendChild(retagLink);
-        dropdownMenu.appendChild(retagItem);
-
-        // Backfill missing fields (#579): fill blanks only, never overwrite.
-        const backfillItem = document.createElement("li");
-        const backfillLink = document.createElement("a");
-        backfillLink.className = "dropdown-item";
-        backfillLink.href = "#";
-        backfillLink.innerHTML = '<i class="bi bi-plus-circle-dotted me-2"></i>Backfill missing fields…';
-        backfillLink.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          CLU.openBackfillModal(fullPath, fileData.name, getLibraryIdForPanel(panel),
-            function () { refreshPanelForPath(fullPath); });
-        };
-        backfillItem.appendChild(backfillLink);
-        dropdownMenu.appendChild(backfillItem);
-      }
-
-      // Create/Update series.json option
-      const seriesJsonItem = document.createElement("li");
-      const seriesJsonLink = document.createElement("a");
-      seriesJsonLink.className = "dropdown-item";
-      seriesJsonLink.href = "#";
-      seriesJsonLink.innerHTML = '<i class="bi bi-file-earmark-code me-2"></i>Create/Update series.json';
-      seriesJsonLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        CLU.openSeriesJsonModal(fullPath, fileData.name);
-      };
-      seriesJsonItem.appendChild(seriesJsonLink);
-      dropdownMenu.appendChild(seriesJsonItem);
-
-      // Enhance Images option
-      const enhanceItem = document.createElement("li");
-      const enhanceLink = document.createElement("a");
-      enhanceLink.className = "dropdown-item";
-      enhanceLink.href = "#";
-      enhanceLink.innerHTML = '<i class="bi bi-stars me-2"></i>Enhance Images';
-      enhanceLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('enhance_dir', fullPath, panel);
-      };
-      enhanceItem.appendChild(enhanceLink);
-      dropdownMenu.appendChild(enhanceItem);
-
-      // Compress option: shrink the page images of every CBZ in this folder
-      const compressDirItem = document.createElement("li");
-      const compressDirLink = document.createElement("a");
-      compressDirLink.className = "dropdown-item";
-      compressDirLink.href = "#";
-      compressDirLink.innerHTML = '<i class="bi bi-file-zip me-2"></i>Compress CBZ Files';
-      compressDirLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnDirectory('compress_dir', fullPath, panel);
-      };
-      compressDirItem.appendChild(compressDirLink);
-      dropdownMenu.appendChild(compressDirItem);
-
-      // Smart Rename option
-      const smartRenameItem = document.createElement("li");
-      const smartRenameLink = document.createElement("a");
-      smartRenameLink.className = "dropdown-item";
-      smartRenameLink.href = "#";
-      smartRenameLink.innerHTML = '<i class="bi bi-magic me-2"></i>Smart Rename';
-      smartRenameLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        runSmartRename(fullPath, panel);
-      };
-      smartRenameItem.appendChild(smartRenameLink);
-      dropdownMenu.appendChild(smartRenameItem);
-
-      // Add to Pull List option (folders only — a folder is a series)
-      const pullListItem = document.createElement("li");
-      const pullListLink = document.createElement("a");
-      pullListLink.className = "dropdown-item";
-      pullListLink.href = "#";
-      pullListLink.innerHTML = '<i class="bi bi-list-check me-2"></i>Add to Pull List';
-      pullListLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        CLU.addFolderToPullList(fullPath, fileData.name);
-      };
-      pullListItem.appendChild(pullListLink);
-      dropdownMenu.appendChild(pullListItem);
-
-      // Want to Read option (flags the whole series/folder)
-      dropdownMenu.appendChild(createWantToReadItem(fullPath, fileData.name, 'folder'));
-
-      // Remove All XML option
-      const removeXmlItem = document.createElement("li");
-      const removeXmlLink = document.createElement("a");
-      removeXmlLink.className = "dropdown-item text-danger";
-      removeXmlLink.href = "#";
-      removeXmlLink.innerHTML = '<i class="bi bi-eraser me-2"></i>Remove All XML';
-      removeXmlLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        bulkRemoveXmlFromDirectory(fullPath, panel);
-      };
-      removeXmlItem.appendChild(removeXmlLink);
-      dropdownMenu.appendChild(removeXmlItem);
-
-      dropdownContainer.appendChild(dropdownBtn);
-      dropdownContainer.appendChild(dropdownMenu);
-      // Store for later - will be appended after trash button
-      li.folderDropdown = dropdownContainer;
-    }
-  }
-
-  if (fileData.name !== "Parent") {
-    let pencil = document.createElement("button");
-    pencil.className = "btn btn-sm btn-outline-dark";
-    pencil.innerHTML = '<i class="bi bi-pencil"></i>';
-    pencil.title = "Edit filename";
-    pencil.setAttribute('aria-label', pencil.title);
-    pencil.setAttribute("type", "button");
-
-    pencil.addEventListener("click", e => {
-      e.stopPropagation();
-      const liElem = e.currentTarget.closest("li");
-      liElem.setAttribute("draggable", "false");
-      liElem.classList.remove("draggable");
-      const oldPath = liElem.dataset.fullpath;
-      const nameSpanElem = liElem.querySelector("span");
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "form-control form-control-sm edit-input";
-      input.value = typeof fileData === "object" ? fileData.name : fileData;
-      input.addEventListener("click", ev => ev.stopPropagation());
-
-      input.addEventListener("keypress", ev => {
-        if (ev.key === "Enter") {
-          const newName = input.value.trim();
-          if (!newName) return CLU.toast("Filename cannot be empty.", 'warning');
-          liElem.setAttribute("draggable", "true");
-          liElem.classList.add("draggable");
-          renameItem(oldPath, newName, panel);
-        }
-      });
-
-      input.addEventListener("blur", () => {
-        liElem.setAttribute("draggable", "true");
-        liElem.classList.add("draggable");
-        liElem.replaceChild(leftContainer, input);
-      });
-
-      liElem.replaceChild(input, leftContainer);
-      input.focus();
-    });
-
-    let trash = document.createElement("button");
-    trash.className = "btn btn-sm btn-outline-danger";
-    trash.innerHTML = '<i class="bi bi-trash"></i>';
-    trash.title = "Delete file";
-    trash.setAttribute('aria-label', trash.title);
-    trash.setAttribute("type", "button");
-    trash.onclick = function (e) {
-      e.stopPropagation();
-      showDeletePrompt(fullPath, fileData.name, panel);
-    };
-
-    // Eye button on the cvinfo / series.json rows: view their contents as text
-    if (type === "file" && ["cvinfo", "series.json"].includes(fileData.name.toLowerCase())) {
-      const eye = document.createElement("button");
-      eye.className = "btn btn-sm btn-outline-secondary";
-      eye.innerHTML = '<i class="bi bi-eye"></i>';
-      eye.title = `View ${fileData.name}`;
-      eye.setAttribute('aria-label', eye.title);
-      eye.setAttribute("type", "button");
-      eye.onclick = function (e) {
-        e.stopPropagation();
-        CLU.openSidecarViewer(fullPath.substring(0, Math.max(fullPath.lastIndexOf("/"), fullPath.lastIndexOf("\\"))));
-      };
-      iconContainer.appendChild(eye);
-    }
-
-    iconContainer.appendChild(pencil);
-    iconContainer.appendChild(trash);
-
-    // Add folder three-dots menu after trash button (for directories only)
-    if (li.folderDropdown) {
-      iconContainer.appendChild(li.folderDropdown);
-      delete li.folderDropdown; // Clean up
-    }
-
-    // Add three-dots menu for CBZ/CBR files (same as collection.html)
-    // Only add if this is a CBZ/CBR/ZIP file
-    if (
-      type === "file" &&
-      ['.cbz', '.cbr', '.zip'].some(ext => fileData.name.toLowerCase().endsWith(ext))
-    ) {
-      const dropdownContainer = document.createElement("div");
-      dropdownContainer.className = "dropdown d-inline-block";
-
-      const dropdownBtn = document.createElement("button");
-      dropdownBtn.className = "btn btn-sm";
-      dropdownBtn.setAttribute("type", "button");
-      dropdownBtn.setAttribute("data-bs-toggle", "dropdown");
-      dropdownBtn.setAttribute("aria-expanded", "false");
-      dropdownBtn.innerHTML = '<i class="bi bi-three-dots-vertical"></i>';
-      dropdownBtn.title = "More options";
-      dropdownBtn.setAttribute('aria-label', dropdownBtn.title);
-      dropdownBtn.onclick = (e) => e.stopPropagation();
-
-      const dropdownMenu = document.createElement("ul");
-      dropdownMenu.className = "dropdown-menu dropdown-menu-end shadow";
-
-      // Crop Cover option
-      const cropItem = document.createElement("li");
-      const cropLink = document.createElement("a");
-      cropLink.className = "dropdown-item";
-      cropLink.href = "#";
-      cropLink.textContent = "Crop Cover";
-      cropLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnFile('crop', fullPath, panel);
-      };
-      cropItem.appendChild(cropLink);
-      dropdownMenu.appendChild(cropItem);
-
-      // Remove 1st Image option
-      const removeFirstItem = document.createElement("li");
-      const removeFirstLink = document.createElement("a");
-      removeFirstLink.className = "dropdown-item";
-      removeFirstLink.href = "#";
-      removeFirstLink.textContent = "Remove 1st Image";
-      removeFirstLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnFile('remove', fullPath, panel);
-      };
-      removeFirstItem.appendChild(removeFirstLink);
-      dropdownMenu.appendChild(removeFirstItem);
-
-      // Edit File option
-      const editItem = document.createElement("li");
-      const editLink = document.createElement("a");
-      editLink.className = "dropdown-item";
-      editLink.href = "#";
-      editLink.textContent = "Edit File";
-      editLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openEditModal(fullPath);
-      };
-      editItem.appendChild(editLink);
-      dropdownMenu.appendChild(editItem);
-
-      // Split File option (CBZ only)
-      if (fileData.name.toLowerCase().endsWith('.cbz')) {
-        const splitItem = document.createElement("li");
-        const splitLink = document.createElement("a");
-        splitLink.className = "dropdown-item";
-        splitLink.href = "#";
-        splitLink.textContent = "Split File";
-        splitLink.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openSplitModal(fullPath);
-        };
-        splitItem.appendChild(splitLink);
-        dropdownMenu.appendChild(splitItem);
-      }
-
-      // Rebuild option
-      const rebuildItem = document.createElement("li");
-      const rebuildLink = document.createElement("a");
-      rebuildLink.className = "dropdown-item";
-      rebuildLink.href = "#";
-      rebuildLink.textContent = "Rebuild";
-      rebuildLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnFile('single_file', fullPath, panel);
-      };
-      rebuildItem.appendChild(rebuildLink);
-      dropdownMenu.appendChild(rebuildItem);
-
-      // Enhance option
-      const enhanceItem = document.createElement("li");
-      const enhanceLink = document.createElement("a");
-      enhanceLink.className = "dropdown-item";
-      enhanceLink.href = "#";
-      enhanceLink.textContent = "Enhance";
-      enhanceLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnFile('enhance_single', fullPath, panel);
-      };
-      enhanceItem.appendChild(enhanceLink);
-      dropdownMenu.appendChild(enhanceItem);
-
-      // Compress option: shrink the page images (CBZ only)
-      if (fullPath.toLowerCase().endsWith('.cbz')) {
-        const compressItem = document.createElement("li");
-        const compressLink = document.createElement("a");
-        compressLink.className = "dropdown-item";
-        compressLink.href = "#";
-        compressLink.textContent = "Compress (smaller file)";
-        compressLink.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          executeScriptOnFile('compress', fullPath, panel);
-        };
-        compressItem.appendChild(compressLink);
-        dropdownMenu.appendChild(compressItem);
-      }
-
-      // Add Blank to End option
-      const addBlankItem = document.createElement("li");
-      const addBlankLink = document.createElement("a");
-      addBlankLink.className = "dropdown-item";
-      addBlankLink.href = "#";
-      addBlankLink.textContent = "Add Blank to End";
-      addBlankLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        executeScriptOnFile('add', fullPath, panel);
-      };
-      addBlankItem.appendChild(addBlankLink);
-      dropdownMenu.appendChild(addBlankItem);
-
-      // Force Metadata Match: ComicInfo.xml lives inside a zip, so not for CBR.
-      if (!fileData.name.toLowerCase().endsWith('.cbr')) {
-        const forceMetaItem = document.createElement("li");
-        const forceMetaLink = document.createElement("a");
-        forceMetaLink.className = "dropdown-item";
-        forceMetaLink.href = "#";
-        forceMetaLink.innerHTML = '<i class="bi bi-crosshair me-2"></i>Force Metadata Match';
-        forceMetaLink.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          forceMetadataMatchForFile(fullPath, fileData.name, panel);
-        };
-        forceMetaItem.appendChild(forceMetaLink);
-        dropdownMenu.appendChild(forceMetaItem);
-      }
-
-      // Divider
-      const dividerItem = document.createElement("li");
-      dividerItem.innerHTML = '<hr class="dropdown-divider">';
-      dropdownMenu.appendChild(dividerItem);
-
-      // Want to Read option
-      dropdownMenu.appendChild(createWantToReadItem(fullPath, fileData.name, 'file'));
-
-      // Add to Reading List option
-      const addToListItem = document.createElement("li");
-      const addToListLink = document.createElement("a");
-      addToListLink.className = "dropdown-item";
-      addToListLink.href = "#";
-      addToListLink.innerHTML = '<i class="bi bi-journal-plus me-2"></i>Add to Reading List';
-      addToListLink.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openAddToReadingListModal(fullPath);
-      };
-      addToListItem.appendChild(addToListLink);
-      dropdownMenu.appendChild(addToListItem);
-
-      dropdownContainer.appendChild(dropdownBtn);
-      dropdownContainer.appendChild(dropdownMenu);
-      iconContainer.appendChild(dropdownContainer);
-    }
-  }
-
-  li.appendChild(leftContainer);
-  li.appendChild(iconContainer);
-
-  if (type === "file") {
-    li.setAttribute("data-fullpath", fullPath);
-    li.addEventListener("click", function (e) {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        if (selectedFiles.has(fullPath)) {
-          selectedFiles.delete(fullPath);
-          li.classList.remove("selected");
-          li.removeAttribute("data-selection-hint");
-        } else {
-          selectedFiles.add(fullPath);
-          li.classList.add("selected");
-          li.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-        }
-        lastClickedFile = li;
-      } else if (e.shiftKey) {
-        let container = li.parentNode;
-        let fileItems = Array.from(container.querySelectorAll("li.list-group-item"))
-          .filter(item => item.getAttribute("data-fullpath"));
-        if (!lastClickedFile) lastClickedFile = li;
-        let startIndex = fileItems.indexOf(lastClickedFile);
-        let endIndex = fileItems.indexOf(li);
-        if (startIndex === -1) startIndex = 0;
-        if (endIndex === -1) endIndex = 0;
-        let [minIndex, maxIndex] = startIndex < endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
-        for (let i = minIndex; i <= maxIndex; i++) {
-          let item = fileItems[i];
-          selectedFiles.add(item.getAttribute("data-fullpath"));
-          item.classList.add("selected");
-          item.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-        }
-      } else {
-        // If clicking the only selected file, deselect it (toggle off)
-        if (selectedFiles.size === 1 && selectedFiles.has(fullPath)) {
-          selectedFiles.clear();
-          li.classList.remove("selected");
-          li.removeAttribute("data-selection-hint");
-          lastClickedFile = null;
-        } else {
-          selectedFiles.clear();
-          document.querySelectorAll("li.list-group-item.selected").forEach(item => {
-            item.classList.remove("selected");
-            item.removeAttribute("data-selection-hint");
-          });
-          selectedFiles.add(fullPath);
-          li.classList.add("selected");
-          li.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-          lastClickedFile = li;
-        }
-      }
-      updateSelectionBadge();
-      e.stopPropagation();
-    });
-
-    li.addEventListener("contextmenu", e => {
-      e.preventDefault();
-      // Only show context menu if multiple files are selected
-      if (selectedFiles.size > 1) {
-        showFileContextMenu(e, panel);
-      }
-    });
-  }
-
-  if (type === "directory") {
-    // Set data-fullpath for directories so they can be found during deletion
-    li.setAttribute("data-fullpath", fullPath);
-
-    li.onclick = function () {
-      // Store current filter for current path before navigating
-      const currentPath = panel === 'source' ? currentSourcePath : currentDestinationPath;
-      if (currentFilter[panel] !== 'all') {
-        filterHistory[panel][currentPath] = currentFilter[panel];
-      } else {
-        // Remove entry if filter is 'all' (default) to minimize memory usage
-        delete filterHistory[panel][currentPath];
-      }
-
-      currentFilter[panel] = 'all';
-      loadDirectories(fullPath, panel);
-    };
-    if (fileData.name.toLowerCase() !== "parent") {
-      li.addEventListener("dragover", e => { e.preventDefault(); li.classList.add("folder-hover"); });
-      li.addEventListener("dragleave", e => { li.classList.remove("folder-hover"); });
-      li.addEventListener("drop", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        li.classList.remove("folder-hover");
-        clearAllDropHoverStates();
-
-        let dataStr = e.dataTransfer.getData("text/plain");
-        let items;
-        try {
-          items = JSON.parse(dataStr);
-          if (!Array.isArray(items)) items = [items];
-        } catch {
-          items = [{ path: dataStr, type: "unknown" }];
-        }
-
-        let targetDir = fullPath;
-        let dedupedPaths = new Set();
-
-        items.forEach(item => {
-          let sourcePath = item.path;
-          let sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
-          if (sourceDir !== targetDir && !dedupedPaths.has(sourcePath)) {
-            dedupedPaths.add(sourcePath);
-          }
-        });
-
-        const paths = [...dedupedPaths];
-        if (paths.length === 0) return;
-
-        if (paths.length === 1 && items[0].type === "file") {
-          moveSingleItem(paths[0], targetDir);
-        } else {
-          // Pass item types for better progress tracking
-          moveMultipleItems(paths, targetDir, panel, items);
-        }
-        markFolderAsReceiving(fullPath);
-        selectedFiles.clear();
-        if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-      });
-    }
-  } else {
-    li.onclick = e => e.stopPropagation();
-  }
-
-  if (isDraggable && !(type === "file" && fileData.compressing)) {
-    li.classList.add("draggable");
-    li.setAttribute("draggable", "true");
-    li.addEventListener("dragstart", function (e) {
-      if (type === "file") {
-        if (selectedFiles.has(fullPath)) {
-          e.dataTransfer.setData("text/plain", JSON.stringify([...selectedFiles].map(path => ({ path, type: "file" }))));
-          // Set drag image for multiple files
-          e.dataTransfer.effectAllowed = "move";
-
-          // Create custom drag image showing count
-          const dragCount = selectedFiles.size;
-          if (dragCount > 1) {
-            const dragImage = document.createElement('div');
-            dragImage.className = 'drag-preview';
-            dragImage.textContent = `${dragCount} files`;
-            dragImage.style.cssText = 'position: absolute; top: -1000px; background: #2196f3; color: white; padding: 0.5rem; border-radius: 0.25rem; font-weight: bold;';
-            document.body.appendChild(dragImage);
-            e.dataTransfer.setDragImage(dragImage, 50, 25);
-            setTimeout(() => document.body.removeChild(dragImage), 0);
-          }
-        } else {
-          selectedFiles.clear();
-          document.querySelectorAll("li.list-group-item.selected").forEach(item => {
-            item.classList.remove("selected");
-            item.removeAttribute("data-selection-hint");
-          });
-          selectedFiles.add(fullPath);
-          li.classList.add("selected");
-          li.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-          if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-          e.dataTransfer.setData("text/plain", JSON.stringify([{ path: fullPath, type: "file" }]));
-          e.dataTransfer.effectAllowed = "move";
-        }
-      } else {
-        e.dataTransfer.setData("text/plain", JSON.stringify([{ path: fullPath, type: "directory" }]));
-        e.dataTransfer.effectAllowed = "move";
-      }
-
-      // Add dragging class for visual feedback
-      li.classList.add("dragging");
-      setTimeout(() => li.classList.remove("dragging"), 50);
-    });
-
-    li.addEventListener("dragend", function (e) {
-      // Clean up any hover states when drag ends (whether successful or not)
-      setTimeout(() => {
-        clearAllDropHoverStates();
-      }, 100);
-    });
-  }
-
-  return li;
-}
-
 // First letters present in a folder listing: 'A'..'Z', or '#' for the rest.
 function directoryLetters(directories) {
   // CLU.sortLetters buckets each first character ('#' for a non-letter).
@@ -1420,47 +336,47 @@ function directoryLetters(directories) {
   return new Set(CLU.sortLetters(dirs.map(dir => dir.charAt(0))));
 }
 
-// Draw a panel's A-Z bar. A second click on the selected letter goes back
-// to All (CLU.letterBar); the list is filtered here, in the browser.
+// Draw a panel's search box and A-Z bar. The search box is always there and
+// narrows files and folders alike; the letter bar appears only in a folder of
+// more than FM_MANY_FOLDERS folders and narrows folders only. A second click
+// on the selected letter goes back to All (CLU.letterBar).
 function updateFilterBar(panel, directories, files) {
   const outerContainer = document.getElementById(`${panel}-directory-filter`);
   if (!outerContainer) return;
-  const bar = outerContainer.querySelector('.clu-letter-bar');
-  if (!bar) return;
+  if (!Array.isArray(directories)) directories = [];
 
-  if (!Array.isArray(directories)) {
-    if (directories) console.warn("directories is not an array in updateFilterBar:", directories);
-    directories = [];
+  const bar = outerContainer.querySelector('.clu-letter-bar');
+  if (bar) {
+    const many = directories.length > FM_MANY_FOLDERS;
+    if (!many) currentFilter[panel] = 'all';
+    bar.hidden = !many;
+    CLU.letterBar(bar, {
+      letters: many ? Array.from(directoryLetters(directories)) : [],
+      active: currentFilter[panel] === 'all' ? '' : currentFilter[panel],
+      onChange: value => {
+        currentFilter[panel] = value || 'all';
+        fmPanes[panel].cur = 0;
+        fmRender(panel);
+      }
+    });
   }
 
-  CLU.letterBar(bar, {
-    letters: Array.from(directoryLetters(directories)),
-    active: currentFilter[panel] === 'all' ? '' : currentFilter[panel],
-    onChange: value => {
-      currentFilter[panel] = value || 'all';
-      const data = panel === 'source' ? sourceDirectoriesData : destinationDirectoriesData;
-      if (data) renderDirectoryListing(data, panel);
-    }
-  });
-
-  // --- SEARCH BOX (both panels, once a folder holds more than a screenful) ---
-  // It stays while a search is on, so a search that hides everything can
-  // still be cleared from the box.
+  // The search box is drawn once per pane and kept, so typing never loses focus.
   const searchRow = document.getElementById(panel + '-directory-search-row');
   if (!searchRow) return;
-  const entries = directories.length + (Array.isArray(files) ? files.length : 0);
-  if (entries > 12 || panelSearch[panel]) {
+  let input = document.getElementById(panel + '-directory-search');
+  if (!input) {
     const box = CLU.searchInput({
       id: panel + '-directory-search',
       label: 'Search files and folders',
       value: panelSearch[panel],
     });
-    box.classList.add('mb-2');
     searchRow.replaceChildren(box);
-    CLU.bindSearch(box.querySelector('input'), val => onPanelSearch(panel, val), { delay: 0 });
-  } else {
-    searchRow.innerHTML = '';
+    input = box.querySelector('input');
+    CLU.bindSearch(input, val => onPanelSearch(panel, val), { delay: 0 });
   }
+  if (input.value.trim() !== (panelSearch[panel] || '')) input.value = panelSearch[panel] || '';
+  input.disabled = !fmPanes[panel].loaded;
 }
 
 // Function to restore filter from history if valid for the given path
@@ -1481,8 +397,8 @@ function restoreFilterIfValid(panel, path, directories) {
 const panelSearch = { source: '', destination: '' };
 function onPanelSearch(panel, val) {
   panelSearch[panel] = val.trim();
-  const data = panel === 'source' ? sourceDirectoriesData : destinationDirectoriesData;
-  if (data) renderDirectoryListing(data, panel);
+  fmPanes[panel].cur = 0;
+  fmRender(panel);
 }
 
 // Save scroll position before navigating away
@@ -1505,102 +421,6 @@ function restoreScrollPosition(panel, path) {
       container.scrollTop = history[path];
     }, 0);
   }
-}
-
-// Updated loadDirectories function.
-function loadDirectories(path, panel) {
-  console.log("loadDirectories called with path:", path, "panel:", panel);
-
-  // Route virtual paths to their dedicated loaders
-  if (path === 'trash') { loadTrash(panel); return; }
-  if (path === 'recent-files') { loadRecentFiles(panel); return; }
-
-  // Save scroll position before loading new content
-  saveScrollPosition(panel);
-
-  // Update button states - library dropdown replaces btnDirectories
-  const btnDownloads = document.getElementById('btnDownloads');
-  if (btnDownloads) btnDownloads.classList.remove('active');
-  const btnRecentFiles = document.getElementById('btnRecentFiles');
-  if (btnRecentFiles) btnRecentFiles.classList.remove('active');
-  const btnTrashLib = document.getElementById('btnTrash');
-  if (btnTrashLib) btnTrashLib.classList.remove('active');
-
-  // Show filter bar
-  const filterBar = document.getElementById(`${panel}-directory-filter`);
-  if (filterBar) {
-    filterBar.style.display = 'block';
-  }
-
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  let container = panel === 'source' ? document.getElementById("source-list")
-    : document.getElementById("destination-list");
-  if (!container) {
-    console.error("Container not found for panel:", panel);
-    return;
-  }
-  container.innerHTML = `<div class="d-flex justify-content-center my-3">
-                                <button class="btn btn-primary" type="button" disabled>
-                                  <span class="spinner-grow spinner-grow-sm" role="status" aria-hidden="true"></span>
-                                  Loading...
-                                </button>
-                              </div>`;
-  // Refresh the Want to Read set alongside the listing so the dropdown entries
-  // are built with the correct Add/Remove label.
-  Promise.all([
-    fetch(`/list-directories?path=${encodeURIComponent(path)}`).then(response => response.json()),
-    refreshWantToReadPaths()
-  ])
-    .then(([data]) => {
-      console.log("Received data for panel", panel, ":", data);
-
-      // Check for server errors
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      if (panel === 'source') {
-        currentSourcePath = data.current_path;
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, data.current_path);
-        updateBreadcrumb('source', data.current_path);
-        sourceDirectoriesData = data;
-        // Reset the search on navigation (updateFilterBar redraws its box)
-        panelSearch.source = '';
-        updateFilterBar('source', data.directories, data.files);
-
-        // Restore filter if previously set for this path
-        restoreFilterIfValid('source', data.current_path, data.directories);
-
-        renderDirectoryListing(data, 'source');
-        // Restore scroll position if navigating back
-        restoreScrollPosition('source', data.current_path);
-        watchCompressing('source', data);
-      } else {
-        currentDestinationPath = data.current_path;
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, data.current_path);
-        updateBreadcrumb('destination', data.current_path);
-        destinationDirectoriesData = data;
-        // Reset the search on navigation (updateFilterBar redraws its box)
-        panelSearch.destination = '';
-        updateFilterBar('destination', data.directories, data.files);
-
-        // Restore filter if previously set for this path
-        restoreFilterIfValid('destination', data.current_path, data.directories);
-
-        renderDirectoryListing(data, 'destination');
-        // Restore scroll position if navigating back
-        restoreScrollPosition('destination', data.current_path);
-        watchCompressing('destination', data);
-      }
-    })
-    .catch(error => {
-      console.error("Error loading directories:", error);
-      container.innerHTML = `<div class="alert alert-danger" role="alert">
-                                    Error loading directory.
-                                  </div>`;
-    });
 }
 
 // While a listed comic is being compressed, check the folder every few seconds
@@ -1635,793 +455,1606 @@ function watchCompressing(panel, data, kind = 'directories') {
   compressWatchTimers[panel] = setTimeout(check, 4000);
 }
 
-// Function to render the directory listing.
-function renderDirectoryListing(data, panel) {
-  let container = panel === 'source' ? document.getElementById("source-list")
-    : document.getElementById("destination-list");
-  container.innerHTML = "";
-
-  if (data.parent) {
-    let parentItem = createListItem("Parent", data.parent, "directory", panel, false);
-    parentItem.querySelector("span").innerHTML = `<i class="bi bi-arrow-left-square me-2"></i> Parent`;
-    // Ensure Parent directory has data-fullpath for consistency
-    parentItem.setAttribute("data-fullpath", data.parent);
-    container.appendChild(parentItem);
-  }
-
-  // Handle undefined or null directories - provide empty array as fallback
-  if (!data.directories) {
-    data.directories = [];
-  }
-  if (!Array.isArray(data.directories)) {
-    console.warn("data.directories is not an array:", data.directories);
-    data.directories = [];
-  }
-
-  let filter = currentFilter[panel];
-  const term = panelSearch[panel].toLowerCase();
-  let directoriesToShow = data.directories.filter(dir => {
-    if (term && !dir.toLowerCase().includes(term)) return false;
-    if (filter === 'all') return true;
-    if (filter === '#') return !/^[A-Za-z]/.test(dir.charAt(0));
-    return dir.charAt(0).toUpperCase() === filter;
-  });
-
-  directoriesToShow.forEach(dir => {
-    let fullPath = data.current_path + "/" + dir;
-    let item = createListItem(dir, fullPath, "directory", panel, true);
-    container.appendChild(item);
-  });
-
-  let filesShown = 0;
-  if (filter === 'all') {
-    // Handle undefined or null files - provide empty array as fallback
-    if (!data.files) {
-      data.files = [];
-    }
-    if (!Array.isArray(data.files)) {
-      console.warn("data.files is not an array:", data.files);
-      data.files = [];
-    }
-
-    data.files.forEach(file => {
-      const fileData = normalizeFile(file);
-      if (term && !String(fileData.name).toLowerCase().includes(term)) return;
-      filesShown++;
-      const fullPath = data.current_path + "/" + fileData.name;
-      let fileItem = createListItem(fileData, fullPath, "file", panel, true);
-      container.appendChild(fileItem);
-    });
-  }
-
-  const folderEmpty = data.directories.length === 0 && (!data.files || data.files.length === 0);
-  // For the destination panel, only add the drop target if the directory is truly empty.
-  if (panel === 'destination' && folderEmpty) {
-    createDropTargetItem(container, data.current_path, panel);
-  } else if (folderEmpty) {
-    appendEmptyListing(container, 'This folder is empty');
-  } else if (directoriesToShow.length === 0 && filter !== 'all') {
-    // Only folders are filtered; files are hidden while a letter is picked.
-    appendNoMatchesListing(container, panel, true);
-  } else if (term && directoriesToShow.length === 0 && filesShown === 0) {
-    appendNoMatchesListing(container, panel, false);
-  }
-}
-
-// New loadDownloads function to fetch downloads data.
-function loadDownloads(path, panel) {
-  console.log("loadDownloads called with path:", path, "panel:", panel);
-  const btnDownloads = document.getElementById('btnDownloads');
-  if (btnDownloads) btnDownloads.classList.add('active');
-  const btnRecentFiles = document.getElementById('btnRecentFiles');
-  if (btnRecentFiles) btnRecentFiles.classList.remove('active');
-  const btnTrashDl = document.getElementById('btnTrash');
-  if (btnTrashDl) btnTrashDl.classList.remove('active');
-
-  // Show filter bar
-  const filterBar = document.getElementById(`${panel}-directory-filter`);
-  if (filterBar) {
-    filterBar.style.display = 'block';
-  }
-  // The search box filters a library folder's listing; Downloads lists
-  // something else, so it goes until the panel is back on a folder.
-  panelSearch[panel] = '';
-  const downloadsSearchRow = document.getElementById(panel + '-directory-search-row');
-  if (downloadsSearchRow) downloadsSearchRow.innerHTML = '';
-
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  let container = panel === 'source' ? document.getElementById("source-list")
-    : document.getElementById("destination-list");
-  if (!container) {
-    console.error("Container not found for panel:", panel);
-    return;
-  }
-  container.innerHTML = `<div class="d-flex justify-content-center my-3">
-                                <button class="btn btn-primary" type="button" disabled>
-                                  <span class="spinner-grow spinner-grow-sm" role="status" aria-hidden="true"></span>
-                                  Loading...
-                                </button>
-                              </div>`;
-  fetch(`/list-downloads?path=${encodeURIComponent(path)}`)
-    .then(response => response.json())
-    .then(data => {
-      console.log("Received data:", data);
-      if (data.error) {
-        throw new Error(data.error);
-      }
-      container.innerHTML = "";
-
-      if (panel === 'source') {
-        currentSourcePath = data.current_path;
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, data.current_path);
-        updateBreadcrumb('source', data.current_path);
-      } else {
-        currentDestinationPath = data.current_path;
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, data.current_path);
-        updateBreadcrumb('destination', data.current_path);
-      }
-      if (data.parent) {
-        let parentItem = createListItem("Parent", data.parent, "directory", panel, false);
-        parentItem.querySelector("span").innerHTML = `<i class="bi bi-arrow-left-square me-2"></i> Parent`;
-        // Ensure Parent directory has data-fullpath for consistency
-        parentItem.setAttribute("data-fullpath", data.parent);
-        container.appendChild(parentItem);
-      }
-      if (data.directories && Array.isArray(data.directories)) {
-        data.directories.forEach(dir => {
-          const dirData = normalizeFile(dir);
-          const fullPath = data.current_path + "/" + dirData.name;
-          const item = createListItem(dirData, fullPath, "directory", panel, true);
-          container.appendChild(item);
-        });
-      }
-      if (data.files && Array.isArray(data.files)) {
-        data.files.forEach(file => {
-          const fileData = normalizeFile(file);
-          const fullPath = data.current_path + "/" + fileData.name;
-          let fileItem = createListItem(fileData, fullPath, "file", panel, true);
-          container.appendChild(fileItem);
-        });
-      }
-      const nothing = !(data.directories && data.directories.length) && !(data.files && data.files.length);
-      if (nothing && panel === 'destination') {
-        createDropTargetItem(container, data.current_path, panel);
-      } else if (nothing && data.parent) {
-        appendEmptyListing(container, 'This folder is empty');
-      } else if (nothing) {
-        appendEmptyListing(container, 'No downloads waiting',
-          'Finished downloads land here until they are moved into a library.', 'bi-cloud-check');
-      }
-      watchCompressing(panel, data, 'downloads');
-    })
-    .catch(error => {
-      console.error("Error loading downloads:", error);
-      container.replaceChildren();
-      appendEmptyListing(container, 'Could not load Downloads',
-        error && error.message ? error.message : 'The server did not answer.', 'bi-exclamation-triangle');
-    });
-}
-
-// Function to load recent files from the file watcher
-function loadRecentFiles(panel) {
-  console.log("loadRecentFiles called for panel:", panel);
-
-  // Update button states
-  const btnRecentFiles = document.getElementById('btnRecentFiles');
-  if (btnRecentFiles) btnRecentFiles.classList.add('active');
-  const btnDownloads = document.getElementById('btnDownloads');
-  if (btnDownloads) btnDownloads.classList.remove('active');
-  const btnTrashRf = document.getElementById('btnTrash');
-  if (btnTrashRf) btnTrashRf.classList.remove('active');
-
-  // Hide filter bar (not needed for recent files)
-  const filterBar = document.getElementById(`${panel}-directory-filter`);
-  if (filterBar) {
-    filterBar.style.display = 'none';
-  }
-
-  // Update breadcrumb to show "Recent Files"
-  updateBreadcrumb(panel, 'Recent Files');
-
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  let container = panel === 'source' ? document.getElementById("source-list")
-    : document.getElementById("destination-list");
-
-  if (!container) {
-    console.error("Container not found for panel:", panel);
-    return;
-  }
-
-  // Show loading spinner
-  container.innerHTML = `<div class="d-flex justify-content-center my-3">
-                          <button class="btn btn-primary" type="button" disabled>
-                            <span class="spinner-grow spinner-grow-sm" role="status" aria-hidden="true"></span>
-                            Loading Recent Files...
-                          </button>
-                        </div>`;
-
-  // Fetch recent files from the API
-  fetch('/list-recent-files?limit=100')
-    .then(response => response.json())
-    .then(data => {
-      console.log("Received recent files data:", data);
-      container.innerHTML = "";
-
-      if (panel === 'source') {
-        currentSourcePath = 'recent-files';
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, 'recent-files');
-      } else {
-        currentDestinationPath = 'recent-files';
-        // Reset file tracking AFTER updating global path variable
-        resetFileTracking(panel, 'recent-files');
-      }
-
-      // Display date range if available
-      if (data.date_range && data.files.length > 0) {
-        const dateInfo = document.createElement('div');
-        dateInfo.className = 'alert alert-info mb-3';
-        dateInfo.innerHTML = `
-          <i class="bi bi-clock-history me-2"></i>
-          <strong>Recent Files (${data.total_count})</strong>
-          <div class="small mt-1">
-            From ${formatDateTime(data.date_range.oldest)} to ${formatDateTime(data.date_range.newest)}
-          </div>
-        `;
-        container.appendChild(dateInfo);
-      }
-
-      // Display files
-      if (data.files && Array.isArray(data.files) && data.files.length > 0) {
-        data.files.forEach(file => {
-          // Create custom list item for recent files with enhanced display
-          const fileItem = document.createElement('li');
-          fileItem.className = 'list-group-item list-group-item-action draggable d-flex align-items-start justify-content-between';
-          fileItem.setAttribute('draggable', 'true');
-          fileItem.setAttribute('data-fullpath', file.file_path);
-
-          const timeAgo = getTimeAgo(file.added_at);
-          const formattedDateTime = formatDateTime(file.added_at);
-
-          // Create left container with file info
-          const leftContainer = document.createElement('div');
-          leftContainer.className = 'd-flex align-items-start flex-grow-1';
-          leftContainer.style.minWidth = '0';
-          leftContainer.innerHTML = `
-            <i class="bi bi-file-earmark-zip me-2 mt-1"></i>
-            <div class="flex-grow-1" style="min-width: 0;">
-              <div class="fw-medium">${CLU.escapeHtml(file.file_name)}</div>
-              <div class="small text-muted mt-1">
-                <i class="bi bi-clock me-1"></i>${CLU.escapeHtml(timeAgo)}
-                <span class="ms-2" title="${CLU.escapeHtml(formattedDateTime)}">(${CLU.escapeHtml(formattedDateTime)})</span>
-              </div>
-              <div class="small text-warning mt-1" style="word-break: break-all;">
-                <i class="bi bi-folder me-1"></i>${CLU.escapeHtml(file.file_path)}
-              </div>
-            </div>
-          `;
-
-          // Create button group
-          const iconContainer = document.createElement('div');
-          iconContainer.className = 'btn-group';
-          iconContainer.setAttribute('role', 'group');
-          iconContainer.setAttribute('aria-label', 'File actions');
-
-          // Add CBZ info button
-          const infoBtn = document.createElement('button');
-          infoBtn.className = 'btn btn-sm btn-outline-info';
-          infoBtn.innerHTML = '<i class="bi bi-eye"></i>';
-          infoBtn.title = 'CBZ Information';
-          infoBtn.setAttribute('aria-label', infoBtn.title);
-          infoBtn.setAttribute('type', 'button');
-          infoBtn.onclick = function (e) {
-            e.stopPropagation();
-            // Get the directory path
-            const directoryPath = file.file_path.substring(0, file.file_path.lastIndexOf('/'));
-            // For recent files, we don't have the full directory listing, so pass empty array
-            showCBZInfo(file.file_path, file.file_name, directoryPath, []);
-          };
-          iconContainer.appendChild(infoBtn);
-
-          // Use source panel's providers for recent files (or fall back to legacy)
-          const providers = sourceLibraryProviders || [];
-          const hasGCD = providers.some(p => p.provider_type === 'gcd');
-          const hasAnyProvider = providers.length > 0;
-
-          // Add cascade metadata button (if providers configured)
-          if (hasAnyProvider) {
-            const metadataBtn = document.createElement('button');
-            metadataBtn.className = 'btn btn-sm btn-outline-success';
-            metadataBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-            metadataBtn.title = 'Fetch Metadata (search providers by priority)';
-            metadataBtn.setAttribute('aria-label', metadataBtn.title);
-            metadataBtn.setAttribute('type', 'button');
-            metadataBtn.onclick = function (e) {
-              e.stopPropagation();
-              searchMetadataForFile(file.file_path, file.file_name, 'source');
-            };
-            iconContainer.appendChild(metadataBtn);
-          }
-
-          // Add GCD-specific button (if GCD is available)
-          if (hasGCD) {
-            const gcdBtn = document.createElement('button');
-            gcdBtn.className = 'btn btn-sm btn-outline-info';
-            gcdBtn.innerHTML = '<i class="bi bi-database-down"></i>';
-            gcdBtn.title = 'Search GCD Database Only';
-            gcdBtn.setAttribute('aria-label', gcdBtn.title);
-            gcdBtn.setAttribute('type', 'button');
-            gcdBtn.onclick = function (e) {
-              e.stopPropagation();
-              searchGCDMetadata(file.file_path, file.file_name);
-            };
-            iconContainer.appendChild(gcdBtn);
-          }
-
-          // Fallback to legacy buttons if no providers configured
-          if (!hasAnyProvider) {
-            if (typeof gcdAvailable !== 'undefined' && gcdAvailable) {
-              const gcdBtn = document.createElement('button');
-              gcdBtn.className = 'btn btn-sm btn-outline-success';
-              gcdBtn.innerHTML = '<i class="bi bi-cloud-download"></i>';
-              gcdBtn.title = 'Search GCD for Metadata (legacy)';
-              gcdBtn.setAttribute('aria-label', gcdBtn.title);
-              gcdBtn.setAttribute('type', 'button');
-              gcdBtn.onclick = function (e) {
-                e.stopPropagation();
-                searchGCDMetadata(file.file_path, file.file_name);
-              };
-              iconContainer.appendChild(gcdBtn);
-            }
-          }
-
-          // Add edit filename button
-          const pencilBtn = document.createElement('button');
-          pencilBtn.className = 'btn btn-sm btn-outline-dark';
-          pencilBtn.innerHTML = '<i class="bi bi-pencil"></i>';
-          pencilBtn.title = 'Edit filename';
-          pencilBtn.setAttribute('aria-label', pencilBtn.title);
-          pencilBtn.setAttribute('type', 'button');
-          pencilBtn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            const nameDiv = leftContainer.querySelector('.fw-medium');
-            const oldPath = file.file_path;
-
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'form-control form-control-sm edit-input';
-            input.value = file.file_name;
-            input.addEventListener('click', ev => ev.stopPropagation());
-
-            input.addEventListener('keypress', ev => {
-              if (ev.key === 'Enter') {
-                const newName = input.value.trim();
-                if (!newName) return CLU.toast('Filename cannot be empty.', 'warning');
-                renameItem(oldPath, newName, panel);
-              }
-            });
-
-            input.addEventListener('blur', () => {
-              nameDiv.innerHTML = CLU.escapeHtml(file.file_name);
-            });
-
-            nameDiv.innerHTML = '';
-            nameDiv.appendChild(input);
-            input.focus();
-          });
-          iconContainer.appendChild(pencilBtn);
-
-          // Add delete button
-          const trashBtn = document.createElement('button');
-          trashBtn.className = 'btn btn-sm btn-outline-danger';
-          trashBtn.innerHTML = '<i class="bi bi-trash"></i>';
-          trashBtn.title = 'Delete file';
-          trashBtn.setAttribute('aria-label', trashBtn.title);
-          trashBtn.setAttribute('type', 'button');
-          trashBtn.onclick = function (e) {
-            e.stopPropagation();
-            showDeletePrompt(file.file_path, file.file_name, panel);
-          };
-          iconContainer.appendChild(trashBtn);
-
-          // Append containers to fileItem
-          fileItem.appendChild(leftContainer);
-          fileItem.appendChild(iconContainer);
-
-          // Add drag start handler
-          fileItem.addEventListener("dragstart", function (e) {
-            const fullPath = file.file_path;
-            if (selectedFiles.has(fullPath)) {
-              e.dataTransfer.setData("text/plain", JSON.stringify([...selectedFiles].map(path => ({ path, type: "file" }))));
-              e.dataTransfer.effectAllowed = "move";
-
-              // Create custom drag image showing count
-              const dragCount = selectedFiles.size;
-              if (dragCount > 1) {
-                const dragImage = document.createElement('div');
-                dragImage.className = 'drag-preview';
-                dragImage.textContent = `${dragCount} files`;
-                dragImage.style.cssText = 'position: absolute; top: -1000px; background: #2196f3; color: white; padding: 0.5rem; border-radius: 0.25rem; font-weight: bold;';
-                document.body.appendChild(dragImage);
-                e.dataTransfer.setDragImage(dragImage, 50, 25);
-                setTimeout(() => document.body.removeChild(dragImage), 0);
-              }
-            } else {
-              selectedFiles.clear();
-              document.querySelectorAll("li.list-group-item.selected").forEach(item => {
-                item.classList.remove("selected");
-                item.removeAttribute("data-selection-hint");
-              });
-              selectedFiles.add(fullPath);
-              fileItem.classList.add("selected");
-              fileItem.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-              if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-              e.dataTransfer.setData("text/plain", JSON.stringify([{ path: fullPath, type: "file" }]));
-              e.dataTransfer.effectAllowed = "move";
-            }
-
-            fileItem.classList.add("dragging");
-            setTimeout(() => fileItem.classList.remove("dragging"), 50);
-          });
-
-          // Add drag end handler
-          fileItem.addEventListener("dragend", function (e) {
-            setTimeout(() => {
-              if (typeof clearAllDropHoverStates === 'function') {
-                clearAllDropHoverStates();
-              }
-            }, 100);
-          });
-
-          // Add click handler for selection
-          fileItem.addEventListener('click', function (e) {
-            if (e.ctrlKey || e.metaKey) {
-              // Multi-select with Ctrl/Cmd
-              const fullPath = file.file_path;
-              if (selectedFiles.has(fullPath)) {
-                selectedFiles.delete(fullPath);
-                fileItem.classList.remove("selected");
-                fileItem.removeAttribute("data-selection-hint");
-              } else {
-                selectedFiles.add(fullPath);
-                fileItem.classList.add("selected");
-                fileItem.setAttribute("data-selection-hint", "Drag to move • Right-click for options");
-              }
-              if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-            }
-          });
-
-          container.appendChild(fileItem);
-        });
-      } else {
-        // No recent files
-        const emptyMsg = document.createElement('div');
-        emptyMsg.className = 'alert alert-warning';
-        emptyMsg.innerHTML = '<i class="bi bi-inbox me-2"></i>No recent files found. Files added to /data will appear here.';
-        container.appendChild(emptyMsg);
-      }
-    })
-    .catch(error => {
-      console.error("Error loading recent files:", error);
-      container.innerHTML = `<div class="alert alert-danger" role="alert">
-                              <i class="bi bi-exclamation-triangle me-2"></i>
-                              Error loading recent files: ${error.message}
-                            </div>`;
-    });
-}
-
 // =============================================
 // Trash browsing
 // =============================================
 
+// The Trash count on both panes' Trash buttons, and whether Trash is on (which
+// decides whether Delete acts at once with Undo or asks first).
 function updateTrashBadge() {
   fetch('/api/trash/info')
     .then(r => r.json())
     .then(data => {
-      const badge = document.getElementById('trashBadge');
-      if (!badge) return;
-      if (data.enabled && data.item_count > 0) {
-        badge.textContent = data.item_count;
-        badge.style.display = '';
-      } else {
-        badge.style.display = 'none';
-      }
+      trashEnabled = !!(data.enabled && data.path);
+      document.querySelectorAll('.fm-trash-count').forEach(badge => {
+        const n = trashEnabled ? (data.item_count || 0) : 0;
+        badge.textContent = n;
+        badge.hidden = !n;
+      });
     })
     .catch(() => {});
 }
 
-// Initialize trash badge on page load
 document.addEventListener('DOMContentLoaded', updateTrashBadge);
 
-function loadTrash(panel) {
-  console.log("loadTrash called for panel:", panel);
+// =============================================================================
+// File Manager: two panes, one row builder, one selection bar.
+//
+// Each pane (source, destination) shows a place: a library folder, Downloads
+// (TARGET), Recent Files or Trash. Every row of every place is built by
+// fmRow(); a row is a check box, a type icon, the name, a fact line and at most
+// two controls (CBZ Information or Restore, and the row's menu). Everything
+// else is in that menu, the open folder's menu (the breadcrumb's ⋮) or the
+// selection bar. Names are always text (textContent), never markup.
+// =============================================================================
 
-  // Update button states
-  const btnTrash = document.getElementById('btnTrash');
-  if (btnTrash) btnTrash.classList.add('active');
-  const btnDownloads = document.getElementById('btnDownloads');
-  if (btnDownloads) btnDownloads.classList.remove('active');
-  const btnRecentFiles = document.getElementById('btnRecentFiles');
-  if (btnRecentFiles) btnRecentFiles.classList.remove('active');
+const FM_PANELS = ['source', 'destination'];
+const FM_MANY_FOLDERS = 40;   // the letter bar appears above this many folders
 
-  // Hide filter bar
-  const filterBar = document.getElementById(`${panel}-directory-filter`);
-  if (filterBar) filterBar.style.display = 'none';
+function fmNewPane() {
+  return { place: 'library', parent: null, items: [], cur: 0, anchor: null, ren: null, renErr: '', loaded: false };
+}
+const fmPanes = { source: fmNewPane(), destination: fmNewPane() };
+let fmActive = 'source';     // the pane the shortcuts and the bar act on
+let fmTab = 'source';        // the pane shown on a phone
+let selectionPane = null;    // the pane selectedFiles belongs to
+let trashEnabled = null;     // from /api/trash/info; null until known
+let fmDrag = null;           // { panel, items } while a row drag is on
+let fmCreatePanel = 'destination';
 
-  updateBreadcrumb(panel, 'Trash');
+function fmTargetDir() {
+  const el = document.getElementById('fm');
+  return el ? (el.dataset.targetDir || '') : '';
+}
+function otherPanel(panel) { return panel === 'source' ? 'destination' : 'source'; }
+function fmPaneEl(panel) { return document.getElementById(panel + '-pane'); }
+function fmListEl(panel) { return document.getElementById(panel + '-list'); }
+function panelPath(panel) { return panel === 'source' ? currentSourcePath : currentDestinationPath; }
+function setPanelPath(panel, path) {
+  if (panel === 'source') currentSourcePath = path; else currentDestinationPath = path;
+}
+function setPanelData(panel, data) {
+  if (panel === 'source') sourceDirectoriesData = data; else destinationDirectoriesData = data;
+}
+function isVirtualPlace(panel) {
+  const place = fmPanes[panel].place;
+  return place === 'recent' || place === 'trash';
+}
+function baseName(p) { return String(p).replace(/\/+$/, '').split('/').pop(); }
+function dirName(p) { return String(p).substring(0, String(p).lastIndexOf('/')); }
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+function fileExt(name) {
+  const m = /\.([^./]+)$/.exec(String(name));
+  return m ? m[1].toLowerCase() : '';
+}
+function isComicEntry(e) { return e.type === 'file' && ['cbz', 'cbr', 'zip'].includes(fileExt(e.name)); }
+function isCbzEntry(e) { return e.type === 'file' && ['cbz', 'zip'].includes(fileExt(e.name)); }
+function isSidecarEntry(e) { return e.type === 'file' && ['cvinfo', 'series.json'].includes(e.name.toLowerCase()); }
+function fmNamed(entries) {
+  return entries.length === 1 ? '“' + entries[0].name + '”' : plural(entries.length, 'item');
+}
 
-  window.scrollTo({ top: 0, behavior: "smooth" });
-  let container = panel === 'source' ? document.getElementById("source-list")
-    : document.getElementById("destination-list");
+function shortDate(d) {
+  if (!(d instanceof Date) || isNaN(d)) return '';
+  const opts = { day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString(undefined, opts);
+}
 
-  if (!container) return;
+// "CBR · 61.2 MB · 11 Nov" for a file, "12 items" for a folder.
+function factLine(e) {
+  if (e.busy) return 'Moving…';
+  if (e.compressing) return 'Compressing…';
+  if (e.type === 'directory') {
+    if (e.trashName) return 'Folder' + (e.size != null ? ' · ' + formatSize(e.size) : '');
+    return e.count == null ? 'Folder' : plural(e.count, 'item');
+  }
+  const parts = [(fileExt(e.name) || 'file').toUpperCase()];
+  if (e.size != null) parts.push(formatSize(e.size));
+  if (e.added) parts.push(getTimeAgo(e.added));
+  else if (e.mtime) parts.push(shortDate(new Date(e.mtime * 1000)));
+  return parts.join(' · ');
+}
 
-  container.innerHTML = `<div class="d-flex justify-content-center my-3">
-    <button class="btn btn-primary" type="button" disabled>
-      <span class="spinner-grow spinner-grow-sm" role="status" aria-hidden="true"></span>
-      Loading Trash...
-    </button>
-  </div>`;
+// ---------------------------------------------------------------------------
+// Loading a place
+// ---------------------------------------------------------------------------
 
-  fetch('/api/trash/list')
-    .then(response => response.json())
-    .then(data => {
-      container.innerHTML = "";
+function fmLoading(panel, text) {
+  const list = fmListEl(panel);
+  if (!list) return;
+  const li = document.createElement('li');
+  li.className = 'fm-empty text-center text-body-secondary small';
+  const sp = document.createElement('span');
+  sp.className = 'spinner-border spinner-border-sm me-2';
+  sp.setAttribute('aria-hidden', 'true');
+  li.append(sp, text || 'Loading…');
+  list.replaceChildren(li);
+}
 
-      if (panel === 'source') {
-        currentSourcePath = 'trash';
-        resetFileTracking(panel, 'trash');
-      } else {
-        currentDestinationPath = 'trash';
-        resetFileTracking(panel, 'trash');
+function fmFailed(panel, title, err) {
+  const p = fmPanes[panel];
+  p.items = [];
+  p.loaded = false;
+  p.error = { title: title, message: err && err.message ? err.message : 'The server did not answer.' };
+  fmRender(panel);
+}
+
+// A listing changed path: the search, the letter and this pane's selection go.
+function fmArrive(panel, path) {
+  const p = fmPanes[panel];
+  const moved = panelPath(panel) !== path;
+  if (moved) {
+    const prev = panelPath(panel);
+    if (prev && currentFilter[panel] !== 'all') filterHistory[panel][prev] = currentFilter[panel];
+    else if (prev) delete filterHistory[panel][prev];
+    panelSearch[panel] = '';
+    currentFilter[panel] = 'all';
+    p.cur = 0;
+    p.anchor = null;
+    p.ren = null;
+    if (selectionPane === panel) { selectedFiles.clear(); selectionPane = null; }
+  }
+  setPanelPath(panel, path);
+  return moved;
+}
+
+function fmLoadListing(panel, place, path) {
+  const p = fmPanes[panel];
+  if (p.place === place) saveScrollPosition(panel);
+  p.place = place;
+  p.error = null;
+  fmDrawPlaces(panel);
+  fmLoading(panel);
+  const url = place === 'downloads' ? '/list-downloads' : '/list-directories';
+  // Refresh the Want to Read set alongside the listing so the menus offer the
+  // right Add / Remove label.
+  return Promise.all([
+    fetch(`${url}?path=${encodeURIComponent(path)}`).then(r => r.json()),
+    refreshWantToReadPaths()
+  ])
+    .then(([data]) => {
+      if (data.error) throw new Error(data.error);
+      if (fmPanes[panel].place !== place) return;   // the user went elsewhere meanwhile
+      const moved = fmArrive(panel, data.current_path);
+      setPanelData(panel, data);
+      p.parent = data.parent || null;
+      p.items = fmEntriesFromListing(data);
+      p.loaded = true;
+      if (moved) restoreFilterIfValid(panel, data.current_path, data.directories);
+      fmPruneSelection(panel);
+      fmSyncLibraryName(panel, data.current_path);
+      fmRender(panel);
+      restoreScrollPosition(panel, data.current_path);
+      if (p.focusPath) {
+        const k = fmView(panel).findIndex(x => x.path === p.focusPath);
+        p.focusPath = null;
+        if (k >= 0) fmFocusRow(panel, k);
       }
-
-      if (!data.enabled) {
-        container.innerHTML = '<div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>Trash is disabled. Enable it in Settings &gt; File Processing.</div>';
-        return;
-      }
-
-      // Header bar with info and empty button
-      const totalSize = data.items.reduce((sum, i) => sum + i.size, 0);
-      const header = document.createElement('div');
-      header.className = 'alert alert-secondary d-flex justify-content-between align-items-center mb-3';
-      header.innerHTML = `
-        <div>
-          <i class="bi bi-trash3 me-2"></i>
-          <strong>Trash (${data.items.length} item${data.items.length !== 1 ? 's' : ''})</strong>
-          <span class="ms-2 text-muted">${CLU.formatFileSize(totalSize)}</span>
-        </div>
-        ${data.items.length > 0 ? '<button class="btn btn-sm btn-danger" onclick="emptyTrash()"><i class="bi bi-trash me-1"></i>Empty Trash</button>' : ''}
-      `;
-      container.appendChild(header);
-
-      if (data.items.length === 0) {
-        const emptyMsg = document.createElement('div');
-        emptyMsg.className = 'alert alert-info';
-        emptyMsg.innerHTML = '<i class="bi bi-check-circle me-2"></i>Trash is empty.';
-        container.appendChild(emptyMsg);
-        return;
-      }
-
-      data.items.forEach(item => {
-        const fileItem = document.createElement('li');
-        fileItem.className = 'list-group-item list-group-item-action draggable d-flex align-items-start justify-content-between';
-        fileItem.setAttribute('draggable', 'true');
-        fileItem.setAttribute('data-fullpath', item.path);
-        fileItem.setAttribute('data-trash-item', item.name);
-
-        const icon = item.is_dir ? 'bi-folder' : 'bi-file-earmark-zip';
-        const mtime = new Date(item.mtime * 1000);
-        const timeAgo = getTimeAgo(mtime.toISOString());
-
-        // Left container with file info
-        const leftContainer = document.createElement('div');
-        leftContainer.className = 'd-flex align-items-start flex-grow-1';
-        leftContainer.style.minWidth = '0';
-        leftContainer.innerHTML = `
-          <i class="bi ${icon} me-2 mt-1"></i>
-          <div class="flex-grow-1" style="min-width: 0;">
-            <div class="fw-medium">${CLU.escapeHtml(item.name)}</div>
-            <div class="small text-muted mt-1">
-              <span>${CLU.formatFileSize(item.size)}</span>
-              <span class="ms-2"><i class="bi bi-clock me-1"></i>${CLU.escapeHtml(timeAgo)}</span>
-              ${item.original_path ? `<span class="ms-2" title="${CLU.escapeHtml(item.original_path)}"><i class="bi bi-arrow-return-left me-1"></i>${CLU.escapeHtml(truncatePath(item.original_path))}</span>` : ''}
-            </div>
-          </div>
-        `;
-
-        // Button group
-        const iconContainer = document.createElement('div');
-        iconContainer.className = 'btn-group';
-        iconContainer.setAttribute('role', 'group');
-
-        // Restore button
-        const restoreBtn = document.createElement('button');
-        restoreBtn.className = 'btn btn-sm btn-outline-success';
-        restoreBtn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i>';
-        restoreBtn.title = item.original_path
-          ? `Restore to ${item.original_path}`
-          : 'No original path recorded — use drag and drop';
-        restoreBtn.setAttribute('aria-label', restoreBtn.title);
-        restoreBtn.disabled = !item.original_path;
-        restoreBtn.setAttribute('type', 'button');
-        restoreBtn.onclick = function (e) {
-          e.stopPropagation();
-          restoreTrashItem(item.name, item.original_path, restoreBtn);
-        };
-        iconContainer.appendChild(restoreBtn);
-
-        // CBZ info button (files only)
-        if (!item.is_dir) {
-          const infoBtn = document.createElement('button');
-          infoBtn.className = 'btn btn-sm btn-outline-info';
-          infoBtn.innerHTML = '<i class="bi bi-eye"></i>';
-          infoBtn.title = 'CBZ Information';
-          infoBtn.setAttribute('aria-label', infoBtn.title);
-          infoBtn.setAttribute('type', 'button');
-          infoBtn.onclick = function (e) {
-            e.stopPropagation();
-            const dirPath = item.path.substring(0, item.path.lastIndexOf('/'));
-            showCBZInfo(item.path, item.name, dirPath, []);
-          };
-          iconContainer.appendChild(infoBtn);
-        }
-
-        // Permanently delete button
-        const permDeleteBtn = document.createElement('button');
-        permDeleteBtn.className = 'btn btn-sm btn-outline-danger';
-        permDeleteBtn.innerHTML = '<i class="bi bi-x-lg"></i>';
-        permDeleteBtn.title = 'Permanently delete';
-        permDeleteBtn.setAttribute('aria-label', permDeleteBtn.title);
-        permDeleteBtn.setAttribute('type', 'button');
-        permDeleteBtn.onclick = function (e) {
-          e.stopPropagation();
-          permanentlyDeleteTrashItem(item.name, permDeleteBtn);
-        };
-        iconContainer.appendChild(permDeleteBtn);
-
-        fileItem.appendChild(leftContainer);
-        fileItem.appendChild(iconContainer);
-
-        // Drag start — allows dragging to destination panel to restore
-        fileItem.addEventListener("dragstart", function (e) {
-          const fullPath = item.path;
-          if (selectedFiles.has(fullPath)) {
-            e.dataTransfer.setData("text/plain", JSON.stringify([...selectedFiles].map(p => ({ path: p, type: item.is_dir ? "folder" : "file" }))));
-            e.dataTransfer.effectAllowed = "move";
-
-            const dragCount = selectedFiles.size;
-            if (dragCount > 1) {
-              const dragImage = document.createElement('div');
-              dragImage.className = 'drag-preview';
-              dragImage.textContent = `${dragCount} files`;
-              dragImage.style.cssText = 'position: absolute; top: -1000px; background: #2196f3; color: white; padding: 0.5rem; border-radius: 0.25rem; font-weight: bold;';
-              document.body.appendChild(dragImage);
-              e.dataTransfer.setDragImage(dragImage, 50, 25);
-              setTimeout(() => document.body.removeChild(dragImage), 0);
-            }
-          } else {
-            selectedFiles.clear();
-            document.querySelectorAll("li.list-group-item.selected").forEach(el => {
-              el.classList.remove("selected");
-              el.removeAttribute("data-selection-hint");
-            });
-            selectedFiles.add(fullPath);
-            fileItem.classList.add("selected");
-            fileItem.setAttribute("data-selection-hint", "Drag to destination to restore");
-            if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-            e.dataTransfer.setData("text/plain", JSON.stringify([{ path: fullPath, type: item.is_dir ? "folder" : "file" }]));
-            e.dataTransfer.effectAllowed = "move";
-          }
-          fileItem.classList.add("dragging");
-          setTimeout(() => fileItem.classList.remove("dragging"), 50);
-        });
-
-        fileItem.addEventListener("dragend", function () {
-          setTimeout(() => {
-            if (typeof clearAllDropHoverStates === 'function') clearAllDropHoverStates();
-          }, 100);
-        });
-
-        // Click handler for multi-select
-        fileItem.addEventListener('click', function (e) {
-          if (e.ctrlKey || e.metaKey) {
-            const fullPath = item.path;
-            if (selectedFiles.has(fullPath)) {
-              selectedFiles.delete(fullPath);
-              fileItem.classList.remove("selected");
-              fileItem.removeAttribute("data-selection-hint");
-            } else {
-              selectedFiles.add(fullPath);
-              fileItem.classList.add("selected");
-              fileItem.setAttribute("data-selection-hint", "Drag to destination to restore");
-            }
-            if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-          }
-        });
-
-        container.appendChild(fileItem);
-      });
-
-      updateTrashBadge();
+      watchCompressing(panel, data, place === 'downloads' ? 'downloads' : 'directories');
     })
     .catch(error => {
-      console.error("Error loading trash:", error);
-      container.innerHTML = `<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Error loading trash: ${error.message}</div>`;
+      console.error('Error loading directory:', error);
+      fmFailed(panel, place === 'downloads' ? 'Could not load Downloads' : 'Could not load this folder', error);
     });
 }
 
-function emptyTrash() {
-  if (!confirm('Permanently delete all items in the Trash? This cannot be undone.')) return;
-
-  fetch('/api/trash/empty', { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
-      if (data.success) {
-        CLU.showSuccess(`Emptied trash: ${data.count} item(s), ${CLU.formatFileSize(data.size_freed)} freed`);
-        updateTrashBadge();
-        loadTrash('source');
-      } else {
-        CLU.showError('Failed to empty trash');
-      }
-    })
-    .catch(err => CLU.showError('Error emptying trash: ' + err.message));
+function fmEntriesFromListing(data) {
+  const base = data.current_path;
+  const counts = data.dir_counts || {};
+  const dirs = (Array.isArray(data.directories) ? data.directories : []).map(d => {
+    const name = typeof d === 'object' && d ? d.name : d;
+    return { name: name, path: base + '/' + name, type: 'directory', count: counts[name] != null ? counts[name] : null };
+  });
+  const files = (Array.isArray(data.files) ? data.files : []).map(f => {
+    const fd = normalizeFile(f);
+    return {
+      name: fd.name, path: base + '/' + fd.name, type: 'file',
+      size: fd.size, mtime: fd.mtime || null, compressing: !!fd.compressing
+    };
+  });
+  return dirs.concat(files);
 }
 
-function permanentlyDeleteTrashItem(name, btnEl) {
-  fetch('/api/trash/delete', {
+// Route virtual paths to their places; a path under TARGET is Downloads.
+function loadDirectories(path, panel) {
+  if (path === 'trash') { loadTrash(panel); return; }
+  if (path === 'recent-files') { loadRecentFiles(panel); return; }
+  const target = fmTargetDir();
+  const inTarget = !!target && !!path && (path === target || path.startsWith(target + '/'));
+  fmLoadListing(panel, inTarget ? 'downloads' : 'library', path || '');
+}
+
+function loadDownloads(path, panel) {
+  fmLoadListing(panel, 'downloads', path || fmTargetDir());
+}
+
+function loadRecentFiles(panel) {
+  const p = fmPanes[panel];
+  p.place = 'recent';
+  p.error = null;
+  fmDrawPlaces(panel);
+  fmLoading(panel, 'Loading recent files…');
+  fetch('/list-recent-files?limit=100')
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      if (p.place !== 'recent') return;
+      fmArrive(panel, 'recent-files');
+      p.parent = null;
+      p.items = (data.files || []).map(f => ({
+        name: f.file_name, path: f.file_path, type: 'file', added: f.added_at
+      }));
+      p.loaded = true;
+      fmPruneSelection(panel);
+      fmRender(panel);
+    })
+    .catch(error => {
+      console.error('Error loading recent files:', error);
+      fmFailed(panel, 'Could not load recent files', error);
+    });
+}
+
+function loadTrash(panel) {
+  const p = fmPanes[panel];
+  p.place = 'trash';
+  p.error = null;
+  fmDrawPlaces(panel);
+  fmLoading(panel, 'Loading Trash…');
+  fetch('/api/trash/list')
+    .then(r => r.json())
+    .then(data => {
+      if (p.place !== 'trash') return;
+      fmArrive(panel, 'trash');
+      p.parent = null;
+      p.trashOff = !data.enabled;
+      p.items = (data.items || []).map(item => ({
+        name: item.name, path: item.path, type: item.is_dir ? 'directory' : 'file',
+        size: item.size, mtime: item.mtime, trashName: item.name, original: item.original_path || null
+      }));
+      p.loaded = true;
+      fmPruneSelection(panel);
+      fmRender(panel);
+      updateTrashBadge();
+    })
+    .catch(error => {
+      console.error('Error loading trash:', error);
+      fmFailed(panel, 'Could not load Trash', error);
+    });
+}
+
+// Reload a pane in whatever place it is showing.
+function refreshFilePanel(panel) {
+  const p = fmPanes[panel];
+  if (p.place === 'recent') loadRecentFiles(panel);
+  else if (p.place === 'trash') loadTrash(panel);
+  else if (panelPath(panel)) loadDirectories(panelPath(panel), panel);
+}
+
+function fmRefreshAll() { FM_PANELS.forEach(refreshFilePanel); }
+
+// Name the Library button for the library the pane is in.
+function fmSyncLibraryName(panel, path) {
+  const lib = fmLibraryFor(path);
+  const span = document.getElementById(panel === 'source' ? 'sourceLibraryName' : 'destLibraryName');
+  if (lib && span) span.textContent = lib.name;
+}
+
+function fmLibraryFor(path) {
+  const libs = window.fmLibraries || [];
+  let best = null;
+  libs.forEach(lib => {
+    const root = String(lib.path).replace(/\/+$/, '');
+    if ((path === root || String(path).startsWith(root + '/')) && (!best || root.length > best.path.length)) {
+      best = { name: lib.name, path: root };
+    }
+  });
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+
+// The rows the pane shows: the search narrows files and folders alike; the
+// letter narrows folders only.
+function fmView(panel) {
+  const p = fmPanes[panel];
+  const term = (panelSearch[panel] || '').toLowerCase();
+  const letter = currentFilter[panel];
+  return p.items.filter(e => {
+    if (term && !e.name.toLowerCase().includes(term)) return false;
+    if (letter && letter !== 'all' && e.type === 'directory') {
+      if (letter === '#') return !/^[A-Za-z]/.test(e.name.charAt(0));
+      return e.name.charAt(0).toUpperCase() === letter;
+    }
+    return true;
+  });
+}
+
+function fmIcon(cls) {
+  const i = document.createElement('i');
+  i.className = 'bi ' + cls;
+  i.setAttribute('aria-hidden', 'true');
+  return i;
+}
+
+function fmButton(cls, label, icon, attrs) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = cls;
+  if (icon) b.appendChild(fmIcon(icon + (label ? ' me-1' : '')));
+  if (label) b.appendChild(document.createTextNode(label));
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (v === false || v == null) return;
+    b.setAttribute(k, v === true ? '' : v);
+  });
+  return b;
+}
+
+// The one row builder: library folders, Downloads, Recent Files and Trash.
+function fmRow(panel, e, k) {
+  const p = fmPanes[panel];
+  const trash = p.place === 'trash';
+  const current = k === p.cur;
+  const tab = current ? '0' : '-1';
+  const renaming = p.ren === e.path;
+  const sel = selectionPane === panel && selectedFiles.has(e.path);
+
+  const li = document.createElement('li');
+  li.className = 'fm-row ' + (e.type === 'directory' ? 'is-dir' : 'is-file') + (e.busy ? ' is-busy' : '');
+  li.setAttribute('role', 'row');
+  li.setAttribute('aria-selected', sel ? 'true' : 'false');
+  li.dataset.k = k;
+  li.dataset.fullpath = e.path;
+  li.tabIndex = current ? 0 : -1;
+  li.draggable = !renaming && !e.busy && !e.compressing;
+  if (e.original) li.title = 'From ' + e.original;
+
+  const ckc = document.createElement('span');
+  ckc.className = 'fm-ckc';
+  ckc.setAttribute('role', 'gridcell');
+  const ck = document.createElement('input');
+  ck.type = 'checkbox';
+  ck.className = 'form-check-input fm-ck';
+  ck.tabIndex = -1;
+  ck.checked = sel;
+  ck.setAttribute('aria-label', 'Select ' + e.name);
+  ckc.appendChild(ck);
+
+  const ty = fmIcon((e.type === 'directory' ? 'bi-folder' : isComicEntry(e) ? 'bi-file-earmark-zip' : 'bi-file-earmark') + ' fm-ty');
+
+  const nm = document.createElement('span');
+  nm.className = 'fm-nm';
+  nm.setAttribute('role', 'gridcell');
+  if (renaming) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'fm-in';
+    input.value = e.name;
+    input.setAttribute('aria-label', 'New name for ' + e.name);
+    if (p.renErr) {
+      input.setAttribute('aria-invalid', 'true');
+      input.setAttribute('aria-describedby', panel + '-fmErr');
+    }
+    nm.appendChild(input);
+  } else if (e.type === 'directory' && !trash) {
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'fm-go';
+    go.dataset.fmAct = 'open';
+    go.tabIndex = -1;
+    go.textContent = e.name;
+    go.title = e.name;
+    nm.appendChild(go);
+  } else {
+    nm.textContent = e.name;
+    nm.title = e.name;
+  }
+
+  const mt = document.createElement('span');
+  mt.className = 'fm-mt';
+  mt.setAttribute('role', 'gridcell');
+  mt.textContent = factLine(e);
+
+  const acts = document.createElement('span');
+  acts.className = 'fm-acts';
+  acts.setAttribute('role', 'gridcell');
+  if (trash) {
+    acts.appendChild(fmButton('btn btn-sm btn-outline-secondary', 'Restore', null, {
+      'data-fm-act': 'restore', tabindex: tab, disabled: !e.original,
+      title: e.original ? 'Restore to ' + e.original : 'No original path recorded — drag it to a folder instead'
+    }));
+  } else if (isCbzEntry(e)) {
+    acts.appendChild(fmButton('btn btn-sm fm-ib fm-info', '', 'bi-eye', {
+      'data-fm-act': 'info', tabindex: tab, 'aria-label': 'CBZ Information for ' + e.name, title: 'CBZ Information'
+    }));
+  }
+  acts.appendChild(fmButton('btn btn-sm fm-ib', '', 'bi-three-dots-vertical', {
+    'data-fm-act': 'menu', tabindex: tab, 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+    'aria-label': 'More actions for ' + e.name, title: 'More actions'
+  }));
+
+  li.append(ckc, ty, nm, mt, acts);
+  if (renaming && p.renErr) {
+    const err = document.createElement('span');
+    err.className = 'fm-err';
+    err.id = panel + '-fmErr';
+    err.textContent = p.renErr;
+    li.appendChild(err);
+  }
+  return li;
+}
+
+function fmEmptyRow(panel) {
+  const p = fmPanes[panel];
+  const li = document.createElement('li');
+  li.className = 'fm-empty';
+  const query = (panelSearch[panel] || '').trim();
+  const letterOn = currentFilter[panel] !== 'all';
+  if (p.error) {
+    li.appendChild(CLU.emptyState({ icon: 'bi-exclamation-triangle', title: p.error.title, message: p.error.message, compact: true }));
+  } else if (p.items.length && (query || letterOn)) {
+    li.appendChild(CLU.noMatches({
+      noun: 'files or folders', query: query, filtered: letterOn, compact: true,
+      onClear: () => clearDirectoryNarrowing(panel, letterOn)
+    }));
+  } else if (p.place === 'recent') {
+    li.appendChild(CLU.emptyState({ icon: 'bi-clock-history', title: 'No recent files', message: 'Files added to a library show up here.', compact: true }));
+  } else if (p.place === 'trash') {
+    li.appendChild(p.trashOff
+      ? CLU.emptyState({ icon: 'bi-info-circle', title: 'Trash is turned off', message: 'Deleted files are removed at once. Turn Trash on in Settings › File Processing.', compact: true })
+      : CLU.emptyState({ icon: 'bi-trash3', title: 'Trash is empty', message: 'Deleted files wait here until it is emptied.', compact: true }));
+  } else if (p.place === 'downloads' && !p.parent) {
+    li.appendChild(CLU.emptyState({ icon: 'bi-cloud-check', title: 'No downloads waiting', message: 'Finished downloads land here until they are moved into a library.', compact: true }));
+  } else {
+    li.appendChild(CLU.emptyState({ icon: 'bi-folder2-open', title: 'This folder is empty', message: 'Move files here from the other pane, or drop them from your computer.', compact: true }));
+  }
+  return li;
+}
+
+function clearDirectoryNarrowing(panel, clearLetter) {
+  if (clearLetter) currentFilter[panel] = 'all';
+  panelSearch[panel] = '';
+  const box = document.getElementById(panel + '-directory-search');
+  if (box) box.value = '';
+  fmRender(panel);
+  if (box) box.focus();
+}
+
+function fmDrawPlaces(panel) {
+  const pane = fmPaneEl(panel);
+  if (!pane) return;
+  const place = fmPanes[panel].place;
+  pane.querySelectorAll('[data-fm-place]').forEach(b => {
+    const on = b.dataset.fmPlace === place;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  const pm = pane.querySelector('[data-fm-pane-menu]');
+  if (pm) pm.hidden = place === 'recent';
+}
+
+// Update the breadcrumb for a pane: the place's root, then each folder below it.
+function updateBreadcrumb(panel, fullPath) {
+  const el = document.getElementById(panel + '-path-display');
+  if (!el) return;
+  el.replaceChildren();
+  const p = fmPanes[panel];
+  const here = document.createElement('span');
+  here.setAttribute('aria-current', 'location');
+  if (p.place === 'recent' || p.place === 'trash' || !fullPath) {
+    here.textContent = p.place === 'trash' ? 'Trash' : p.place === 'recent' ? 'Recent Files' : '';
+    el.appendChild(here);
+    return;
+  }
+  const target = fmTargetDir().replace(/\/+$/, '');
+  const lib = p.place === 'downloads' ? { name: 'Downloads', path: target } : fmLibraryFor(fullPath);
+  let rootPath = lib && lib.path ? lib.path : '';
+  const crumbs = [];
+  if (rootPath && (fullPath === rootPath || fullPath.startsWith(rootPath + '/'))) {
+    crumbs.push({ name: lib.name, path: rootPath });
+  } else {
+    rootPath = '';
+  }
+  let acc = rootPath;
+  fullPath.slice(rootPath.length).split('/').filter(Boolean).forEach(part => {
+    acc += '/' + part;
+    crumbs.push({ name: part, path: acc });
+  });
+  crumbs.forEach((c, i) => {
+    if (i) {
+      const sep = document.createElement('span');
+      sep.className = 'fm-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      sep.textContent = '/';
+      el.appendChild(sep);
+    }
+    if (i === crumbs.length - 1) {
+      here.textContent = c.name;
+      el.appendChild(here);
+    } else {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = c.name;
+      b.addEventListener('click', () => loadDirectories(c.path, panel));
+      el.appendChild(b);
+    }
+  });
+}
+
+function fmDrawFooter(panel, shown) {
+  const ft = document.getElementById(panel + '-footer');
+  if (!ft) return;
+  const p = fmPanes[panel];
+  ft.replaceChildren();
+  if (!p.loaded) return;
+  const total = p.items.length;
+  const what = document.createElement('span');
+  const narrowed = (panelSearch[panel] || '').trim() || currentFilter[panel] !== 'all';
+  if (narrowed) {
+    what.textContent = `Showing ${shown} of ${plural(total, 'item')}`;
+    ft.appendChild(what);
+    return;
+  }
+  if (!total) return;
+  const files = p.items.filter(e => e.type === 'file');
+  const dirs = total - files.length;
+  if (p.place === 'recent') {
+    what.textContent = plural(total, 'recent file');
+  } else {
+    what.textContent = [dirs && plural(dirs, 'folder'), files.length && plural(files.length, 'file')].filter(Boolean).join(' · ');
+  }
+  ft.appendChild(what);
+  const bytes = p.items.reduce((sum, e) => sum + (e.type === 'file' || p.place === 'trash' ? (e.size || 0) : 0), 0);
+  if (bytes) {
+    const size = document.createElement('span');
+    size.className = 'fm-ft-size';
+    size.textContent = formatSize(bytes);
+    ft.appendChild(size);
+  }
+}
+
+function fmRender(panel) {
+  const list = fmListEl(panel);
+  if (!list) return;
+  const p = fmPanes[panel];
+  fmDrawPlaces(panel);
+  updateBreadcrumb(panel, panelPath(panel));
+  const dirs = p.items.filter(e => e.type === 'directory').map(e => e.name);
+  updateFilterBar(panel, dirs, p.items.filter(e => e.type === 'file'));
+  const rows = fmView(panel);
+  p.cur = Math.max(0, Math.min(p.cur, rows.length - 1));
+  const frag = document.createDocumentFragment();
+  if (rows.length) rows.forEach((e, k) => frag.appendChild(fmRow(panel, e, k)));
+  else frag.appendChild(fmEmptyRow(panel));
+  list.replaceChildren(frag);
+  // One tab stop: the current row, or the list itself when it has none.
+  list.tabIndex = rows.length ? -1 : 0;
+  fmDrawFooter(panel, rows.length);
+  fmDrawBar();
+}
+
+// Selection only: no rebuild.
+function fmSyncSelection(panel) {
+  const list = fmListEl(panel);
+  if (!list) return;
+  list.querySelectorAll('.fm-row').forEach(li => {
+    const on = selectionPane === panel && selectedFiles.has(li.dataset.fullpath);
+    li.setAttribute('aria-selected', on ? 'true' : 'false');
+    const ck = li.querySelector('.fm-ck');
+    if (ck) ck.checked = on;
+  });
+}
+
+function fmSelectionChanged() {
+  FM_PANELS.forEach(fmSyncSelection);
+  fmDrawBar();
+}
+
+function fmSetActive(panel) {
+  fmActive = panel;
+  FM_PANELS.forEach(pn => {
+    const el = fmPaneEl(pn);
+    if (el) el.classList.toggle('is-active', pn === panel);
+  });
+}
+
+function fmSetTab(panel) {
+  fmTab = panel;
+  FM_PANELS.forEach(pn => {
+    const el = fmPaneEl(pn);
+    if (el) el.classList.toggle('is-tab', pn === panel);
+  });
+  document.querySelectorAll('[data-fm-tab]').forEach(b => {
+    b.setAttribute('aria-selected', b.dataset.fmTab === panel ? 'true' : 'false');
+  });
+  fmSetActive(panel);
+  fmDrawBar();
+}
+
+// ---------------------------------------------------------------------------
+// Selection
+// ---------------------------------------------------------------------------
+
+// Selecting in one pane clears the other.
+function fmSelect(panel, paths, mode) {
+  if (selectionPane && selectionPane !== panel) selectedFiles.clear();
+  selectionPane = panel;
+  if (mode === 'only') selectedFiles.clear();
+  paths.forEach(path => {
+    if (mode === 'toggle' && selectedFiles.has(path)) selectedFiles.delete(path);
+    else selectedFiles.add(path);
+  });
+  if (!selectedFiles.size) selectionPane = null;
+  fmSetActive(panel);
+  fmSelectionChanged();
+}
+
+function clearFileSelection() {
+  selectedFiles.clear();
+  selectionPane = null;
+  fmSelectionChanged();
+}
+
+function fmPruneSelection(panel) {
+  if (selectionPane !== panel) return;
+  const here = new Set(fmPanes[panel].items.map(e => e.path));
+  [...selectedFiles].forEach(path => { if (!here.has(path)) selectedFiles.delete(path); });
+  if (!selectedFiles.size) selectionPane = null;
+}
+
+function fmSelectedEntries(panel) {
+  return fmPanes[panel].items.filter(e => selectedFiles.has(e.path));
+}
+
+// What the next action works on: the selection, else the row it was asked on.
+function fmTargets(panel, e) {
+  if (e && !(selectionPane === panel && selectedFiles.has(e.path))) return [e];
+  return selectionPane === panel ? fmSelectedEntries(panel) : (e ? [e] : []);
+}
+
+// Why the selection cannot move to the other pane, or '' when it can.
+function fmMoveBlocked(panel) {
+  const o = otherPanel(panel);
+  const op = fmPanes[o];
+  if (op.place === 'trash') return 'The other pane shows Trash. Use Delete to send items there.';
+  if (op.place === 'recent') return 'The other pane shows Recent Files. Open a folder there to move here.';
+  if (!op.loaded || !panelPath(o)) return 'The other pane has no folder open.';
+  if (!isVirtualPlace(panel) && panelPath(o) === panelPath(panel)) {
+    return 'Both panes show this folder. Open another folder in the other pane to move here.';
+  }
+  return '';
+}
+
+function fmFolderLabel(panel) {
+  const p = fmPanes[panel];
+  if (p.place === 'recent') return 'Recent Files';
+  if (p.place === 'trash') return 'Trash';
+  const path = panelPath(panel);
+  const lib = p.place === 'downloads' ? null : fmLibraryFor(path);
+  if (lib && lib.path === path) return lib.name;
+  if (p.place === 'downloads' && !p.parent) return 'Downloads';
+  return baseName(path) || path;
+}
+
+// ---------------------------------------------------------------------------
+// The selection bar
+// ---------------------------------------------------------------------------
+
+function fmDrawBar() {
+  const bar = document.getElementById('fmBar');
+  if (!bar) return;
+  const root = document.getElementById('fm');
+  const n = selectionPane ? selectedFiles.size : 0;
+  if (root) root.classList.toggle('is-picking', n > 0);
+  bar.hidden = !n;
+  bar.replaceChildren();
+  if (!n) return;
+  const panel = selectionPane;
+  const p = fmPanes[panel];
+  const entries = fmSelectedEntries(panel);
+
+  const what = document.createElement('span');
+  what.className = 'fm-bar-what';
+  const b = document.createElement('b');
+  b.textContent = plural(n, 'item');
+  what.appendChild(b);
+  if (p.place === 'trash') {
+    what.appendChild(document.createTextNode(' in Trash'));
+  } else {
+    what.appendChild(document.createTextNode(' selected in '));
+    const where = document.createElement('span');
+    where.className = 'fm-mono';
+    where.textContent = fmFolderLabel(panel);
+    what.appendChild(where);
+  }
+  bar.appendChild(what);
+
+  const clear = fmButton('btn btn-sm btn-outline-secondary', '', 'bi-x-lg', { 'aria-label': 'Clear selection', title: 'Clear selection' });
+  const clearText = document.createElement('span');
+  clearText.className = 'fm-opt ms-1';
+  clearText.textContent = 'Clear';
+  clear.appendChild(clearText);
+  clear.addEventListener('click', () => { clearFileSelection(); fmFocusRow(panel); });
+  bar.appendChild(clear);
+
+  if (p.place === 'trash') {
+    const restore = fmButton('btn btn-sm btn-primary', 'Restore ' + n, 'bi-arrow-counterclockwise');
+    restore.addEventListener('click', () => fmRestore(panel, entries));
+    const forever = fmButton('btn btn-sm btn-outline-secondary fm-danger', 'Delete forever…', 'bi-x-lg');
+    forever.addEventListener('click', () => fmDeleteForever(panel, entries));
+    bar.append(restore, forever);
+    return;
+  }
+
+  const why = fmMoveBlocked(panel);
+  const move = fmButton('btn btn-sm btn-primary', '', 'bi-arrow-right-square', why ? { disabled: true, 'aria-describedby': 'fmWhy' } : {});
+  move.appendChild(document.createTextNode('Move ' + n + ' to '));
+  const dest = document.createElement('span');
+  dest.className = 'fm-mono';
+  dest.textContent = fmFolderLabel(otherPanel(panel));
+  move.appendChild(dest);
+  move.addEventListener('click', () => fmMoveTo(panel, entries));
+  bar.appendChild(move);
+
+  const runBulk = fn => () => { contextMenuPanel = panel; fn(); };
+  if (p.place !== 'recent') {
+    const nf = fmButton('btn btn-sm btn-outline-secondary fm-opt', 'New folder with these', 'bi-folder-plus');
+    nf.addEventListener('click', runBulk(createFolderWithSelection));
+    bar.appendChild(nf);
+  }
+  const cbz = entries.filter(e => e.name.toLowerCase().endsWith('.cbz')).length;
+  const combine = fmButton('btn btn-sm btn-outline-secondary fm-opt', 'Combine', 'bi-collection', cbz < 2 ? { disabled: true } : {});
+  combine.addEventListener('click', runBulk(showCombineFilesModal));
+  bar.appendChild(combine);
+
+  const more = fmButton('btn btn-sm btn-outline-secondary', 'More', null, { 'aria-haspopup': 'menu', 'aria-expanded': 'false' });
+  more.addEventListener('click', () => {
+    const phone = window.matchMedia('(max-width: 767.98px)').matches;
+    const items = [];
+    if (phone && p.place !== 'recent') items.push({ label: 'New folder with these', run: runBulk(createFolderWithSelection) });
+    if (phone && cbz >= 2) items.push({ label: 'Combine Files', run: runBulk(showCombineFilesModal) });
+    items.push({ label: 'Merge Files…', run: runBulk(mergeSelectedPages), disabled: !mergeCandidates() });
+    items.push({ label: 'Remove XML', run: runBulk(showRemoveXmlConfirmation), disabled: !cbz });
+    fmOpenMenu(more, items);
+  });
+  bar.appendChild(more);
+
+  const del = fmButton('btn btn-sm btn-outline-secondary fm-danger', 'Delete', 'bi-trash');
+  del.addEventListener('click', () => fmDelete(panel, entries));
+  bar.appendChild(del);
+
+  if (why) {
+    const reason = document.createElement('p');
+    reason.className = 'fm-why';
+    reason.id = 'fmWhy';
+    reason.textContent = why;
+    bar.appendChild(reason);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Menus: one menu element, positioned at the button (or the pointer).
+// Items: { h: 'Group' } | '-' | { label, run, danger, disabled }
+// ---------------------------------------------------------------------------
+
+let fmMenuBack = null;
+
+function fmTidyMenu(items) {
+  const out = [];
+  items.forEach((it, i) => {
+    if (!it) return;
+    if (it === '-') {
+      if (out.length && out[out.length - 1] !== '-') out.push(it);
+      return;
+    }
+    if (it.h) {
+      // A group heading only when an item follows before the next break.
+      const next = items.slice(i + 1).find(x => x && (x === '-' || x.h || x.label));
+      if (next && next.label) out.push(it);
+      return;
+    }
+    out.push(it);
+  });
+  while (out.length && (out[out.length - 1] === '-' || out[out.length - 1].h)) out.pop();
+  while (out.length && out[0] === '-') out.shift();
+  return out;
+}
+
+function fmOpenMenu(anchor, items, point) {
+  const menu = document.getElementById('fmMenu');
+  if (!menu) return;
+  fmCloseMenu(false);
+  menu.replaceChildren();
+  fmTidyMenu(items).forEach(it => {
+    if (it === '-') {
+      const hr = document.createElement('hr');
+      hr.className = 'dropdown-divider';
+      menu.appendChild(hr);
+    } else if (it.h) {
+      const h = document.createElement('h6');
+      h.className = 'dropdown-header';
+      h.textContent = it.h;
+      menu.appendChild(h);
+    } else {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dropdown-item' + (it.danger ? ' fm-danger' : '');
+      b.setAttribute('role', 'menuitem');
+      b.tabIndex = -1;
+      b.textContent = it.label;
+      if (it.disabled) b.disabled = true;
+      b.addEventListener('click', () => { fmCloseMenu(true); it.run(); });
+      menu.appendChild(b);
+    }
+  });
+  menu.hidden = false;
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const r = point ? { left: point.x, right: point.x, top: point.y, bottom: point.y } : anchor.getBoundingClientRect();
+  const left = Math.max(8, Math.min((point ? r.left : r.right - w), window.innerWidth - w - 8));
+  const below = r.bottom + 4;
+  const top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 4) : below;
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  fmMenuBack = anchor;
+  if (anchor) anchor.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('[role=menuitem]:not(:disabled)');
+  if (first) first.focus();
+}
+
+function fmCloseMenu(refocus) {
+  const menu = document.getElementById('fmMenu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  if (fmMenuBack) {
+    fmMenuBack.setAttribute('aria-expanded', 'false');
+    if (refocus && document.contains(fmMenuBack)) fmMenuBack.focus();
+  }
+  fmMenuBack = null;
+}
+
+function fmWantToReadItem(path, name, itemType) {
+  const on = wantToReadPaths.has(path);
+  return { label: on ? 'Remove from Want to Read' : 'Add to Want to Read', run: () => toggleWantToRead(path, name, itemType) };
+}
+
+// Jobs on a folder's files: the folder row's menu and the open folder's menu.
+function fmFolderJobs(panel, path, name) {
+  const providers = getProvidersForPanel(panel);
+  const hasGCD = providers.some(pr => pr.provider_type === 'gcd');
+  const legacy = gcdAvailable || comicVineAvailable || metronAvailable;
+  const lib = () => getLibraryIdForPanel(panel);
+  const refresh = () => refreshPanelForPath(path);
+  const dirJob = type => () => executeScriptOnDirectory(type, path, panel);
+  return [
+    { h: 'Metadata' },
+    (providers.length || legacy) && { label: 'Fetch Metadata for All Comics in Directory', run: () => fetchDirectoryMetadataForPanel(path, name, panel) },
+    hasGCD && { label: 'Fetch GCD Metadata for All Comics', run: () => searchGCDMetadataForDirectory(path, name) },
+    providers.length && { label: 'Re-tag with provider…', run: () => CLU.openRetagModal(path, name, lib(), refresh) },
+    providers.length && { label: 'Backfill missing fields…', run: () => CLU.openBackfillModal(path, name, lib(), refresh) },
+    { label: 'Update XML', run: () => CLU.openUpdateXmlModal(path, name) },
+    { h: 'Names' },
+    { label: 'Rename files in this directory', run: () => fmRenameDirectory(path, name, panel) },
+    { label: 'Smart Rename', run: () => runSmartRename(path, panel) },
+    { label: 'Remove Text…', run: () => openCustomRenameModal(path, panel) },
+    { label: 'Replace Text…', run: () => openReplaceTextModal(path, panel) },
+    { label: 'Rename Series…', run: () => openRenameFilesModal(path, panel) },
+    { h: 'Convert' },
+    { label: 'Convert CBR→CBZ', run: dirJob('convert') },
+    { label: 'PDFs→CBZ', run: dirJob('pdf') },
+    { label: 'Rebuild All Files', run: dirJob('rebuild') },
+    { label: 'Enhance Images', run: dirJob('enhance_dir') },
+    { label: 'Compress CBZ Files', run: dirJob('compress_dir') },
+    { h: 'Series' },
+    { label: 'Create/Update series.json', run: () => CLU.openSeriesJsonModal(path, name) },
+    { label: 'Add CVINFO', run: () => promptForCVInfo(path, panel) },
+    { label: 'Missing File Check', run: dirJob('missing') },
+    { label: 'Add to Pull List', run: () => CLU.addFolderToPullList(path, name) },
+    fmWantToReadItem(path, name, 'folder'),
+    { label: 'Show folder information', run: () => fmFolderInfo(path, name) },
+    '-',
+    { label: 'Remove All XML', run: () => bulkRemoveXmlFromDirectory(path, panel), danger: true },
+  ];
+}
+
+function fmFileItems(panel, e) {
+  const path = e.path;
+  const name = e.name;
+  const ext = fileExt(name);
+  const cbz = isCbzEntry(e);
+  const providers = getProvidersForPanel(panel);
+  const hasGCD = providers.some(pr => pr.provider_type === 'gcd');
+  const fileJob = type => () => executeScriptOnFile(type, path, panel);
+  if (!isComicEntry(e)) {
+    return [
+      isSidecarEntry(e) && { label: 'View ' + name, run: () => fmOpen(panel, e) },
+      '-',
+      { h: 'File' },
+      { label: 'Rename', run: () => fmStartRename(panel, e) },
+      { label: 'Move to…', run: () => fmMoveTo(panel, [e]) },
+      '-',
+      { label: 'Delete', run: () => fmDelete(panel, [e]), danger: true },
+    ];
+  }
+  return [
+    cbz && { label: 'CBZ Information', run: () => fmOpen(panel, e) },
+    '-',
+    { h: 'Metadata' },
+    cbz && providers.length && { label: 'Fetch Metadata', run: () => searchMetadataForFile(path, name, panel) },
+    cbz && hasGCD && { label: 'Search GCD Database Only', run: () => searchGCDMetadata(path, name) },
+    cbz && !providers.length && gcdAvailable && { label: 'Search GCD for Metadata (legacy)', run: () => searchGCDMetadata(path, name) },
+    ext !== 'cbr' && { label: 'Force Metadata Match', run: () => forceMetadataMatchForFile(path, name, panel) },
+    { h: 'Pages' },
+    { label: 'Crop Cover', run: fileJob('crop') },
+    { label: 'Remove 1st Image', run: fileJob('remove') },
+    { label: 'Edit File', run: () => openEditModal(path) },
+    ext === 'cbz' && { label: 'Split File', run: () => openSplitModal(path) },
+    { label: 'Add Blank to End', run: fileJob('add') },
+    { h: 'File' },
+    { label: 'Rename', run: () => fmStartRename(panel, e) },
+    { label: 'Move to…', run: () => fmMoveTo(panel, [e]) },
+    { label: 'Rebuild', run: fileJob('single_file') },
+    { label: 'Enhance', run: fileJob('enhance_single') },
+    ext === 'cbz' && { label: 'Compress (smaller file)', run: fileJob('compress') },
+    { h: 'Lists' },
+    fmWantToReadItem(path, name, 'file'),
+    { label: 'Add to Reading List', run: () => openAddToReadingListModal(path) },
+    '-',
+    { label: 'Delete', run: () => fmDelete(panel, [e]), danger: true },
+  ];
+}
+
+function fmSelectionItems(panel) {
+  const p = fmPanes[panel];
+  const entries = fmSelectedEntries(panel);
+  const n = entries.length;
+  if (p.place === 'trash') {
+    return [
+      { label: 'Restore ' + n, run: () => fmRestore(panel, entries) },
+      '-',
+      { label: 'Delete forever…', run: () => fmDeleteForever(panel, entries), danger: true },
+    ];
+  }
+  const cbz = entries.filter(e => e.name.toLowerCase().endsWith('.cbz')).length;
+  const runBulk = fn => () => { contextMenuPanel = panel; fn(); };
+  return [
+    { label: 'Move ' + n + ' to ' + fmFolderLabel(otherPanel(panel)), run: () => fmMoveTo(panel, entries), disabled: !!fmMoveBlocked(panel) },
+    p.place !== 'recent' && { label: 'New folder with these', run: runBulk(createFolderWithSelection) },
+    cbz >= 2 && { label: 'Combine Files', run: runBulk(showCombineFilesModal) },
+    mergeCandidates() && { label: 'Merge Files…', run: runBulk(mergeSelectedPages) },
+    cbz && { label: 'Remove XML', run: runBulk(showRemoveXmlConfirmation) },
+    '-',
+    { label: 'Delete', run: () => fmDelete(panel, entries), danger: true },
+  ];
+}
+
+function fmRowItems(panel, e) {
+  const p = fmPanes[panel];
+  if (selectionPane === panel && selectedFiles.size > 1 && selectedFiles.has(e.path)) return fmSelectionItems(panel);
+  if (p.place === 'trash') {
+    return [
+      { label: 'Restore', run: () => fmRestore(panel, [e]), disabled: !e.original },
+      isCbzEntry(e) && { label: 'CBZ Information', run: () => showCBZInfo(e.path, e.name, dirName(e.path), []) },
+      '-',
+      { label: 'Delete forever…', run: () => fmDeleteForever(panel, [e]), danger: true },
+    ];
+  }
+  if (e.type === 'directory') {
+    return [
+      { label: 'Open', run: () => fmOpen(panel, e) },
+      { label: 'Rename', run: () => fmStartRename(panel, e) },
+      { label: 'Move to…', run: () => fmMoveTo(panel, [e]) },
+      '-',
+      ...fmFolderJobs(panel, e.path, e.name),
+      { label: 'Delete', run: () => fmDelete(panel, [e]), danger: true },
+    ];
+  }
+  return fmFileItems(panel, e);
+}
+
+// The open folder's menu (the ⋮ at the end of the breadcrumb).
+function fmPaneItems(panel) {
+  const p = fmPanes[panel];
+  const path = panelPath(panel);
+  if (p.place === 'trash') {
+    return [{ label: 'Empty Trash…', run: fmEmptyTrash, danger: true, disabled: !p.items.length || p.trashOff }];
+  }
+  const items = [{ label: 'New folder…', run: () => openCreateFolderModal(panel) }];
+  // A library root or the Downloads root: no whole-library jobs from here.
+  if (p.parent) items.push('-', ...fmFolderJobs(panel, path, baseName(path)));
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+function fmEntryAt(panel, k) { return fmView(panel)[k] || null; }
+
+function fmFocusRow(panel, k) {
+  const p = fmPanes[panel];
+  if (k != null) p.cur = k;
+  const list = fmListEl(panel);
+  if (!list) return;
+  const rows = list.querySelectorAll('.fm-row');
+  rows.forEach((li, i) => {
+    const on = i === p.cur;
+    li.tabIndex = on ? 0 : -1;
+    li.querySelectorAll('[data-fm-act]:not(.fm-go)').forEach(b => { b.tabIndex = on ? 0 : -1; });
+  });
+  const row = rows[p.cur];
+  if (row) { row.focus(); row.scrollIntoView({ block: 'nearest' }); } else list.focus();
+}
+
+function fmOpen(panel, e) {
+  if (!e) return;
+  const p = fmPanes[panel];
+  if (p.place === 'trash') return;
+  if (e.type === 'directory') { loadDirectories(e.path, panel); return; }
+  if (isCbzEntry(e)) {
+    const comics = p.place === 'recent' ? [] : p.items
+      .filter(x => x.type === 'file' && ['cbz', 'zip', 'cbr'].includes(fileExt(x.name)))
+      .map(x => x.name).sort();
+    showCBZInfo(e.path, e.name, dirName(e.path), comics);
+  } else if (isSidecarEntry(e)) {
+    CLU.openSidecarViewer(dirName(e.path));
+  }
+}
+
+function fmUp(panel) {
+  const p = fmPanes[panel];
+  if (isVirtualPlace(panel) || !p.parent) return;
+  // Land on the folder we came from once the listing is in.
+  p.focusPath = panelPath(panel);
+  loadDirectories(p.parent, panel);
+}
+
+function fmRenameDirectory(path, name, panel) {
+  fetch('/rename-directory', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name })
+    body: JSON.stringify({ directory: path })
+  })
+    .then(r => r.json())
+    .then(result => {
+      if (result.success) {
+        // The server reports how many files actually changed, so a no-op
+        // rename is not presented as a success (#716).
+        const renamedCount = result.renamed || 0;
+        CLU.showToast(renamedCount ? 'Rename Successful' : 'Nothing to Rename',
+          result.message || `Renamed ${renamedCount} file(s) in ${name}`, renamedCount ? 'success' : 'info');
+        refreshFilePanel(panel);
+      } else {
+        CLU.showToast('Rename Error', result.error, 'error');
+      }
+    })
+    .catch(error => CLU.showToast('Rename Error', error.message, 'error'));
+}
+
+function fmFolderInfo(path, name) {
+  fetch(`/folder-size?path=${encodeURIComponent(path)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.size == null) { CLU.toast(`Could not read the size of ${name}`, 'error'); return; }
+      const parts = [formatSize(data.size)];
+      if (data.comic_count) parts.push(plural(data.comic_count, 'comic'));
+      if (data.magazine_count) parts.push(plural(data.magazine_count, 'magazine'));
+      CLU.toast(`${name}: ${parts.join(' · ')}`, 'info');
+    })
+    .catch(() => CLU.toast(`Could not read the size of ${name}`, 'error'));
+}
+
+// Inline rename: Enter saves, Escape or leaving the field cancels; an empty
+// name or one with a slash is refused under the field.
+function fmStartRename(panel, e) {
+  const p = fmPanes[panel];
+  if (p.place === 'trash') return;
+  const k = fmView(panel).findIndex(x => x.path === e.path);
+  if (k < 0) return;
+  p.ren = e.path;
+  p.renErr = '';
+  p.cur = k;
+  fmRender(panel);
+  fmFocusRename(panel, e.name);
+}
+
+function fmFocusRename(panel, name) {
+  const input = fmListEl(panel).querySelector('.fm-in');
+  if (!input) return;
+  input.focus();
+  const stem = name.replace(/\.[^.]+$/, '');
+  input.setSelectionRange(0, stem.length || name.length);
+}
+
+function fmEndRename(panel, refocus) {
+  const p = fmPanes[panel];
+  if (!p.ren) return;
+  p.ren = null;
+  p.renErr = '';
+  fmRender(panel);
+  if (refocus) fmFocusRow(panel);
+}
+
+function fmCommitRename(panel, value) {
+  const p = fmPanes[panel];
+  const e = p.items.find(x => x.path === p.ren);
+  if (!e) { fmEndRename(panel, true); return; }
+  const v = value.trim();
+  p.renErr = !v ? 'A name can’t be empty.' : /[/\\]/.test(v) ? 'A name can’t contain a slash.' : '';
+  if (p.renErr) {
+    fmRender(panel);
+    fmFocusRename(panel, value);
+    const input = fmListEl(panel).querySelector('.fm-in');
+    if (input) input.value = value;
+    return;
+  }
+  if (v === e.name) { fmEndRename(panel, true); return; }
+  p.renSaving = true;
+  renameItem(e.path, v, panel).then(result => {
+    p.renSaving = false;
+    if (result.ok) { p.ren = null; p.renErr = ''; return; }  // renameItem reloads the pane
+    p.renErr = result.error;
+    fmRender(panel);
+    fmFocusRename(panel, v);
+    const input = fmListEl(panel).querySelector('.fm-in');
+    if (input) input.value = v;
+  });
+}
+
+// Move entries to the folder open in the other pane.
+function fmMoveTo(panel, entries) {
+  entries = entries.filter(Boolean);
+  if (!entries.length) return;
+  const why = fmMoveBlocked(panel);
+  if (why) { CLU.toast(why, 'info'); return; }
+  fmMoveInto(panel, entries, panelPath(otherPanel(panel)));
+}
+
+// Moves a batch into a folder. Refusals are error toasts; nothing moves.
+function fmMoveInto(panel, entries, target) {
+  const loop = entries.find(e => e.type === 'directory' && (target === e.path || target.startsWith(e.path + '/')));
+  if (loop) {
+    CLU.toast(`“${loop.name}” can’t move into itself. Nothing was moved.`, 'error');
+    return;
+  }
+  const moving = entries.filter(e => dirName(e.path) !== target);
+  if (!moving.length) {
+    CLU.toast(`${entries.length === 1 ? 'It is' : 'They are'} already in ${baseName(target)}.`, 'info');
+    return;
+  }
+  moveMultipleItems(moving.map(e => e.path), target, panel, moving.map(e => ({ path: e.path, type: e.type })));
+}
+
+function fmMarkBusy(paths, on) {
+  const set = new Set(paths);
+  FM_PANELS.forEach(panel => {
+    let hit = false;
+    fmPanes[panel].items.forEach(e => { if (set.has(e.path)) { e.busy = on; hit = true; } });
+    if (hit) fmRender(panel);
+  });
+}
+
+// Delete: to Trash at once with Undo; with Trash off, the shared confirmation.
+function fmDelete(panel, entries) {
+  entries = entries.filter(Boolean);
+  if (!entries.length || fmPanes[panel].place === 'trash') return;
+  const paths = entries.map(e => e.path);
+  const refresh = () => { clearFileSelection(); fmRefreshAll(); };
+  if (trashEnabled !== true) {
+    window._cluDelete = {
+      deleteEndpoint: '/delete',
+      deletePayload: function (p) { return { target: p }; },
+      onDeleteComplete: refresh,
+      onDeleteError: function (path, error) { CLU.toast('Error deleting item: ' + error, 'error'); },
+      onBulkDeleteComplete: function (ps, results) {
+        const failures = results.filter(r => !r.success);
+        if (failures.length) CLU.toast(`${plural(failures.length, 'item')} could not be deleted: ${failures[0].error}`, 'error');
+        refresh();
+      },
+      onUndoDelete: fmRefreshAll
+    };
+    const opts = { permanent: trashEnabled === false };
+    if (entries.length === 1) CLU.showDeleteConfirmation(paths[0], entries[0].name, opts);
+    else CLU.showBulkDeleteConfirmation(paths, opts);
+    return;
+  }
+  fmMarkBusy(paths, true);
+  fetch('/api/delete-multiple', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targets: paths })
   })
     .then(r => r.json())
     .then(data => {
-      if (data.success) {
-        const li = btnEl.closest('li');
-        if (li) li.remove();
-        updateTrashBadge();
-        CLU.showSuccess('Item permanently deleted');
-      } else {
-        CLU.showError(data.error || 'Failed to delete item');
+      if (!data.results) throw new Error(data.error || 'Unexpected response from server');
+      const done = data.results.filter(r => r.success);
+      const failures = data.results.filter(r => !r.success);
+      updateTrashBadge();
+      if (done.length) {
+        const gone = entries.filter(e => done.some(r => r.path === e.path));
+        window._cluDelete = { onUndoDelete: fmRefreshAll };
+        if (!CLU.offerUndoDelete(done.map(r => r.trash_name), fmNamed(gone))) {
+          CLU.toast(`Deleted ${fmNamed(gone)}`, 'success');
+        }
       }
-    })
-    .catch(err => CLU.showError('Error: ' + err.message));
-}
-
-function restoreTrashItem(name, originalPath, btnEl) {
-  fetch('/api/trash/restore', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name })
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (data.success) {
-        const li = btnEl.closest('li');
-        if (li) li.remove();
-        updateTrashBadge();
-        CLU.showSuccess(`Restored to ${data.restored_path}`);
-      } else if (data.conflict) {
-        CLU.showError(`Cannot restore: a file already exists at ${data.original_path}`);
-      } else {
-        CLU.showError(data.error || 'Failed to restore item');
+      if (failures.length) {
+        CLU.toast(`${plural(failures.length, 'item')} could not be deleted: ${failures[0].error}`, 'error');
       }
+      refresh();
     })
-    .catch(err => CLU.showError('Error: ' + err.message));
+    .catch(err => {
+      CLU.toast('Delete failed: ' + err.message, 'error');
+      fmMarkBusy(paths, false);
+    });
 }
 
-function truncatePath(fullPath) {
-  const parts = fullPath.replace(/\\/g, '/').split('/').filter(Boolean);
-  if (parts.length <= 3) return fullPath;
-  return '.../' + parts.slice(-3).join('/');
+// One at a time: each restore rewrites the same trash manifest.
+function fmRestore(panel, entries) {
+  entries = entries.filter(e => e && e.trashName);
+  if (!entries.length) return;
+  const restored = [];
+  const errors = [];
+  entries.reduce((chain, e) => chain.then(() =>
+    fetch('/api/trash/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: e.trashName })
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) restored.push({ e: e, to: data.restored_path });
+        else errors.push(data.conflict ? `a file already exists at ${data.original_path}` : (data.error || 'Failed to restore'));
+      })
+      .catch(err => errors.push(err.message))
+  ), Promise.resolve()).then(() => {
+    if (restored.length) {
+      const where = restored.length === 1 ? ' to ' + dirName(restored[0].to) : '';
+      CLU.toast(`Restored ${fmNamed(restored.map(x => x.e))}${where}`, 'success');
+    }
+    if (errors.length) CLU.toast(`Could not restore ${plural(errors.length, 'item')}: ${errors[0]}`, 'error');
+    clearFileSelection();
+    updateTrashBadge();
+    fmRefreshAll();
+  });
 }
 
-// Helper function to format date/time
-function formatDateTime(dateStr) {
-  const date = new Date(dateStr);
-  return date.toLocaleString();
+function fmConfirmPermanent(label, run) {
+  window._cluDelete = { onConfirm: run };
+  CLU.showDeleteConfirmation('', label, { permanent: true });
+}
+
+function fmDeleteForever(panel, entries) {
+  entries = entries.filter(e => e && e.trashName);
+  if (!entries.length) return;
+  fmConfirmPermanent(fmNamed(entries), () => {
+    let ok = 0;
+    const errors = [];
+    entries.reduce((chain, e) => chain.then(() =>
+      fetch('/api/trash/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: e.trashName })
+      })
+        .then(r => r.json())
+        .then(data => { if (data.success) ok++; else errors.push(data.error || 'Failed to delete item'); })
+        .catch(err => errors.push(err.message))
+    ), Promise.resolve()).then(() => {
+      if (ok) CLU.toast(`Deleted ${plural(ok, 'item')} for good`, 'success');
+      if (errors.length) CLU.toast(errors[0], 'error');
+      clearFileSelection();
+      updateTrashBadge();
+      fmRefreshAll();
+    });
+  });
+}
+
+// Empty Trash asks first, in the shared confirmation modal (never a native dialog).
+function fmEmptyTrash() {
+  fmConfirmPermanent('every item in the Trash', () => {
+    fetch('/api/trash/empty', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          CLU.showSuccess(`Emptied trash: ${data.count} item(s), ${CLU.formatFileSize(data.size_freed)} freed`);
+        } else {
+          CLU.showError('Failed to empty trash');
+        }
+        clearFileSelection();
+        updateTrashBadge();
+        fmRefreshAll();
+      })
+      .catch(err => CLU.showError('Error emptying trash: ' + err.message));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Events: delegated per list, so a row carries no listeners of its own.
+// ---------------------------------------------------------------------------
+
+function fmRowOf(target) {
+  const row = target.closest && target.closest('.fm-row');
+  if (!row) return null;
+  const list = row.closest('.fm-list');
+  const panel = list && list.id.replace(/-list$/, '');
+  if (!fmPanes[panel]) return null;
+  const k = +row.dataset.k;
+  return { panel: panel, row: row, k: k, e: fmEntryAt(panel, k) };
+}
+
+function fmClickRow(panel, k, e, ev) {
+  const p = fmPanes[panel];
+  const rows = fmView(panel);
+  if (ev.shiftKey && p.anchor) {
+    const a = rows.findIndex(x => x.path === p.anchor);
+    if (a >= 0) {
+      const [lo, hi] = a < k ? [a, k] : [k, a];
+      fmSelect(panel, rows.slice(lo, hi + 1).map(x => x.path), 'only');
+    } else {
+      fmSelect(panel, [e.path], 'only');
+      p.anchor = e.path;
+    }
+  } else if (ev.ctrlKey || ev.metaKey) {
+    fmSelect(panel, [e.path], 'toggle');
+    p.anchor = e.path;
+  } else {
+    // Clicking the only selected row clears it.
+    const only = selectionPane === panel && selectedFiles.size === 1 && selectedFiles.has(e.path);
+    fmSelect(panel, only ? [] : [e.path], 'only');
+    p.anchor = e.path;
+  }
+  fmFocusRow(panel, k);
+}
+
+function fmBindList(panel) {
+  const list = fmListEl(panel);
+  const pane = fmPaneEl(panel);
+  if (!list || !pane) return;
+
+  pane.addEventListener('focusin', () => fmSetActive(panel));
+  pane.addEventListener('pointerdown', () => fmSetActive(panel));
+
+  list.addEventListener('click', ev => {
+    const hit = fmRowOf(ev.target);
+    if (!hit || !hit.e) return;
+    const p = fmPanes[panel];
+    if (p.ren === hit.e.path) return;
+    const act = ev.target.closest('[data-fm-act]');
+    if (act) {
+      ev.stopPropagation();
+      const a = act.dataset.fmAct;
+      p.cur = hit.k;
+      if (a === 'menu') fmOpenMenu(act, fmRowItems(panel, hit.e));
+      else if (a === 'open' || a === 'info') fmOpen(panel, hit.e);
+      else if (a === 'restore') fmRestore(panel, [hit.e]);
+      return;
+    }
+    if (ev.target.classList.contains('fm-ck')) {
+      fmSelect(panel, [hit.e.path], 'toggle');
+      p.anchor = hit.e.path;
+      fmFocusRow(panel, hit.k);
+      return;
+    }
+    fmClickRow(panel, hit.k, hit.e, ev);
+  });
+
+  list.addEventListener('dblclick', ev => {
+    const hit = fmRowOf(ev.target);
+    if (!hit || !hit.e || ev.target.closest('button, input')) return;
+    fmOpen(panel, hit.e);
+  });
+
+  // Right-click opens the row's menu (the selection's, on a selected row).
+  list.addEventListener('contextmenu', ev => {
+    const hit = fmRowOf(ev.target);
+    if (!hit || !hit.e || fmPanes[panel].ren) return;
+    ev.preventDefault();
+    if (!(selectionPane === panel && selectedFiles.has(hit.e.path))) {
+      fmSelect(panel, [hit.e.path], 'only');
+      fmPanes[panel].anchor = hit.e.path;
+    }
+    fmFocusRow(panel, hit.k);
+    fmOpenMenu(hit.row.querySelector('[data-fm-act="menu"]'), fmRowItems(panel, hit.e), { x: ev.clientX, y: ev.clientY });
+  });
+
+  list.addEventListener('keydown', ev => fmListKey(panel, ev));
+
+  // Leaving the rename field cancels it (Enter saves first).
+  list.addEventListener('focusout', ev => {
+    if (!ev.target.classList.contains('fm-in')) return;
+    setTimeout(() => {
+      const p = fmPanes[panel];
+      if (p.ren && !p.renSaving && !(document.activeElement && document.activeElement.classList.contains('fm-in'))) {
+        fmEndRename(panel, false);
+      }
+    }, 0);
+  });
+
+  list.addEventListener('dragstart', ev => {
+    const hit = fmRowOf(ev.target);
+    if (!hit || !hit.e) return;
+    if (!(selectionPane === panel && selectedFiles.has(hit.e.path))) {
+      fmSelect(panel, [hit.e.path], 'only');
+      fmPanes[panel].anchor = hit.e.path;
+    }
+    const items = fmSelectedEntries(panel);
+    fmDrag = { panel: panel, items: items };
+    ev.dataTransfer.effectAllowed = 'move';
+    ev.dataTransfer.setData('text/plain', JSON.stringify(items.map(x => ({ path: x.path, type: x.type }))));
+  });
+  list.addEventListener('dragend', () => { fmDrag = null; fmClearDrop(); });
+  list.addEventListener('dragover', ev => fmDragOver(panel, ev));
+  list.addEventListener('dragleave', ev => { if (!list.contains(ev.relatedTarget)) fmClearDrop(); });
+  list.addEventListener('drop', ev => fmDrop(panel, ev));
+}
+
+function fmClearDrop() {
+  document.querySelectorAll('.fm-drop').forEach(x => x.classList.remove('fm-drop'));
+  fmStopAutoScroll();
+}
+
+// Where a drag over this pane would land: a folder row, or the pane's folder.
+function fmDropTarget(panel, ev) {
+  const external = !fmDrag && ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files');
+  const hit = fmRowOf(ev.target);
+  if (fmDrag && hit && hit.e && hit.e.type === 'directory' && fmPanes[panel].place !== 'trash' &&
+      !fmDrag.items.some(x => x.path === hit.e.path)) {
+    return { el: hit.row, path: hit.e.path };
+  }
+  if (isVirtualPlace(panel) || !panelPath(panel)) return null;
+  if (external || (fmDrag && fmDrag.panel !== panel)) return { el: fmListEl(panel), path: panelPath(panel), external: external };
+  return null;
+}
+
+let fmAutoScroll = null;
+function fmStopAutoScroll() { clearInterval(fmAutoScroll); fmAutoScroll = null; }
+
+function fmDragOver(panel, ev) {
+  const list = fmListEl(panel);
+  const r = list.getBoundingClientRect();
+  const dir = ev.clientY - r.top < 40 ? -6 : r.bottom - ev.clientY < 40 ? 6 : 0;
+  fmStopAutoScroll();
+  if (dir) fmAutoScroll = setInterval(() => { list.scrollTop += dir; }, 30);
+  const t = fmDropTarget(panel, ev);
+  document.querySelectorAll('.fm-drop').forEach(x => { if (!t || x !== t.el) x.classList.remove('fm-drop'); });
+  if (!t) return;
+  ev.preventDefault();
+  t.el.classList.add('fm-drop');
+}
+
+function fmDrop(panel, ev) {
+  const t = fmDropTarget(panel, ev);
+  fmClearDrop();
+  if (!t) return;
+  ev.preventDefault();
+  if (t.external) {
+    handleExternalFileDrop(ev.dataTransfer.files, t.path, panel);
+    return;
+  }
+  const from = fmDrag;
+  fmDrag = null;
+  if (from) fmMoveInto(from.panel, from.items, t.path);
+}
+
+function fmListKey(panel, ev) {
+  const t = ev.target;
+  const p = fmPanes[panel];
+  if (t.classList.contains('fm-in')) {
+    if (ev.key === 'Enter') { ev.preventDefault(); fmCommitRename(panel, t.value); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); fmEndRename(panel, true); }
+    return;
+  }
+  const rows = fmView(panel);
+  const hit = fmRowOf(t);
+  const k = hit ? hit.k : p.cur;
+  const e = rows[k] || null;
+  const onRow = !!hit && t === hit.row;
+  const key = ev.key;
+  if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(key) && rows.length) {
+    ev.preventDefault();
+    const step = key === 'PageDown' ? 10 : key === 'PageUp' ? -10 : key === 'ArrowDown' ? 1 : -1;
+    const to = key === 'Home' ? 0 : key === 'End' ? rows.length - 1 : Math.max(0, Math.min(rows.length - 1, k + step));
+    if (ev.shiftKey) {
+      if (!p.anchor && e) p.anchor = e.path;
+      const a = Math.max(0, rows.findIndex(x => x.path === p.anchor));
+      const [lo, hi] = a < to ? [a, to] : [to, a];
+      fmSelect(panel, rows.slice(lo, hi + 1).map(x => x.path), 'only');
+    }
+    fmFocusRow(panel, to);
+    return;
+  }
+  if (!e) return;
+  if (key === ' ' && onRow) {
+    ev.preventDefault();
+    fmSelect(panel, [e.path], 'toggle');
+    p.anchor = e.path;
+  } else if (key === 'Enter' && onRow) {
+    ev.preventDefault();
+    fmOpen(panel, e);
+  } else if (key === 'F2' && p.place !== 'trash') {
+    ev.preventDefault();
+    fmStartRename(panel, e);
+  } else if (key === 'ContextMenu' || (key === 'F10' && ev.shiftKey)) {
+    ev.preventDefault();
+    fmOpenMenu(hit ? hit.row.querySelector('[data-fm-act="menu"]') : null, fmRowItems(panel, e));
+  } else if ((key === 'a' || key === 'A') && (ev.metaKey || ev.ctrlKey)) {
+    ev.preventDefault();
+    fmSelect(panel, rows.map(x => x.path), 'only');
+  } else if (fmPaneKey(panel, ev, e)) {
+    ev.preventDefault();
+  }
+}
+
+// Shortcuts that work on the pane, from a row or from the page itself.
+function fmPaneKey(panel, ev, e) {
+  const p = fmPanes[panel];
+  const key = ev.key;
+  if (ev.altKey || ((ev.metaKey || ev.ctrlKey) && key !== 'Backspace')) return false;
+  const targets = () => fmTargets(panel, e);
+  if (key === 'Backspace' && !ev.metaKey) { fmUp(panel); return true; }
+  if ((key === 'm' || key === 'M') && p.place !== 'trash') {
+    const list = targets();
+    if (!list.length) return false;
+    fmMoveTo(panel, list);
+    return true;
+  }
+  if ((key === 'Delete' || (key === 'Backspace' && ev.metaKey)) && p.place !== 'trash') {
+    const list = targets();
+    if (!list.length) return false;
+    fmDelete(panel, list);
+    return true;
+  }
+  if (key === 'Escape' && selectionPane === panel) { clearFileSelection(); return true; }
+  return false;
+}
+
+function fmInit() {
+  const root = document.getElementById('fm');
+  if (!root) return;
+  FM_PANELS.forEach(fmBindList);
+  fmSetTab('source');
+
+  document.querySelectorAll('[data-fm-tab]').forEach(b => b.addEventListener('click', () => fmSetTab(b.dataset.fmTab)));
+  document.querySelectorAll('[data-fm-pane-menu]').forEach(b => {
+    b.addEventListener('click', () => {
+      const panel = b.closest('.fm-pane').dataset.panel;
+      fmSetActive(panel);
+      fmOpenMenu(b, fmPaneItems(panel));
+    });
+  });
+
+  const menu = document.getElementById('fmMenu');
+  menu.addEventListener('keydown', ev => {
+    const items = [...menu.querySelectorAll('[role=menuitem]:not(:disabled)')];
+    const k = items.indexOf(document.activeElement);
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      const n = items.length;
+      if (n) items[(k + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n].focus();
+    } else if (ev.key === 'Home' || ev.key === 'End') {
+      ev.preventDefault();
+      if (items.length) items[ev.key === 'Home' ? 0 : items.length - 1].focus();
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      fmCloseMenu(true);
+    } else if (ev.key === 'Tab') {
+      fmCloseMenu(false);
+    }
+  });
+  document.addEventListener('pointerdown', ev => {
+    if (!menu.hidden && !menu.contains(ev.target) && !(fmMenuBack && fmMenuBack.contains(ev.target))) fmCloseMenu(false);
+  });
+  window.addEventListener('resize', () => fmCloseMenu(false));
+  document.addEventListener('scroll', () => fmCloseMenu(false), true);
+
+  // The shortcuts reach the last-used pane when nothing else has the focus.
+  document.addEventListener('keydown', ev => {
+    const t = ev.target;
+    if (t !== document.body || document.querySelector('.modal.show')) return;
+    if (fmPaneKey(fmActive, ev, null)) ev.preventDefault();
+  });
 }
 
 // Helper function to calculate "time ago" string
@@ -2440,61 +2073,13 @@ function getTimeAgo(dateStr) {
   return date.toLocaleDateString();
 }
 
-// Helper function to escape HTML to prevent XSS
-
-// Test function for debugging toast
-function testToast() {
-  console.log('testToast() called');
-  CLU.showToast('Test Toast', 'This is a test message', 'success');
-}
-
-// Function to clear all drop hover states
-function clearAllDropHoverStates() {
-  // Remove all hover-related classes from all elements
-  document.querySelectorAll('.hover, .folder-hover, .drag-hover').forEach(element => {
-    element.classList.remove('hover', 'folder-hover', 'drag-hover');
-  });
-
-  // Stop any auto-scroll that might be running
-  if (typeof stopAutoScroll === 'function') {
-    stopAutoScroll();
-  }
-}
-
-// Make functions available globally for debugging
-window.testToast = testToast;
-window.clearAllDropHoverStates = clearAllDropHoverStates;
-
-// Initialize when DOM is loaded
+// Initialize when DOM is loaded. The library dropdowns (files.html) open the
+// first folder in each pane once the libraries are known.
 document.addEventListener('DOMContentLoaded', function () {
-  console.log('DOM loaded, initializing files.js');
-
-  // Check GCD MySQL availability
   checkGCDAvailability();
-
-  // Check ComicVine API availability
   checkComicVineAvailability();
-
-  // Check Metron API availability
   checkMetronAvailability();
-
-  // Initialize rename rows as hidden (only on files page)
-  const sourceRenameRow = document.getElementById('source-directory-rename-row');
-  const destRenameRow = document.getElementById('destination-directory-rename-row');
-  if (sourceRenameRow) sourceRenameRow.style.display = 'none';
-  if (destRenameRow) destRenameRow.style.display = 'none';
-
-  // Initial load for both panels (only on files page)
-  const sourceList = document.getElementById("source-list");
-  const destList = document.getElementById("destination-list");
-  if (sourceList && destList) {
-    loadDirectories(currentSourcePath, 'source');
-    loadDirectories(currentDestinationPath, 'destination');
-
-    // Attach drop events.
-    setupDropEvents(sourceList, 'source');
-    setupDropEvents(destList, 'destination');
-  }
+  fmInit();
 
   // #updateXmlConfirmBtn is wired by clu-update-xml.js, which owns the modal —
   // binding it here too made every update submit twice.
@@ -2502,171 +2087,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Add event listener for Update XML field dropdown change
   const updateXmlFieldSelect = document.getElementById('updateXmlField');
   if (updateXmlFieldSelect) updateXmlFieldSelect.addEventListener('change', CLU.updateXmlFieldChanged);
-
 });
-
-// Function to move an item.
-function moveItem(source, destination) {
-  fetch('/move', {
-    method: 'POST',
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source: source, destination: destination })
-  })
-    .then(response => response.json())
-    .then(result => {
-      if (result.success) {
-        loadDirectories(currentSourcePath, 'source');
-        loadDirectories(currentDestinationPath, 'destination');
-      } else {
-        CLU.toast("Error moving file: " + result.error, 'error');
-      }
-    })
-    .catch(error => {
-      console.error("Error in move request:", error);
-    });
-}
-
-// Grey out a source <li> to show it is being moved.
-function markSourceItemMoving(sourcePath) {
-  const li = document.querySelector(`#source-list li[data-fullpath="${sourcePath}"]`)
-          || document.querySelector(`#destination-list li[data-fullpath="${sourcePath}"]`);
-  if (!li) return;
-  li.className = 'list-group-item list-group-item-secondary d-flex align-items-center justify-content-between';
-  li.style.opacity = '0.5';
-  li.style.pointerEvents = 'none';
-  li.setAttribute('draggable', 'false');
-  li.dataset.movePending = 'true';
-}
-
-// Show a spinner on a folder row that is receiving moved items.
-function markFolderAsReceiving(folderPath) {
-  const selectors = [
-    `#source-list li[data-fullpath="${folderPath}"]`,
-    `#destination-list li[data-fullpath="${folderPath}"]`
-  ];
-  selectors.forEach(sel => {
-    const li = document.querySelector(sel);
-    if (!li) return;
-    const icon = li.querySelector('i.bi-folder, i.bi-folder-fill');
-    if (!icon) return;
-    li.dataset.originalIcon = icon.className;
-    icon.className = 'spinner-border spinner-border-sm me-2';
-    icon.style.color = '';
-    li.dataset.moveReceiving = 'true';
-  });
-}
-
-// Mark an existing file row as being replaced by an incoming move.
-function markExistingFileAsReplacing(destPath) {
-  const li = document.querySelector(`#source-list li[data-fullpath="${destPath}"]`)
-          || document.querySelector(`#destination-list li[data-fullpath="${destPath}"]`);
-  if (!li || li.dataset.moveReplacing === 'true') return;
-  li.classList.add('list-group-item-info');
-  li.style.opacity = '0.6';
-  li.style.pointerEvents = 'none';
-  const leftContainer = li.querySelector('.d-flex.align-items-center');
-  if (leftContainer) {
-    const spinner = document.createElement('span');
-    spinner.className = 'spinner-border spinner-border-sm me-2';
-    spinner.setAttribute('role', 'status');
-    leftContainer.insertBefore(spinner, leftContainer.firstChild);
-  }
-  li.dataset.moveReplacing = 'true';
-}
-
-// Add a blue placeholder <li> in the destination panel for an incoming item.
-function addDestinationPlaceholder(fileName, destPath, isDirectory) {
-  // Determine which panel is showing the destination folder
-  const destFolder = destPath.substring(0, destPath.lastIndexOf('/'));
-  let container = null;
-  if (currentSourcePath === destFolder) container = document.getElementById('source-list');
-  if (currentDestinationPath === destFolder) container = document.getElementById('destination-list');
-  if (!container) return;
-
-  // Don't add duplicate placeholders
-  if (container.querySelector(`li[data-fullpath="${destPath}"]`)) {
-    markExistingFileAsReplacing(destPath);
-    return;
-  }
-
-  const li = document.createElement('li');
-  li.className = 'list-group-item list-group-item-info d-flex align-items-center justify-content-between';
-  li.style.opacity = '0.6';
-  li.style.pointerEvents = 'none';
-  li.dataset.fullpath = destPath;
-  li.dataset.movePlaceholder = 'true';
-
-  const leftContainer = document.createElement('div');
-  leftContainer.className = 'd-flex align-items-center';
-  const icon = document.createElement('i');
-  icon.className = isDirectory ? 'bi bi-folder me-2' : 'bi bi-file-earmark-zip me-2';
-  if (isDirectory) icon.style.color = '#bf9300';
-  leftContainer.appendChild(icon);
-  const spinner = document.createElement('span');
-  spinner.className = 'spinner-border spinner-border-sm me-2';
-  spinner.setAttribute('role', 'status');
-  leftContainer.appendChild(spinner);
-  const nameSpan = document.createElement('span');
-  nameSpan.textContent = fileName;
-  leftContainer.appendChild(nameSpan);
-  li.appendChild(leftContainer);
-
-  // Insert alphabetically among existing items (skip first if it's "Parent")
-  const items = Array.from(container.querySelectorAll('li.list-group-item'));
-  let inserted = false;
-  for (const item of items) {
-    const name = item.dataset.fullpath ? item.dataset.fullpath.split('/').pop() : '';
-    // Skip parent, drop-target, and items already sorted before this one
-    if (!item.dataset.fullpath || name.toLowerCase() === 'parent') continue;
-    if (fileName.localeCompare(name, undefined, { sensitivity: 'base' }) < 0) {
-      container.insertBefore(li, item);
-      inserted = true;
-      break;
-    }
-  }
-  if (!inserted) container.appendChild(li);
-}
-
-// After move ops complete: remove greyed source items, finalize destination placeholders.
-function finalizeMoveUI(hasErrors) {
-  // Remove greyed-out source items
-  document.querySelectorAll('li[data-move-pending="true"]').forEach(li => li.remove());
-
-  // Finalize destination placeholders: make them normal items
-  document.querySelectorAll('li[data-move-placeholder="true"]').forEach(li => {
-    li.removeAttribute('data-move-placeholder');
-    li.style.opacity = '';
-    li.style.pointerEvents = '';
-    const spinner = li.querySelector('.spinner-border');
-    if (spinner) spinner.remove();
-    li.className = 'list-group-item d-flex align-items-center justify-content-between';
-  });
-
-  // Restore folder icons that were showing spinners
-  document.querySelectorAll('li[data-move-receiving="true"]').forEach(li => {
-    const icon = li.querySelector('.spinner-border');
-    if (icon && li.dataset.originalIcon) {
-      icon.className = li.dataset.originalIcon;
-      icon.style.color = '#bf9300';
-    }
-    delete li.dataset.moveReceiving;
-    delete li.dataset.originalIcon;
-  });
-
-  // Restore files that were being replaced
-  document.querySelectorAll('li[data-move-replacing="true"]').forEach(li => {
-    li.classList.remove('list-group-item-info');
-    li.style.opacity = '';
-    li.style.pointerEvents = '';
-    const spinner = li.querySelector('.spinner-border');
-    if (spinner) spinner.remove();
-    delete li.dataset.moveReplacing;
-  });
-
-  // Full refresh to get proper event handlers, buttons, metadata, etc.
-  loadDirectories(currentSourcePath, 'source');
-  loadDirectories(currentDestinationPath, 'destination');
-}
 
 // Poll one op until it leaves 'running'/'queued', then call done(op). The op is
 // null when it already finished and was pruned -- absent means done, not failed.
@@ -2687,22 +2108,19 @@ function pollOperation(opId, done) {
   setTimeout(() => clearInterval(interval), 1800000); // 30min safety
 }
 
-// Wait for a move op, then toast and refresh panels. The move itself is fast;
-// metadata for the moved files runs afterwards as its own queued job, which
-// the header's operations indicator follows.
-function waitForMoveCompletion(opId, label, itemCount) {
+// Wait for a move op, then toast with Undo and refresh both panes. The move
+// itself is fast; metadata for the moved files runs afterwards as its own
+// queued job, which the header's operations indicator follows.
+function waitForMoveCompletion(opId, label, itemCount, undo) {
   pollOperation(opId, op => {
     const detail = (op && op.detail) || '';
     const tagNote = detail.includes('metadata queued') ? ' Metadata is being fetched in the background.' : '';
     if (op && op.status === 'error') {
-      CLU.showToast('Move Errors', detail || `Some of ${itemCount} move(s) failed`, 'error');
+      CLU.toast(detail || `Some of ${itemCount} move(s) failed`, 'error');
     } else {
-      CLU.showToast('Move Successful',
-        (itemCount === 1 ? `Successfully moved ${label}.` : `Successfully moved ${itemCount} items.`) + tagNote,
-        'success');
+      CLU.toast(`Moved ${label}.` + tagNote, 'success', undo ? { duration: 8000, action: { label: 'Undo', onClick: undo } } : undefined);
     }
-    clearAllDropHoverStates();
-    finalizeMoveUI(op && op.status === 'error');
+    fmRefreshAll();
   });
 }
 
@@ -2728,135 +2146,6 @@ function waitForRenameCompletion(opId, itemCount, refreshFn) {
     if (typeof refreshFn === 'function') refreshFn();
   });
 }
-
-function moveSingleItem(sourcePath, targetFolder) {
-  let actualPath = typeof sourcePath === 'object' ? sourcePath.path || sourcePath.name : sourcePath;
-  let fileName = actualPath.split('/').pop();
-
-  fetch('/move', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: actualPath, destination: targetFolder + '/' + fileName })
-  })
-  .then(res => res.json())
-  .then(result => {
-    if (result.success) {
-      markSourceItemMoving(actualPath);
-      addDestinationPlaceholder(fileName, targetFolder + '/' + fileName, false);
-      waitForMoveCompletion(result.op_id, fileName, 1);
-    } else {
-      CLU.showToast('Move Failed', result.error || 'Unknown error', 'error');
-    }
-  })
-  .catch(err => CLU.showToast('Move Failed', err.message, 'error'));
-}
-
-// Set up drop events for a given panel element.
-function setupDropEvents(element, panel) {
-  let autoScrollInterval = null;
-  function startAutoScroll(direction) {
-    if (autoScrollInterval !== null) return;
-    autoScrollInterval = setInterval(() => {
-      if (direction === "up") {
-        element.scrollTop -= 5;
-      } else if (direction === "down") {
-        element.scrollTop += 5;
-      }
-    }, 50);
-  }
-  function stopAutoScroll() {
-    if (autoScrollInterval !== null) {
-      clearInterval(autoScrollInterval);
-      autoScrollInterval = null;
-    }
-  }
-  element.addEventListener("dragover", function (e) {
-    e.preventDefault();
-    // Detect external file drag (from desktop) for upload styling
-    let isExternal = e.dataTransfer.types.includes('Files') &&
-                     !e.dataTransfer.types.includes('text/plain');
-    if (isExternal) {
-      element.classList.add("upload-hover");
-    } else {
-      element.classList.add("hover");
-    }
-    let rect = element.getBoundingClientRect();
-    let threshold = 50;
-    let scrollDirection = null;
-    if (e.clientY - rect.top < threshold) {
-      scrollDirection = "up";
-    } else if (rect.bottom - e.clientY < threshold) {
-      scrollDirection = "down";
-    }
-    if (scrollDirection) {
-      startAutoScroll(scrollDirection);
-    } else {
-      stopAutoScroll();
-    }
-  });
-  element.addEventListener("dragleave", function (e) {
-    element.classList.remove("hover");
-    element.classList.remove("upload-hover");
-    stopAutoScroll();
-  });
-  element.addEventListener("drop", function (e) {
-    e.preventDefault();
-    element.classList.remove("hover");
-    element.classList.remove("upload-hover");
-    stopAutoScroll();
-    clearAllDropHoverStates();
-
-    // Detect external file drop (from desktop) vs internal drag (between panels)
-    let dataStr = e.dataTransfer.getData("text/plain");
-    let isExternalFileDrop = e.dataTransfer.files.length > 0 && !dataStr;
-
-    if (isExternalFileDrop) {
-      let targetPath = panel === 'source' ? currentSourcePath : currentDestinationPath;
-      handleExternalFileDrop(e.dataTransfer.files, targetPath, panel);
-      return;
-    }
-
-    let items;
-    try {
-      items = JSON.parse(dataStr);
-      if (!Array.isArray(items)) {
-        items = [items];
-      }
-    } catch (err) {
-      items = [{ path: dataStr, type: "unknown" }];
-    }
-    let targetPath = panel === 'source' ? currentSourcePath : currentDestinationPath;
-
-    // Filter out items whose source folder is the same as the target folder.
-    let validItems = items.filter(item => {
-      let sourcePath = item.path;
-      let sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
-      return sourceDir !== targetPath;
-    });
-    if (validItems.length === 0) {
-      console.log("All items dropped are in the same directory. Move cancelled.");
-      return;
-    }
-
-    // If only one valid file item is being moved, call moveSingleItem for progress.
-    const paths = validItems.map(item => item.path);
-
-    // If *only one item is selected*, and no other selections exist, use moveSingleItem
-    if (paths.length === 1 && selectedFiles.size <= 1 && validItems[0].type === "file") {
-      moveSingleItem(paths[0], targetPath);
-    } else {
-      // Pass item types for better progress tracking
-      const itemsWithTypes = validItems.map(item => ({
-        path: item.path,
-        type: item.type
-      }));
-      moveMultipleItems(paths, targetPath, panel, itemsWithTypes);
-    }
-    selectedFiles.clear();
-    if (typeof updateSelectionBadge === 'function') updateSelectionBadge();
-  });
-}
-
 
 /**
  * Handle files dropped from the desktop onto a panel (upload).
@@ -2911,52 +2200,6 @@ function handleExternalFileDrop(fileList, targetPath, panel) {
 }
 
 
-// Update the breadcrumb display for source or destination panel.
-function updateBreadcrumb(panel, fullPath) {
-  let breadcrumbEl;
-  if (panel === 'source') {
-    breadcrumbEl = document.getElementById("source-path-display");
-  } else if (panel === 'destination') {
-    breadcrumbEl = document.getElementById("destination-path-display");
-  } else {
-    console.error("Invalid panel:", panel);
-    return;
-  }
-
-  // Handle undefined or null fullPath
-  if (!fullPath) {
-    breadcrumbEl.innerHTML = "";
-    return;
-  }
-
-  breadcrumbEl.innerHTML = "";
-  let parts = fullPath.split('/').filter(Boolean);
-  let pathSoFar = "";
-  parts.forEach((part, index) => {
-    pathSoFar += "/" + part;
-    let currentPartPath = pathSoFar;
-    const li = document.createElement("li");
-    li.className = "breadcrumb-item";
-    if (index === parts.length - 1) {
-      li.classList.add("active");
-      li.setAttribute("aria-current", "page");
-      li.textContent = part;
-    } else {
-      const a = document.createElement("a");
-      a.href = "#";
-      a.textContent = part;
-      a.onclick = function (e) {
-        e.preventDefault();
-        console.log("Breadcrumb clicked:", currentPartPath, "Panel:", panel);
-        loadDirectories(currentPartPath, panel);
-      };
-      li.appendChild(a);
-    }
-    breadcrumbEl.appendChild(li);
-  });
-}
-
-
 // Create Folder Modal functionality.
 let createFolderModalEl = document.getElementById('createFolderModal');
 let createFolderNameInput = document.getElementById('createFolderName');
@@ -2969,8 +2212,9 @@ if (createFolderModalEl) {
   });
 }
 
-// Open modal function
-function openCreateFolderModal() {
+// Open modal function: the folder is made in the pane it was asked from.
+function openCreateFolderModal(panel) {
+  fmCreatePanel = fmPanes[panel] ? panel : fmActive;
   document.getElementById('createFolderName').value = '';
   let createFolderModal = new bootstrap.Modal(createFolderModalEl);
   createFolderModal.show();
@@ -2985,7 +2229,13 @@ function createFolder() {
     return;
   }
 
-  let fullPath = currentDestinationPath + '/' + folderName;
+  if (/[/\\]/.test(folderName)) {
+    CLU.toast('A folder name can\u2019t contain a slash.', 'warning');
+    createFolderNameInput.focus();
+    return;
+  }
+  const panel = fmCreatePanel;
+  let fullPath = panelPath(panel) + '/' + folderName;
 
   fetch('/create-folder', {
     method: 'POST',
@@ -2997,8 +2247,8 @@ function createFolder() {
       if (data.success) {
         let createFolderModal = bootstrap.Modal.getInstance(createFolderModalEl);
         createFolderModal.hide();
-        currentFilter['destination'] = 'all';
-        loadDirectories(currentDestinationPath, 'destination');
+        currentFilter[panel] = 'all';
+        refreshFilePanel(panel);
       } else {
         CLU.toast(data.error || 'Error creating folder.', 'error');
       }
@@ -3017,22 +2267,18 @@ if (confirmCreateFolderBtn) {
 // Enter key support comes from data-enter-confirm on #createFolderModal (clu-utils.js)
 
 
-// One request, one server-side op for the whole selection. It used to send one
-// /move per file, and each started its own thread -- see core/job_queue.py.
-function moveMultipleItems(filePaths, targetFolder, panel, itemsWithTypes = null) {
-  const entries = filePaths.map((f, i) => {
+// One request, one server-side op for the whole selection (core/job_queue.py).
+// One refused item refuses the batch, so nothing moves and the panes stay.
+function moveMultipleItems(filePaths, targetFolder, panel, itemsWithTypes = null, isUndo = false) {
+  const entries = filePaths.map(f => {
     const fileObj = normalizeFile(f);
     const sourcePath = typeof fileObj === 'string' ? fileObj : fileObj.path || fileObj.name;
-    const fileName = sourcePath.split('/').pop();
-    const itemType = itemsWithTypes ? itemsWithTypes[i] : null;
-    return {
-      source: sourcePath,
-      destination: targetFolder + '/' + fileName,
-      fileName,
-      isDirectory: itemType ? itemType.type === 'directory' : false,
-    };
+    return { source: sourcePath, destination: targetFolder + '/' + baseName(sourcePath) };
   });
   if (entries.length === 0) return;
+  const label = (entries.length === 1 ? '“' + baseName(entries[0].source) + '”' : plural(entries.length, 'item')) +
+    ' to ' + (baseName(targetFolder) || targetFolder);
+  fmMarkBusy(entries.map(e => e.source), true);
 
   fetch('/move-batch', {
     method: 'POST',
@@ -3042,26 +2288,26 @@ function moveMultipleItems(filePaths, targetFolder, panel, itemsWithTypes = null
   .then(res => res.json())
   .then(data => {
     if (!data.success) {
-      CLU.showToast('Move Failed', data.error || 'No items could be moved', 'error');
-      loadDirectories(currentSourcePath, 'source');
-      loadDirectories(currentDestinationPath, 'destination');
+      CLU.toast((isUndo ? 'Undo failed: ' : 'Nothing was moved: ') + (data.error || 'No items could be moved'), 'error');
+      fmRefreshAll();
       return;
     }
-    entries.forEach(e => {
-      markSourceItemMoving(e.source);
-      addDestinationPlaceholder(e.fileName, e.destination, e.isDirectory);
-    });
-    waitForMoveCompletion(data.op_id, `${entries.length} items`, entries.length);
+    clearFileSelection();
+    // Undo sends each item back where it came from. shortcut: an item that
+    // auto-metadata renamed after the move is no longer at its destination,
+    // so its Undo is refused; acceptable until the op reports final paths.
+    const undo = isUndo ? null : () => {
+      const back = {};
+      entries.forEach(e => { (back[dirName(e.source)] = back[dirName(e.source)] || []).push(e.destination); });
+      Object.entries(back).forEach(([dir, paths]) => moveMultipleItems(paths, dir, panel, null, true));
+    };
+    waitForMoveCompletion(data.op_id, label, entries.length, undo);
   })
   .catch(err => {
-    CLU.showToast('Move Failed', err.message, 'error');
-    loadDirectories(currentSourcePath, 'source');
-    loadDirectories(currentDestinationPath, 'destination');
+    CLU.toast('Move failed: ' + err.message, 'error');
+    fmRefreshAll();
   });
 }
-
-
-
 
 // CBZ info – contract setup, adapts arguments for CLU.showCBZInfo
 function showCBZInfo(filePath, fileName, directoryPath, fileList) {
@@ -3071,205 +2317,6 @@ function showCBZInfo(filePath, fileName, directoryPath, fileList) {
 }
 
 // CBZ info nav/clear/page viewer – handled by clu-cbz-info.js (DOMContentLoaded wiring is there too)
-// Delete confirmation – contract setup for clu-delete.js
-// Sets up contract with panel-specific UI removal and files.js endpoint
-function showDeletePrompt(fullPath, name, panel) {
-  window._cluDelete = {
-    deleteEndpoint: '/delete',
-    deletePayload: function (p) { return { target: p }; },
-    onDeleteComplete: function (path) {
-      // UI removal logic from deleteItem
-      let container = panel === 'source'
-        ? document.getElementById("source-list")
-        : document.getElementById("destination-list");
-      let itemToRemove = container
-        ? container.querySelector('li[data-fullpath="' + path + '"]')
-        : null;
-      if (itemToRemove) {
-        itemToRemove.classList.add('deleting');
-        if (selectedFiles.has(path)) selectedFiles.delete(path);
-        setTimeout(function () {
-          if (itemToRemove && itemToRemove.parentNode) {
-            itemToRemove.remove();
-            if (panel === 'destination') {
-              let destContainer = document.getElementById("destination-list");
-              let remaining = destContainer.querySelectorAll("li:not(.drop-target-item)");
-              if (remaining.length === 0) {
-                createDropTargetItem(destContainer, currentDestinationPath, panel);
-              }
-            }
-          }
-        }, 200);
-      } else {
-        if (panel === 'source') loadDirectories(currentSourcePath, 'source');
-        else loadDirectories(currentDestinationPath, 'destination');
-      }
-    },
-    onDeleteError: function (path, error) {
-      CLU.toast("Error deleting item: " + error, 'error');
-    }
-  };
-  CLU.showDeleteConfirmation(fullPath, name);
-}
-// Delete confirmation and keyboard support now handled by clu-delete.js
-
-// Track file counts and current paths for rename button
-let fileTracking = {
-  source: { fileCount: 0, currentPath: '' },
-  destination: { fileCount: 0, currentPath: '' }
-};
-
-// Function to track file additions and update rename button
-function trackFileForRename(panel) {
-  fileTracking[panel].fileCount++;
-  console.log(`File tracked for ${panel}: count now ${fileTracking[panel].fileCount}`);
-  updateRenameButtonVisibility(panel);
-}
-
-// Function to track file removals and update rename button
-function trackFileRemovalForRename(panel) {
-  if (fileTracking[panel].fileCount > 0) {
-    fileTracking[panel].fileCount--;
-    console.log(`File removed from ${panel}: count now ${fileTracking[panel].fileCount}`);
-    updateRenameButtonVisibility(panel);
-  }
-}
-
-// Function to reset file tracking for a panel
-function resetFileTracking(panel, currentPath) {
-  fileTracking[panel].fileCount = 0;
-  fileTracking[panel].currentPath = currentPath;
-  console.log(`Reset file tracking for ${panel}: path=${currentPath}`);
-  updateRenameButtonVisibility(panel);
-}
-
-// Function to update rename button visibility and functionality
-function updateRenameButtonVisibility(panel) {
-  const renameRowId = panel === 'source' ? 'source-directory-rename-row' : 'destination-directory-rename-row';
-  const renameRow = document.getElementById(renameRowId);
-
-  if (!renameRow) {
-    console.log('Rename row not found:', renameRowId);
-    return;
-  }
-
-  const hasFiles = fileTracking[panel].fileCount > 0;
-  // Use the global path variables instead of file tracking
-  const currentPath = panel === 'source' ? currentSourcePath : currentDestinationPath;
-  const rootPath = panel === 'source' ? '/temp' : '/processed';
-  const isNotRoot = currentPath !== rootPath;
-
-  console.log('updateRenameButtonVisibility:', panel, 'hasFiles=', hasFiles, 'currentPath=', currentPath, 'isNotRoot=', isNotRoot);
-
-  // Show row if we're not at root level (Add CVINFO works for empty folders too)
-  if (isNotRoot) {
-    console.log('Showing rename row:', panel, 'files=', fileTracking[panel].fileCount, 'path=', currentPath);
-
-    // File-related buttons (only show when there are files)
-    let renameButton = renameRow.querySelector('.rename-files-btn');
-    let replaceButton = renameRow.querySelector('.replace-text-btn');
-    let seriesRenameButton = renameRow.querySelector('.series-rename-btn');
-
-    if (hasFiles) {
-      // Create or update the rename text button
-      if (!renameButton) {
-        renameButton = document.createElement('button');
-        renameButton.className = 'btn btn-outline-primary btn-sm rename-files-btn me-2';
-        renameButton.innerHTML = '<i class="bi bi-input-cursor-text me-2"></i>Remove Text';
-        renameButton.title = 'Remove text from all filenames in this directory';
-        renameRow.appendChild(renameButton);
-      }
-      renameButton.style.display = '';
-      renameButton.dataset.currentPath = currentPath;
-      renameButton.dataset.currentPanel = panel;
-      renameButton.onclick = function (e) {
-        e.preventDefault();
-        const pathFromData = e.target.dataset.currentPath;
-        const panelFromData = e.target.dataset.currentPanel;
-        console.log('Remove text button clicked, path from data:', pathFromData, 'panel:', panelFromData);
-        openCustomRenameModal(pathFromData, panelFromData);
-      };
-
-      // Create or update the replace text button
-      if (!replaceButton) {
-        replaceButton = document.createElement('button');
-        replaceButton.className = 'btn btn-outline-warning btn-sm replace-text-btn me-2';
-        replaceButton.innerHTML = '<i class="bi bi-arrow-left-right me-2"></i>Replace Text';
-        replaceButton.title = 'Replace text in all filenames in this directory';
-        renameRow.appendChild(replaceButton);
-      }
-      replaceButton.style.display = '';
-      replaceButton.dataset.currentPath = currentPath;
-      replaceButton.dataset.currentPanel = panel;
-      replaceButton.onclick = function (e) {
-        e.preventDefault();
-        const pathFromData = e.target.dataset.currentPath;
-        const panelFromData = e.target.dataset.currentPanel;
-        console.log('Replace text button clicked, path from data:', pathFromData, 'panel:', panelFromData);
-        openReplaceTextModal(pathFromData, panelFromData);
-      };
-
-      // Create or update the series rename button
-      if (!seriesRenameButton) {
-        seriesRenameButton = document.createElement('button');
-        seriesRenameButton.className = 'btn btn-outline-success btn-sm series-rename-btn me-2';
-        seriesRenameButton.innerHTML = '<i class="bi bi-pencil-square me-2"></i>Rename Series';
-        seriesRenameButton.title = 'Replace series name while preserving issue numbers and years';
-        renameRow.appendChild(seriesRenameButton);
-      }
-      seriesRenameButton.style.display = '';
-      seriesRenameButton.dataset.currentPath = currentPath;
-      seriesRenameButton.dataset.currentPanel = panel;
-      seriesRenameButton.onclick = function (e) {
-        e.preventDefault();
-        const pathFromData = e.target.dataset.currentPath;
-        const panelFromData = e.target.dataset.currentPanel;
-        console.log('Series rename button clicked, path from data:', pathFromData, 'panel:', panelFromData);
-        openRenameFilesModal(pathFromData, panelFromData);
-      };
-    } else {
-      // Hide file-related buttons when no files
-      if (renameButton) renameButton.style.display = 'none';
-      if (replaceButton) replaceButton.style.display = 'none';
-      if (seriesRenameButton) seriesRenameButton.style.display = 'none';
-    }
-
-    // Create or update the Add CVINFO button (always visible for non-root folders)
-    let cvInfoButton = renameRow.querySelector('.add-cvinfo-btn');
-    if (!cvInfoButton) {
-      cvInfoButton = document.createElement('button');
-      cvInfoButton.className = 'btn btn-outline-info btn-sm add-cvinfo-btn me-2';
-      cvInfoButton.innerHTML = '<i class="bi bi-link-45deg me-2"></i>Add CVINFO';
-      cvInfoButton.title = 'Save ComicVine URL to cvinfo file in this directory';
-      renameRow.appendChild(cvInfoButton);
-    }
-
-    // Store the current path as a data attribute
-    cvInfoButton.dataset.currentPath = currentPath;
-    cvInfoButton.dataset.currentPanel = panel;
-
-    // Update button click handler with current context
-    cvInfoButton.onclick = function (e) {
-      e.preventDefault();
-      const pathFromData = this.dataset.currentPath;
-      const panelFromData = this.dataset.currentPanel;
-      console.log('Add CVINFO button clicked, path:', pathFromData, 'panel:', panelFromData);
-      promptForCVInfo(pathFromData, panelFromData);
-    };
-
-    renameRow.style.display = 'block';
-  } else {
-    console.log('Hiding rename row:', panel, 'hasFiles=', hasFiles, 'isNotRoot=', isNotRoot, 'path=', currentPath);
-    renameRow.style.display = 'none';
-
-    // Reset file count to 0 when hiding the button (no files in current directory)
-    if (fileTracking[panel].fileCount > 0) {
-      console.log(`Resetting file count for ${panel} from ${fileTracking[panel].fileCount} to 0 (no files in current directory)`);
-      fileTracking[panel].fileCount = 0;
-    }
-  }
-}
-
 // Custom Rename Modal functionality
 let customRenameModal;
 let currentRenameDirectory = '';
@@ -5119,49 +4166,16 @@ function renderSeriesList(seriesData) {
 
 
 
-// Helper function to remove a file from the UI after it's been moved
+// A file left this pane (moved by metadata): drop its row now; the refresh
+// that follows draws the truth.
 function removeFileFromUI(filePath) {
-  console.log('Removing file from UI:', filePath);
-
-  // Check both source and destination lists
-  const sourceLi = document.querySelector(`#source-list li[data-fullpath="${filePath}"]`);
-  const destLi = document.querySelector(`#destination-list li[data-fullpath="${filePath}"]`);
-
-  const itemToRemove = sourceLi || destLi;
-  const panel = sourceLi ? 'source' : 'destination';
-
-  if (itemToRemove) {
-    console.log(`Found item to remove in ${panel} panel`);
-
-    // Add fade-out animation
-    itemToRemove.classList.add('deleting');
-
-    // Remove after animation
-    setTimeout(() => {
-      itemToRemove.remove();
-      console.log('File removed from UI');
-
-      // After removal, check if we need to show the drop target in destination panel
-      if (panel === 'destination') {
-        let container = document.getElementById("destination-list");
-        let remainingItems = container.querySelectorAll("li:not(.drop-target-item)");
-
-        // If no items left (excluding drop target), add the drop target
-        if (remainingItems.length === 0) {
-          createDropTargetItem(container, currentDestinationPath, panel);
-        }
-      }
-
-      // Update file count tracker
-      if (panel === 'source') {
-        trackFileRemovalForRename('source');
-      } else {
-        trackFileRemovalForRename('destination');
-      }
-    }, 200); // Match the CSS transition duration
-  } else {
-    console.log('Item not found in UI, may already be removed or in a different location');
-  }
+  FM_PANELS.forEach(panel => {
+    const p = fmPanes[panel];
+    const n = p.items.length;
+    p.items = p.items.filter(e => e.path !== filePath);
+    selectedFiles.delete(filePath);
+    if (p.items.length !== n) fmRender(panel);
+  });
 }
 
 // ComicVine metadata search function
@@ -5850,33 +4864,12 @@ function renameFileAfterMetadata(filePath, oldName, newName) {
 }
 
 function updateRenamedFileInDOM(oldPath, newPath, newName) {
-  console.log('updateRenamedFileInDOM:', { oldPath, newPath, newName });
-
-  // Find the list item with the old path
-  const sourceList = document.getElementById('source-list');
-  const destList = document.getElementById('destination-list');
-
-  // Check both panels for the file
-  [sourceList, destList].forEach(list => {
-    if (!list) return;
-
-    const listItem = list.querySelector(`li[data-fullpath="${oldPath}"]`);
-    if (listItem) {
-      console.log('Found list item to update:', listItem);
-
-      // Update the data attribute
-      listItem.dataset.fullpath = newPath;
-
-      // Find and update the filename span
-      const nameSpan = listItem.querySelector('span');
-      if (nameSpan) {
-        // Keep the size span; the name itself is text, never markup.
-        const sizeSpan = nameSpan.querySelector('span');
-        nameSpan.textContent = newName;
-        if (sizeSpan) nameSpan.append(" ", sizeSpan);
-        console.log('Updated filename in DOM');
-      }
-    }
+  FM_PANELS.forEach(panel => {
+    const e = fmPanes[panel].items.find(x => x.path === oldPath);
+    if (!e) return;
+    e.path = newPath;
+    e.name = newName;
+    fmRender(panel);
   });
 }
 

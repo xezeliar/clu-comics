@@ -21,7 +21,11 @@
  *     onBulkDeleteError(paths, error),
  *
  *     // After an Undo restored items (default: reload the page)
- *     onUndoDelete()
+ *     onUndoDelete(),
+ *
+ *     // Instead of the delete request: the single modal only asks, and
+ *     // onConfirm() does the work (Empty Trash, Delete forever)
+ *     onConfirm()
  *   }
  *
  * DOM contracts:
@@ -89,6 +93,16 @@
     return true;
   };
 
+  // A permanent delete must not promise the Trash. The note's markup is
+  // remembered so the next ordinary delete gets it back.
+  function _setTrashNote(id, permanent) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.dataset.trashNote === undefined) el.dataset.trashNote = el.innerHTML;
+    if (permanent) el.textContent = 'This cannot be undone.';
+    else el.innerHTML = el.dataset.trashNote;
+  }
+
   // ── showDeleteConfirmation ────────────────────────────────────────────────
 
   /**
@@ -96,7 +110,7 @@
    * @param {string} path  - Full file path
    * @param {string} name  - Display name
    * @param {Object} [options] - { size: number, type: string, showDetails: boolean,
-   *                               note: string }
+   *                               note: string, permanent: boolean }
    */
   CLU.showDeleteConfirmation = function (path, name, options) {
     _currentDeletePath = path;
@@ -105,6 +119,7 @@
 
     var nameEl = document.getElementById('deleteFileName');
     if (nameEl) nameEl.textContent = name;
+    _setTrashNote('deleteTrashNote', !!opts.permanent);
 
     // Detail section (size + path) — shown when showDetails is true
     var detailsEl = document.getElementById('deleteFileDetails');
@@ -145,6 +160,12 @@
 
   CLU.confirmDelete = function () {
     var contract = _getContract();
+    if (typeof contract.onConfirm === 'function') {
+      var askInst = bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal'));
+      if (askInst) askInst.hide();
+      contract.onConfirm();
+      return;
+    }
     var endpoint = contract.deleteEndpoint || '/api/delete-file';
     var payload = typeof contract.deletePayload === 'function'
       ? contract.deletePayload(_currentDeletePath)
@@ -193,9 +214,11 @@
   /**
    * Show a bulk delete confirmation modal with a file list.
    * @param {string[]} paths - Array of file paths to delete
+   * @param {Object} [options] - { permanent: boolean }
    */
-  CLU.showBulkDeleteConfirmation = function (paths) {
+  CLU.showBulkDeleteConfirmation = function (paths, options) {
     _currentBulkPaths = paths;
+    _setTrashNote('deleteMultipleTrashNote', !!(options && options.permanent));
 
     var countEl = document.getElementById('deleteMultipleCount');
     if (countEl) countEl.textContent = paths.length;

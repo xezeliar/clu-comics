@@ -1679,3 +1679,31 @@ class TestMoveRefusedWhileCompressing:
         assert "busy.cbz" in resp.get_json()["error"]
         mock_thread.assert_not_called()
         assert free.exists() and busy.exists()
+
+
+class TestListingCarriesFacts:
+    """The File Manager's fact line needs a file's size and date and a folder's
+    item count from the listing. app.py cannot be imported in tests, so the
+    listing is checked structurally; the counting helper is tested in
+    tests/unit/test_helpers.py."""
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    def _read(self, rel):
+        with open(os.path.join(self.ROOT, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_listing_records_mtime_and_folder_counts(self):
+        src = self._read("app.py")
+        body = src[src.index("def get_directory_listing("):]
+        body = body[:body.index("\ndef ")]
+        assert '"mtime": stat.st_mtime' in body
+        assert "dir_counts[entry] = count_visible_entries(full_path)" in body
+        assert '"dir_counts": dir_counts' in body
+
+    def test_both_listing_routes_return_folder_counts(self):
+        src = self._read("routes/collection.py")
+        for route in ("def list_directories(", "def list_downloads("):
+            body = src[src.index(route):]
+            body = body[:body.index("\n@collection_bp.route")]
+            assert body.count('"dir_counts": ') == 2, route  # cached and fresh answers

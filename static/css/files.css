@@ -21,200 +21,551 @@
         border-color: var(--bs-secondary-color);
     }
 
-    /* Smooth removal animation for deleted items */
-    .list-group-item {
-        transition: all 0.2s ease-out;
-    }
+/* =============================================================================
+   File Manager: two panes, quiet rows, one selection bar (files.js).
+   Neutral buttons everywhere; the one accent is --clu-select (clu-page.css),
+   used for a selection, the active pane's ring and a drop target.
+   ============================================================================= */
+.fm {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
 
-    .list-group-item.deleting {
-        opacity: 0;
-        transform: translateX(-20px);
-        pointer-events: none;
-    }
+.fm-tabs {
+    display: none;
+}
 
-    .drop-target-item {
-        opacity: 0.6;
-        font-style: italic;
-        transition: opacity 0.3s ease;
-    }
+.fm-panes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
 
-    .drop-target-item:hover {
+.fm-pane {
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    background: var(--bs-body-bg);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    transition: border-color .15s, box-shadow .15s;
+}
+
+/* The pane the keyboard shortcuts and the bar act on. */
+.fm-pane.is-active {
+    border-color: var(--clu-select);
+    box-shadow: 0 0 0 1px var(--clu-select);
+}
+
+.fm-ph {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    padding: .6rem .6rem 0 .75rem;
+}
+
+.fm-lbl {
+    font-size: .9375rem;
+    font-weight: 600;
+    margin: 0 auto 0 0;
+}
+
+/* Library / Downloads / Recent Files / Trash: never wider than the pane. */
+.files-source-views {
+    max-width: 100%;
+}
+
+.files-source-views > *,
+.files-source-views > .dropdown > .btn {
+    min-width: 0;
+}
+
+/* One line per label: a wrapped "Recent / Files" broke the joined group on a
+   phone. "Recent Files" reads "Recent" below 576px so the group fits. */
+.files-source-views .btn {
+    white-space: nowrap;
+}
+
+.fm-trash-count {
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+    margin-left: .3rem;
+    padding: 0 .35rem;
+    border-radius: 999px;
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-emphasis-color);
+}
+
+.fm-loc {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+    padding: .25rem .5rem 0 .5rem;
+}
+
+/* The path, as a breadcrumb in the file-name face. */
+.fm-crumb {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .1rem .2rem;
+    font-family: var(--bs-font-monospace);
+    font-size: .8125rem;
+    color: var(--bs-secondary-color);
+    min-height: 2rem;
+}
+
+.fm-crumb button {
+    font: inherit;
+    color: var(--bs-link-color);
+    background: none;
+    border: 0;
+    padding: .1rem .25rem;
+    border-radius: var(--bs-border-radius-sm);
+    text-decoration: underline;
+    text-underline-offset: .15em;
+}
+
+.fm-crumb [aria-current] {
+    color: var(--bs-emphasis-color);
+    padding: .1rem .25rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.fm-crumb .fm-sep {
+    opacity: .6;
+}
+
+/* Icon-only neutral buttons (row and folder menus, CBZ Information). */
+.fm-ib {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    display: inline-grid;
+    place-items: center;
+    color: var(--bs-secondary-color);
+    border: 1px solid transparent;
+}
+
+.fm-ib:hover,
+.fm-ib:focus-visible,
+.fm-ib[aria-expanded="true"] {
+    color: var(--bs-emphasis-color);
+    background: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+
+.fm-sr {
+    padding: .4rem .75rem .5rem;
+}
+
+.fm-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 .25rem;
+    height: 26rem;
+    max-height: 60vh;
+    min-height: 12rem;
+    overflow: auto;
+    border-top: 1px solid var(--bs-border-color);
+    outline: 0;
+}
+
+.fm-list:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--clu-select);
+}
+
+/* A drop target: the other pane's list, or a folder row. */
+.fm-list.fm-drop,
+.fm-row.fm-drop {
+    background: color-mix(in srgb, var(--clu-select) 8%, var(--bs-body-bg));
+    box-shadow: inset 0 0 0 2px var(--clu-select);
+}
+
+.fm-row {
+    display: grid;
+    grid-template-columns: 1.6rem 1.1rem minmax(0, 1fr) auto auto;
+    gap: .6rem;
+    align-items: center;
+    min-height: 2.5rem;
+    padding: .15rem .4rem .15rem .6rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--bs-border-color) 55%, transparent);
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background-color .12s, opacity .2s;
+}
+
+.fm-row:hover {
+    background: var(--bs-tertiary-bg);
+}
+
+.fm-row:focus-visible {
+    outline: 2px solid var(--clu-select);
+    outline-offset: -2px;
+}
+
+.fm-row[aria-selected="true"] {
+    background: color-mix(in srgb, var(--clu-select) 14%, var(--bs-body-bg));
+}
+
+.fm-row.is-busy {
+    opacity: .45;
+}
+
+.fm-ty {
+    color: var(--bs-secondary-color);
+    line-height: 1;
+}
+
+.fm-nm {
+    min-width: 0;
+    font-family: var(--bs-font-monospace);
+    font-size: .8125rem;
+    color: var(--bs-emphasis-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fm-row.is-dir .fm-nm {
+    font-weight: 600;
+}
+
+.fm-go {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: .35rem 0;
+    text-align: left;
+    border-radius: var(--bs-border-radius-sm);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.fm-go:hover {
+    text-decoration: underline;
+    text-underline-offset: .15em;
+}
+
+.fm-mt {
+    font-size: .75rem;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.fm-ck {
+    margin: 0;
+    opacity: 0;
+    transition: opacity .12s;
+}
+
+.fm-ck:checked {
+    background-color: var(--clu-select-fill);
+    border-color: var(--clu-select-fill);
+}
+
+.fm-row:hover .fm-ck,
+.fm-row:focus-within .fm-ck,
+.fm-ck:checked,
+.fm.is-picking .fm-ck {
+    opacity: 1;
+}
+
+.fm-acts {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: .1rem;
+    min-width: 4.1rem;
+}
+
+.fm-row:not(:hover):not(:focus-within) .fm-info {
+    opacity: 0;
+}
+
+/* Inline rename: borderless, a rule under it. */
+.fm-in {
+    width: 100%;
+    font-family: var(--bs-font-monospace);
+    font-size: .8125rem;
+    color: var(--bs-emphasis-color);
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid var(--clu-select);
+    padding: .3rem 0;
+    outline: 0;
+}
+
+.fm-in[aria-invalid="true"] {
+    border-bottom-color: var(--bs-danger);
+}
+
+.fm-err {
+    grid-column: 3 / -1;
+    font-size: .8125rem;
+    color: var(--bs-danger-text-emphasis);
+    padding-bottom: .25rem;
+}
+
+.fm-empty {
+    padding: 1rem .5rem;
+}
+
+.fm-ft {
+    display: flex;
+    gap: .5rem;
+    align-items: center;
+    min-height: 2.1rem;
+    padding: .4rem .75rem;
+    font-size: .8125rem;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    border-top: 1px solid var(--bs-border-color);
+}
+
+.fm-ft .fm-ft-size {
+    margin-left: auto;
+}
+
+/* The one selection bar, at the foot of the page. */
+.fm-bar {
+    position: sticky;
+    bottom: .5rem;
+    z-index: 1020;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    align-items: center;
+    padding: .45rem .5rem .45rem .75rem;
+    border: 1px solid var(--clu-select);
+    border-radius: var(--bs-border-radius);
+    background: color-mix(in srgb, var(--clu-select) 8%, var(--bs-body-bg));
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+}
+
+.fm-bar[hidden] {
+    display: none;
+}
+
+.fm-bar-what {
+    margin-right: auto;
+    min-width: 0;
+    color: var(--bs-emphasis-color);
+}
+
+.fm-bar .fm-mono {
+    font-family: var(--bs-font-monospace);
+    font-size: .875em;
+}
+
+.fm-bar .btn-primary {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fm-why {
+    flex: 1 1 100%;
+    margin: 0;
+    font-size: .8125rem;
+    color: var(--bs-secondary-color);
+}
+
+.fm-danger {
+    color: var(--bs-danger-text-emphasis);
+}
+
+.fm-menu {
+    position: fixed;
+    display: block;
+    max-height: 22rem;
+    overflow: auto;
+    min-width: 13rem;
+    z-index: 1060;
+}
+
+.fm-menu[hidden] {
+    display: none;
+}
+
+/* Touch: the controls a hover would reveal are always there. */
+@media (pointer: coarse) {
+    .fm-ck,
+    .fm-row:not(:hover):not(:focus-within) .fm-info {
         opacity: 1;
     }
 
-    #destination-list,
-    #source-list {
-        /* 100vh is the full height of the screen.
-           We subtract approx 485px to account for the header, buttons, and breadcrumbs above it. */
-        height: calc(100vh - 485px);
-        overflow-y: auto;
+    .fm-ib {
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+}
+
+/* Phone: the panes become two tabs and each list fills the screen. */
+@media (max-width: 767.98px) {
+    /* Clear the phone tab bar (clu-page.css, 3.5rem + safe area). */
+    body:has(.clu-tabbar) .fm-bar {
+        bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px) + .5rem);
     }
 
-    /* Drag and drop hover effects */
-    .folder-hover {
-        background-color: rgba(var(--bs-primary-rgb), 0.15) !important;
-        border-color: var(--bs-primary) !important;
-        transform: scale(1.02);
-        transition: all 0.2s ease;
-        box-shadow: 0 4px 8px rgba(var(--bs-primary-rgb), 0.3);
+    .fm-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 3px;
+        padding: 3px;
+        border: 1px solid var(--bs-border-color);
+        border-radius: var(--bs-border-radius);
     }
 
-    .hover {
-        background-color: rgba(var(--bs-primary-rgb), 0.1) !important;
-        border: 2px dashed var(--bs-primary) !important;
-        transition: all 0.2s ease;
+    .fm-tabs button {
+        font: inherit;
+        background: none;
+        border: 0;
+        border-radius: calc(var(--bs-border-radius) - 2px);
+        padding: .4rem;
+        min-height: 2.75rem;
+        color: var(--bs-secondary-color);
     }
 
-    /* Selected file highlighting */
-    .list-group-item.selected {
-        background-color: rgba(var(--bs-primary-rgb), 0.15);
-        border-color: var(--bs-primary);
-        box-shadow: 0 2px 4px rgba(var(--bs-primary-rgb), 0.2);
-        position: relative;
-    }
-
-    /* Enhanced cursor for selected files */
-    .list-group-item.selected[draggable="true"] {
-        cursor: grab;
-    }
-
-    .list-group-item.selected[draggable="true"]:active {
-        cursor: grabbing;
-    }
-
-    /* Tooltip for selected files */
-    .list-group-item.selected::after {
-        content: attr(data-selection-hint);
-        position: absolute;
-        bottom: -30px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        white-space: nowrap;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.2s ease;
-        z-index: 1000;
-    }
-
-    .list-group-item.selected:hover::after {
-        opacity: 1;
-    }
-
-    /* Draggable items cursor */
-    .draggable {
-        cursor: grab;
-    }
-
-    .draggable:active {
-        cursor: grabbing;
-    }
-
-    .dragging {
-        opacity: 0.5;
-        transform: rotate(2deg);
-        transition: all 0.2s ease;
-    }
-
-    /* Drop target visual feedback */
-    .drop-target {
-        position: relative;
-    }
-
-    .drop-target.hover::before {
-        content: "Drop files here";
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(33, 150, 243, 0.9);
-        color: white;
-        padding: 1rem 2rem;
-        border-radius: 0.5rem;
-        font-weight: bold;
-        z-index: 1000;
-        pointer-events: none;
-    }
-
-    /* Upload drop zone (external file drag from desktop) */
-    .upload-hover {
-        background-color: rgba(var(--bs-success-rgb), 0.15) !important;
-        border: 2px dashed var(--bs-success) !important;
-        transition: all 0.2s ease;
-        position: relative;
-    }
-
-    .drop-target.upload-hover::before {
-        content: "Upload files here";
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(76, 175, 80, 0.9);
-        color: white;
-        padding: 1rem 2rem;
-        border-radius: 0.5rem;
-        font-weight: bold;
-        z-index: 1000;
-        pointer-events: none;
-    }
-
-    /* Selection count badge */
-    .selection-badge {
-        position: fixed;
-        top: 80px;
-        right: 20px;
-        background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
-        color: white;
-        padding: 8px 16px;
-        border-radius: 20px;
-        font-size: 0.875rem;
+    .fm-tabs button[aria-selected="true"] {
+        background: color-mix(in srgb, var(--clu-select) 16%, var(--bs-body-bg));
+        color: var(--bs-emphasis-color);
         font-weight: 600;
-        box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
-        z-index: 1040;
+    }
+
+    .fm-panes {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fm-pane:not(.is-tab) {
         display: none;
-        align-items: center;
-        gap: 8px;
-        animation: slideInRight 0.3s ease;
-        transition: all 0.3s ease;
     }
 
-    .selection-badge.show {
-        display: flex;
+    .fm-pane.is-active {
+        border-color: var(--bs-border-color);
+        box-shadow: none;
     }
 
-    .selection-badge:hover {
-        transform: scale(1.05);
-        box-shadow: 0 6px 16px rgba(33, 150, 243, 0.5);
+    .fm-lbl {
+        display: none;
     }
 
-    .selection-badge .badge-icon {
-        font-size: 1rem;
+    /* The four places in one row. */
+    .fm-places {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        flex: 1 1 auto;
+        width: 100%;
     }
 
-    .selection-badge .badge-hint {
-        font-size: 0.75rem;
-        opacity: 0.9;
-        margin-left: 4px;
-        padding-left: 8px;
-        border-left: 1px solid rgba(255, 255, 255, 0.3);
+    .fm-places .btn {
+        min-height: 2.75rem;
+        justify-content: center;
+        padding-inline: .3rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
-    @keyframes slideInRight {
-        from {
-            transform: translateX(100%);
-            opacity: 0;
-        }
-
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
+    .fm-places [data-fm-place="library"] .bi,
+    .fm-places [data-fm-place="trash"] .bi {
+        display: none;
     }
+
+    .fm-list {
+        height: auto;
+        max-height: none;
+        min-height: 60vh;
+    }
+
+    .fm-row {
+        grid-template-columns: 2rem 1.1rem minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        column-gap: .5rem;
+        padding: .35rem .25rem .35rem .4rem;
+    }
+
+    .fm-row > .fm-ckc,
+    .fm-row > .fm-ty {
+        grid-row: 1 / 3;
+    }
+
+    .fm-ck {
+        opacity: 1;
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+
+    .fm-nm,
+    .fm-go {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow-wrap: anywhere;
+    }
+
+    .fm-info {
+        display: none !important;
+    }
+
+    .fm-mt {
+        grid-column: 3;
+        grid-row: 2;
+        text-align: left;
+    }
+
+    .fm-acts {
+        grid-column: 4;
+        grid-row: 1 / 3;
+        min-width: 0;
+    }
+
+    .fm-crumb button {
+        min-height: 2.75rem;
+    }
+
+    .fm-bar {
+        bottom: .25rem;
+    }
+
+    .fm-bar-what {
+        flex: 1 1 100%;
+    }
+
+    .fm-bar .fm-opt {
+        display: none;
+    }
+
+    .fm-bar .btn {
+        min-height: 2.75rem;
+    }
+
+    .fm-bar .btn-primary {
+        flex: 1 1 100%;
+        order: 5;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fm-pane,
+    .fm-row,
+    .fm-ck {
+        transition: none;
+    }
+}
 
 /* =============================================================================
    Drag-Drop Upload Zone for Edit Modal
@@ -240,62 +591,4 @@
     font-size: 1.2rem;
     z-index: 9999;
     pointer-events: none;
-}
-/* "This folder is empty" / "No downloads waiting": a message, not a row. */
-.files-empty-listing {
-    cursor: default;
-    background-color: transparent;
-}
-
-/* Library / Downloads / Recent Files / Trash: never wider than the panel. */
-.files-source-views {
-    max-width: 100%;
-}
-
-.files-source-views > *,
-.files-source-views > .dropdown > .btn {
-    min-width: 0;
-}
-
-/* One line per label: a wrapped "Recent / Files" broke the joined group on a
-   phone. "Recent Files" reads "Recent" below 576px so the group fits. */
-.files-source-views .btn {
-    white-space: nowrap;
-}
-
-/* Bulk action bar (fixed bottom; same pattern as .collection-bulk-action-bar).
-   Its colours come from "text-white bg-info" in files.html, so every theme
-   paints it with its own info fill. */
-.files-bulk-action-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1050;
-    padding: 12px 0;
-    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
-    animation: filesSlideUpBar 0.2s ease-out;
-}
-
-@keyframes filesSlideUpBar {
-    from {
-        transform: translateY(100%);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
-
-/* Keep the bottom of both panels reachable while the bar covers it. */
-body.files-bulkbar-open {
-    padding-bottom: 80px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .files-bulk-action-bar {
-        animation: none;
-    }
 }

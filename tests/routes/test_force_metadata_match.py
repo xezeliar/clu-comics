@@ -392,7 +392,7 @@ class TestMenuWiring:
     def test_files_menu_item_is_bound(self):
         js = self._read('static/js/files.js')
         assert 'Force Metadata Match' in js
-        assert 'forceMetadataMatchForFile(fullPath' in js
+        assert 'forceMetadataMatchForFile(path, name, panel)' in js
 
     def test_client_posts_to_the_route(self):
         js = self._read('static/js/clu-metadata.js')

@@ -278,7 +278,7 @@ def test_collection_shelves_step_aside_while_narrowed():
 
 def test_file_manager_view_buttons_are_small_secondary_and_fit_a_phone():
     html = _read("templates/files.html")
-    views = html[html.index('files-source-views'):html.index('source-directory-filter')]
+    views = html[html.index('files-source-views'):html.index('fm-loc')]
     assert "btn-outline-primary" not in views and "btn-outline-danger" not in views
     assert views.count("btn btn-sm btn-outline-secondary") == 4
     assert 'Recent<span class="d-none d-sm-inline"> Files</span>' in views

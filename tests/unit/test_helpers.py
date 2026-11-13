@@ -236,3 +236,20 @@ class TestFindFolderThumbnail:
 
         with patch("helpers.os.path.exists", side_effect=flaky):
             assert find_folder_thumbnail(str(tmp_path)).endswith("folder.jpg")
+
+
+# ===== count_visible_entries =====
+
+class TestCountVisibleEntries:
+
+    def test_counts_files_and_folders_but_not_hidden(self, tmp_path):
+        from helpers import count_visible_entries
+        (tmp_path / "a.cbz").write_text("x")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / ".DS_Store").write_text("x")
+        (tmp_path / "_tmp").mkdir()
+        assert count_visible_entries(str(tmp_path)) == 2
+
+    def test_unreadable_folder_is_none(self, tmp_path):
+        from helpers import count_visible_entries
+        assert count_visible_entries(str(tmp_path / "missing")) is None
