@@ -225,6 +225,7 @@
                         filename: filename,
                         series: btn.dataset.series,
                         issue: btn.dataset.issue,
+                        year: ctx.year,
                     }),
                 });
                 const data = await resp.json();

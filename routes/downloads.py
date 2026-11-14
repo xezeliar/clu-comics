@@ -193,6 +193,46 @@ def api_getcomics_search():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _missing_issue_numbers(series_name, issue_num, year=None):
+    """Missing issue numbers of the one mapped series a grab is for, else None.
+
+    A grab from the search window names a series and an issue, not a series id,
+    and several volumes share a name. The series is only taken when exactly one
+    mapped series of that name is missing ``issue_num`` and, when a year is
+    known, its run fits that year -- otherwise nothing is guessed and the caller
+    keeps queueing the single part.
+    """
+    from core.wanted_reading_lists import _norm_series
+    from helpers.collection import wanted_year_fit
+
+    wanted_name = _norm_series(series_name)
+    if not wanted_name:
+        return None
+    file_year = int(year) if str(year or '').isdigit() else None
+    found = []
+    for series in get_all_mapped_series():
+        path = series.get("mapped_path")
+        if _norm_series(series.get("name")) != wanted_name or not path \
+                or not os.path.exists(path):
+            continue
+        if file_year and wanted_year_fit(file_year, series)[0] is None:
+            continue
+        issues = get_issues_for_series(series["id"])
+        status = match_issues_to_collection(
+            path, [IssueObj(i) for i in issues], SeriesObj(series))
+        manual = get_manual_status_for_series(series["id"])
+        today = date.today().isoformat()
+        missing = [
+            str(i.get("number")) for i in issues
+            if not status.get(str(i.get("number")), {}).get("found")
+            and str(i.get("number")) not in manual
+            and (not i.get("store_date") or i["store_date"] <= today)
+        ]
+        if str(issue_num) in missing:
+            found.append(missing)
+    return found[0] if len(found) == 1 else None
+
+
 @downloads_bp.route('/api/getcomics/download', methods=['POST'])
 def api_getcomics_download():
     """Get the download links from a getcomics page and queue the downloads.
@@ -201,7 +241,8 @@ def api_getcomics_download():
     download per part, each named after its part. When the caller names the
     ``issue`` it is after, only the part holding that issue is queued, as the
     sweep does -- someone missing #15 does not want the other 65 issues -- and
-    nothing when no part holds it. ``download_id`` is the first of
+    nothing when no part holds it. When the series is mapped, every part holding
+    one of its other missing issues is queued too. ``download_id`` is the first of
     ``download_ids``.
     """
     # Imported lazily so tests can patch models.getcomics.get_download_parts.
@@ -221,7 +262,21 @@ def api_getcomics_download():
         parts = get_download_parts(page_url)
         split = len(parts) > 1
         if issue_num and split:
-            parts = select_parts_for_issue(parts, issue_num, series_name)
+            # Every part holding a missing issue of the mapped series, not only
+            # the one holding the issue clicked: a series missing #1-67 wants
+            # all five ranges of the post.
+            wanted_nums = [issue_num]
+            for n in _missing_issue_numbers(
+                    series_name, issue_num, data.get('year')) or []:
+                if n not in wanted_nums:
+                    wanted_nums.append(n)
+            picked, seen = [], set()
+            for n in wanted_nums:
+                for part in select_parts_for_issue(parts, n, series_name):
+                    if part["label"] not in seen:
+                        seen.add(part["label"])
+                        picked.append(part)
+            parts = picked
             if not parts:
                 return jsonify({
                     "success": False,
