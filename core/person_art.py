@@ -231,15 +231,19 @@ def _run_one(app, kind, name):
     from models import metron
 
     try:
-        if metron.paused_reason():
+        reason = metron.paused_reason()
+        if reason:
+            app_logger.info(f"Person art: {kind} {name!r} skipped, Metron paused: {reason}")
             return
         api = metron.get_flask_api(app)
         if not api:
+            app_logger.info(f"Person art: {kind} {name!r} skipped, no Metron token")
             return
+        app_logger.info(f"Person art: fetching {kind} {name!r}")
         status = resolve(kind, name, api, _default_fetch_image)
-        app_logger.debug(f"Person art: {kind} {name!r} -> {status}")
+        app_logger.info(f"Person art: {kind} {name!r} -> {status}")
     except Exception as e:
-        app_logger.debug(f"Person art: {kind} {name!r} failed: {e}")
+        app_logger.warning(f"Person art: {kind} {name!r} failed: {e}")
     finally:
         with _in_flight_lock:
             _in_flight.discard((kind, key_for(name)))
