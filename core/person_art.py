@@ -7,9 +7,10 @@ images are fetched here, resized and served by ``/api/person-art/...``.
 Things that look arbitrary and are not:
 
 * **Never called from a request thread.** ``resolve`` sends up to three Metron
-  requests and an image download. The index pages only ``kick()`` a daemon
-  thread (at most once per ``KICK_INTERVAL``); the scheduled job in app.py runs
-  ``run_sweep`` every 30 minutes. Both rely on gunicorn's single worker.
+  requests and an image download. Opening a detail page only ``ensure()``s one
+  name on a daemon thread; the index pages never fetch, and there is no
+  scheduled sweep (a sweep hammered Metron into timeouts). Relies on
+  gunicorn's single worker.
 * **Only an exact (casefolded) name match is used.** A fuzzy match would put a
   stranger's face on a creator page, which is worse than initials.
 * **A team is a Metron team with a member character in the library.** Teams
@@ -33,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.app_logging import app_logger
 from core.config import get_cache_dir
-from core.database import _COMIC_FILE_CLAUSE_FI, db_conn
+from core.database import db_conn
 
 KINDS = ("creator", "character", "team", "publisher")
 _LIST_METHOD = {"creator": "creators_list", "character": "characters_list",
@@ -45,8 +46,6 @@ CREDIT_KINDS = ("writer", "penciller", "inker", "colorist", "letterer", "coverar
 MAX_EDGE = 400
 ERROR_RETRY = timedelta(days=1)
 MISSING_RETRY = timedelta(days=30)
-KICK_INTERVAL = 600  # seconds between index-page kicks
-_CANDIDATES_PER_KIND = 2000
 
 
 def _utcnow():
@@ -194,27 +193,6 @@ def resolve(kind, name, api, fetch_image):
 # What to resolve next
 # --------------------------------------------------------------------------
 
-def _library_names(conn, kind):
-    """Names the library uses for ``kind``, most used first."""
-    if kind == "team":
-        sql = ("SELECT name, 0 AS n FROM person_art WHERE kind = 'team'")
-        return [r["name"] for r in conn.execute(sql).fetchall() if r["name"]]
-    if kind == "publisher":
-        sql = ("SELECT MIN(fi.ci_publisher) AS name, COUNT(*) AS n FROM file_index fi"
-               " WHERE fi.ci_publisher IS NOT NULL AND fi.ci_publisher != '' AND "
-               + _COMIC_FILE_CLAUSE_FI +
-               " GROUP BY fi.ci_publisher COLLATE NOCASE ORDER BY n DESC LIMIT ?")
-        params = [_CANDIDATES_PER_KIND]
-    else:
-        kinds = ("characters",) if kind == "character" else CREDIT_KINDS
-        sql = ("SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
-               " FROM file_metadata_tags t"
-               f" WHERE t.kind IN ({','.join('?' for _ in kinds)})"
-               " GROUP BY t.value COLLATE NOCASE ORDER BY n DESC LIMIT ?")
-        params = [*kinds, _CANDIDATES_PER_KIND]
-    return [r["name"] for r in conn.execute(sql, params).fetchall() if r["name"]]
-
-
 def _is_due(row, now):
     if row is None or not row["status"]:
         return True
@@ -228,31 +206,6 @@ def _is_due(row, now):
         return now - checked >= MISSING_RETRY
     return False
 
-
-def pending(limit=25):
-    """Up to ``limit`` (kind, name) pairs that need resolving, most used first.
-
-    Characters go first: resolving one is also what discovers teams.
-    """
-    now = _utcnow()
-    out = []
-    with db_conn() as conn:
-        if not conn:
-            return out
-        for kind in ("character", "team", "creator", "publisher"):
-            rows = {r["key"]: r for r in conn.execute(
-                "SELECT key, status, checked_at FROM person_art WHERE kind = ?", (kind,))}
-            for name in _library_names(conn, kind):
-                if _is_due(rows.get(key_for(name)), now):
-                    out.append((kind, name))
-                    if len(out) >= limit:
-                        return out
-    return out
-
-
-# --------------------------------------------------------------------------
-# Sweep
-# --------------------------------------------------------------------------
 
 def _default_fetch_image(url):
     """Image bytes via the shared, paced HTTP client; None on any failure."""
@@ -268,69 +221,45 @@ def _default_fetch_image(url):
     return resp.content
 
 
-def sweep(limit=25, api=None, fetch_image=None, app=None):
-    """Resolve up to ``limit`` pending names. Quiet when Metron is unavailable.
+_in_flight = set()
+_in_flight_lock = threading.Lock()
 
-    Returns a ``{status: count}`` summary (empty when nothing ran).
-    """
+
+def _run_one(app, kind, name):
     from models import metron
 
-    if metron.paused_reason():
-        app_logger.debug(f"Person art sweep skipped: {metron.paused_reason()}")
-        return {}
-    work = pending(limit)
-    if not work:
-        return {}
-    if api is None:
-        api = metron.get_flask_api(app) if app is not None else None
-        if not api:
-            app_logger.debug("Person art sweep skipped: Metron not configured")
-            return {}
-    fetch_image = fetch_image or _default_fetch_image
-
-    summary = {}
-    for kind, name in work:
-        if metron.paused_reason():
-            break
-        try:
-            status = resolve(kind, name, api, fetch_image)
-        except Exception as e:
-            app_logger.debug(f"Person art: {kind} {name!r} failed: {e}")
-            status = "error"
-        app_logger.debug(f"Person art: {kind} {name!r} -> {status}")
-        summary[status] = summary.get(status, 0) + 1
-    app_logger.info(
-        "Person art: checked " + str(sum(summary.values())) + " names ("
-        + ", ".join(f"{v} {k}" for k, v in sorted(summary.items())) + ")")
-    return summary
-
-
-_sweep_lock = threading.Lock()
-_last_kick = 0.0
-
-
-def run_sweep(app, limit=25):
-    """One sweep at a time; never raises. The scheduled job and kicks call this."""
-    if not _sweep_lock.acquire(blocking=False):
-        return {}
     try:
-        return sweep(limit=limit, app=app)
+        if metron.paused_reason():
+            return
+        api = metron.get_flask_api(app)
+        if not api:
+            return
+        status = resolve(kind, name, api, _default_fetch_image)
+        app_logger.debug(f"Person art: {kind} {name!r} -> {status}")
     except Exception as e:
-        app_logger.debug(f"Person art sweep failed: {e}")
-        return {}
+        app_logger.debug(f"Person art: {kind} {name!r} failed: {e}")
     finally:
-        _sweep_lock.release()
+        with _in_flight_lock:
+            _in_flight.discard((kind, key_for(name)))
 
 
-def kick(app):
-    """Start a sweep on a daemon thread, at most once per KICK_INTERVAL."""
-    global _last_kick
-    now = time.monotonic()
-    if _last_kick and now - _last_kick < KICK_INTERVAL:
+def ensure(app, kind, name):
+    """Resolve one name on a daemon thread when its detail page is opened.
+
+    No-op when it is already cached, not yet due for a retry, or already in
+    flight. This is the only thing that talks to Metron: there is no sweep.
+    """
+    if kind not in KINDS or not name:
         return False
-    _last_kick = now
-    threading.Thread(target=run_sweep, args=(app,), daemon=True,
-                     name="person-art-sweep").start()
+    key = key_for(name)
+    if not _is_due(_get_row(kind, key), _utcnow()):
+        return False
+    with _in_flight_lock:
+        if (kind, key) in _in_flight:
+            return False
+        _in_flight.add((kind, key))
+    threading.Thread(target=_run_one, args=(app, kind, name), daemon=True,
+                     name="person-art").start()
     return True
 
 

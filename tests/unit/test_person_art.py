@@ -148,32 +148,57 @@ def _seed_library(conn):
     _backfill_file_metadata_tags(conn)
 
 
-class TestSweep:
-    def test_respects_limit_and_resolves_characters_first(self, cache, db_connection):
-        _seed_library(db_connection)
-        api = FakeMetron(**BATMAN_API)
-        with patch("models.metron.paused_reason", return_value=None):
-            summary = person_art.sweep(limit=2, api=api, fetch_image=lambda u: _jpeg())
-        assert sum(summary.values()) == 2
-        kinds = {r["kind"] for r in db_connection.execute("SELECT kind FROM person_art WHERE status IS NOT NULL")}
-        assert kinds == {"character"}
+class TestEnsure:
+    @pytest.fixture
+    def run_inline(self):
+        """Run the daemon thread's body on the caller's thread."""
+        class Inline:
+            def __init__(self, target, args=(), **kw):
+                self.target, self.args = target, args
 
-    def test_paused_is_a_quiet_no_op(self, cache, db_connection):
+            def start(self):
+                self.target(*self.args)
+        with patch("core.person_art.threading.Thread", Inline):
+            yield
+
+    def test_fetches_one_name(self, cache, db_connection, run_inline):
         _seed_library(db_connection)
         api = FakeMetron(**BATMAN_API)
-        with patch("models.metron.paused_reason", return_value="Metron is down"):
-            assert person_art.sweep(limit=5, api=api, fetch_image=lambda u: _jpeg()) == {}
+        with patch("models.metron.paused_reason", return_value=None), \
+             patch("models.metron.get_flask_api", return_value=api), \
+             patch("core.person_art._default_fetch_image", lambda u: _jpeg()):
+            assert person_art.ensure(object(), "character", "Batman") is True
+        rows = db_connection.execute("SELECT key, status FROM person_art WHERE status IS NOT NULL").fetchall()
+        assert [(r["key"], r["status"]) for r in rows] == [(person_art.key_for("Batman"), "ok")]
+        assert person_art._in_flight == set()
+
+    def test_cached_name_is_not_fetched_again(self, cache, db_connection, run_inline):
+        _seed_library(db_connection)
+        api = FakeMetron(**BATMAN_API)
+        with patch("models.metron.paused_reason", return_value=None), \
+             patch("models.metron.get_flask_api", return_value=api), \
+             patch("core.person_art._default_fetch_image", lambda u: _jpeg()):
+            person_art.ensure(object(), "character", "Batman")
+            calls = len(api.calls)
+            assert person_art.ensure(object(), "character", "Batman") is False
+        assert len(api.calls) == calls
+
+    def test_paused_is_a_quiet_no_op(self, cache, db_connection, run_inline):
+        _seed_library(db_connection)
+        api = FakeMetron(**BATMAN_API)
+        with patch("models.metron.paused_reason", return_value="Metron is down"), \
+             patch("models.metron.get_flask_api", return_value=api):
+            person_art.ensure(object(), "character", "Batman")
         assert api.calls == []
 
-    def test_resolved_names_are_not_due_again(self, cache, db_connection):
-        _seed_library(db_connection)
-        api = FakeMetron(**BATMAN_API)
-        with patch("models.metron.paused_reason", return_value=None):
-            person_art.sweep(limit=100, api=api, fetch_image=lambda u: _jpeg())
-            # Teams are discovered by the first pass and fetched by the next.
-            assert {k for k, _ in person_art.pending(100)} == {"team"}
-            person_art.sweep(limit=100, api=api, fetch_image=lambda u: _jpeg())
-            assert person_art.pending(100) == []
+    def test_in_flight_name_is_not_started_twice(self, cache, db_connection):
+        started = []
+        with patch("core.person_art.threading.Thread",
+                   lambda **kw: type("T", (), {"start": lambda self: started.append(1)})()):
+            assert person_art.ensure(object(), "character", "Batman") is True
+            assert person_art.ensure(object(), "character", "Batman") is False
+        person_art._in_flight.clear()
+        assert started == [1]
 
 
 class TestTeams:
@@ -196,7 +221,7 @@ class TestTeams:
         assert creators.list_teams(q="xyz", prefixes=["/data"]) == []
 
     def test_character_on_no_team_is_not_refetched(self, teams):
-        assert ("character", "Flash") not in person_art.pending(100)
+        assert not person_art._is_due(person_art._get_row("character", person_art.key_for("Flash")), person_art._utcnow())
 
     def test_team_page_and_members(self, teams):
         data = creators.team_page("justice league", prefixes=["/data"])

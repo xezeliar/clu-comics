@@ -71,6 +71,16 @@ class TestTeamPages:
         assert p["name"] == "Justice League" and p["issues"] == 3
         assert p["members"] == [{"name": "Batman", "n": 2}, {"name": "Superman", "n": 2}]
 
+    def test_character_detail_has_portrait(self, client, library):
+        with patch("routes.creators.render_template", return_value="") as rt:
+            client.get("/characters/Batman")
+        assert rt.call_args.kwargs["p"]["art"].startswith("/api/person-art/character/Batman")
+
+    def test_detail_portrait_renders_photo_or_initials(self, client, library):
+        html = client.get("/characters/Batman").get_data(as_text=True)
+        assert 'class="pt-img person-photo"' in html and "/api/person-art/character/Batman" in html
+        assert ">JL<" in client.get("/teams/" + quote("justice league")).get_data(as_text=True)
+
     def test_unknown_team_is_404(self, client, library):
         assert client.get("/teams/Avengers").status_code == 404
 

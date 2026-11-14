@@ -23,6 +23,12 @@ def _render_page(data, template, view, **extra):
     for s in data["series"]:
         s["thumbnail_url"] = url_for("get_thumbnail", path=s["cover"])
         s["href"] = url_for("collection.collection", path=s["parent"])
+    if extra.get("kind") in ART_KINDS:
+        kind = ART_KINDS[extra["kind"]]
+        data["art"] = person_art.art_urls(kind, [data["name"]]).get(data["name"])
+        # Opening a detail page is the only thing that asks Metron for a photo.
+        if not data["art"] and (current_app.config.get("METRON_API_TOKEN") or "").strip():
+            person_art.ensure(current_app._get_current_object(), kind, data["name"])
     return render_template(template, p=data, view=view, **extra)
 
 
@@ -43,9 +49,6 @@ def _index(people, kind, q, **extra):
     art = person_art.art_urls(ART_KINDS[kind], [p["name"] for p in people])
     for p in people:
         p["art"] = art.get(p["name"])
-    # Fill in missing photos off-request (debounced; never blocks this page).
-    if (current_app.config.get("METRON_API_TOKEN") or "").strip():
-        person_art.kick(current_app._get_current_object())
     return render_template("people_index.html", people=people, q=q, kind=kind, **extra)
 
 

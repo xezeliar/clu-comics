@@ -2,6 +2,7 @@
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
 {% from 'partials/filters.html' import toolbar, result_count %}
+{% from 'partials/person_tile.html' import person_initials %}
 {% from 'partials/publisher_dot.html' import publisher_dot with context %}
 
 {% set is_creator = kind == 'creators' %}
@@ -12,6 +13,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/people-tiles.css') }}">
 <style>
     .person-grid {
         list-style: none; margin: 0 0 2rem; padding: 0;
@@ -46,6 +48,10 @@
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .person-card-meta { font-size: 0.75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .person-hero { display: flex; gap: 1.25rem; align-items: flex-start; }
+    .person-hero-main { flex: 1; min-width: 0; }
+    .person-photo { flex: none; width: 7rem; }
+    @media (max-width: 575.98px) { .person-photo { width: 4.5rem; } .person-hero { gap: .75rem; } }
     .person-section { font-size: 1rem; font-weight: 500; margin: 0 0 0.75rem; }
     @media (prefers-reduced-motion: reduce) { .person-cover { transition: none; } .person-card:hover .person-cover { translate: none; } }
 </style>
@@ -53,6 +59,11 @@
 
 {% block content %}
 <div class="person-page">
+  <div class="person-hero">
+    <span class="pt-img person-photo" aria-hidden="true">
+        {%- if p.art %}<img src="{{ p.art }}" alt="">{% else %}<span class="pt-ini">{{ person_initials(p.name) }}</span>{% endif -%}
+    </span>
+    <div class="person-hero-main">
     {% call(slot) page_header(p.name, 'bi-pencil' if is_creator else ('bi-people-fill' if kind == 'teams' else 'bi-people'),
                               subtitle=(p.series | length) ~ ' series · ' ~ p.issues ~ ' issues owned · ' ~ p.read ~ ' read'
                                        ~ (' · first seen ' ~ p.first_year if p.first_year else '')
@@ -68,6 +79,8 @@
             </button>
         {% endif %}
     {% endcall %}
+    </div>
+  </div>
 
     {% call toolbar(kind_label ~ ' views') %}
         <div class="clu-toolbar-row">
