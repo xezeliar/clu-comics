@@ -273,7 +273,7 @@ def _clu_default_per_page(kind=None):
 # prefix-matches /download, /download_status, /download_status_all and
 # /download_summary; the management endpoints are listed explicitly.
 _EXEMPT_PREFIXES = (
-    "/login", "/logout", "/static/", "/opds", "/api/insights", "/api/v1/",
+    "/login", "/logout", "/static/", "/opds", "/api/v1/",
     "/download",
     "/cancel_download", "/retry_download", "/dismiss_download",
     "/clear_downloads", "/clear_failed_downloads",
@@ -288,7 +288,10 @@ def require_login():
     Redirects to /login only when login is required and no user is
     authenticated.
     """
-    if any(request.path.startswith(p) for p in _EXEMPT_PREFIXES):
+    # /api/insights (the Homepage widget, its own bearer-token check) is exempt
+    # by exact path: /api/insights/who is per-user data and must stay gated.
+    if request.path == "/api/insights" or any(
+            request.path.startswith(p) for p in _EXEMPT_PREFIXES):
         return None
 
     user = load_current_user()

@@ -1,8 +1,10 @@
-"""Creator pages, character pages and follow-a-creator (core/creators.py)."""
+"""Creator, character and team pages, follow-a-creator (core/creators.py),
+and the cached Metron photos those grids show (core/person_art.py)."""
 
-from flask import Blueprint, abort, jsonify, render_template, request, url_for
+from flask import (Blueprint, abort, current_app, jsonify, render_template, request,
+                   send_file, url_for)
 
-from core import creators
+from core import creators, person_art
 from core.auth import accessible_folder_prefixes, current_user
 from core.database import get_series_slugs_for_folders
 from core.metadata_normalize import strip_provider_ids
@@ -10,14 +12,12 @@ from core.metadata_normalize import strip_provider_ids
 creators_bp = Blueprint("creators", __name__)
 
 
-def _page(kinds, name, template, role_kinds=None, **extra):
-    name = strip_provider_ids(name) or name
+def _view():
     view = request.args.get("view", "series")
-    if view not in creators.CHARACTER_VIEWS:
-        view = "series"
-    data = creators.person_page(
-        kinds, name, prefixes=accessible_folder_prefixes(current_user()), view=view,
-        role_kinds=role_kinds)
+    return view if view in creators.CHARACTER_VIEWS else "series"
+
+
+def _render_page(data, template, view, **extra):
     if data is None:
         abort(404)
     for s in data["series"]:
@@ -26,20 +26,39 @@ def _page(kinds, name, template, role_kinds=None, **extra):
     return render_template(template, p=data, view=view, **extra)
 
 
-def _index(kinds, template, **extra):
-    q = request.args.get("q", "")
-    people = creators.list_people(
-        kinds, q=q, prefixes=accessible_folder_prefixes(current_user()))
-    return render_template(template, people=people, q=q, **extra)
+def _page(kinds, name, template, role_kinds=None, **extra):
+    name = strip_provider_ids(name) or name
+    view = _view()
+    data = creators.person_page(
+        kinds, name, prefixes=accessible_folder_prefixes(current_user()), view=view,
+        role_kinds=role_kinds)
+    return _render_page(data, template, view, **extra)
 
 
-def _issues(kinds, name):
+# Grid kind -> person_art kind.
+ART_KINDS = {"creators": "creator", "characters": "character", "teams": "team"}
+
+
+def _index(people, kind, q, **extra):
+    art = person_art.art_urls(ART_KINDS[kind], [p["name"] for p in people])
+    for p in people:
+        p["art"] = art.get(p["name"])
+    # Fill in missing photos off-request (debounced; never blocks this page).
+    if (current_app.config.get("METRON_API_TOKEN") or "").strip():
+        person_art.kick(current_app._get_current_object())
+    return render_template("people_index.html", people=people, q=q, kind=kind, **extra)
+
+
+def _issues(kinds, name, lookup=None):
     folder = request.args.get("folder", "")
     if not folder:
         return jsonify({"success": False, "error": "Missing folder"}), 400
-    issues = creators.person_issues(
-        kinds, strip_provider_ids(name) or name, folder,
-        prefixes=accessible_folder_prefixes(current_user()))
+    prefixes = accessible_folder_prefixes(current_user())
+    name = strip_provider_ids(name) or name
+    if lookup is not None:
+        issues = lookup(name, folder, prefixes=prefixes)
+    else:
+        issues = creators.person_issues(kinds, name, folder, prefixes=prefixes)
     if issues is None:
         return jsonify({"success": False, "error": "Could not read issues"}), 500
     for i in issues:
@@ -52,8 +71,10 @@ def _issues(kinds, name):
 
 @creators_bp.route("/creators")
 def creators_index():
-    return _index(creators.CREDIT_KINDS, "people_index.html",
-                  kind="creators", title="Creators", icon="bi-pencil")
+    q = request.args.get("q", "")
+    people = creators.list_people(
+        creators.CREDIT_KINDS, q=q, prefixes=accessible_folder_prefixes(current_user()))
+    return _index(people, "creators", q, title="Creators", icon="bi-pencil")
 
 
 @creators_bp.route("/creators/<path:name>")
@@ -82,14 +103,47 @@ def api_character_issues(name):
 
 @creators_bp.route("/characters")
 def characters_index():
-    return _index(("characters",), "people_index.html",
-                  kind="characters", title="Characters", icon="bi-people")
+    q = request.args.get("q", "")
+    people = creators.list_people(
+        ("characters",), q=q, prefixes=accessible_folder_prefixes(current_user()))
+    return _index(people, "characters", q, title="Characters", icon="bi-people")
 
 
 @creators_bp.route("/characters/<path:name>")
 def character_page(name):
     return _page(("characters",), name, "person.html", kind="characters",
                  follow=None, role=None, roles={}, scopes=())
+
+
+@creators_bp.route("/teams")
+def teams_index():
+    q = request.args.get("q", "")
+    people = creators.list_teams(q=q, prefixes=accessible_folder_prefixes(current_user()))
+    return _index(people, "teams", q, title="Teams", icon="bi-people-fill")
+
+
+@creators_bp.route("/teams/<path:name>")
+def team_page(name):
+    view = _view()
+    data = creators.team_page(
+        strip_provider_ids(name) or name,
+        prefixes=accessible_folder_prefixes(current_user()), view=view)
+    return _render_page(data, "person.html", view, kind="teams",
+                        follow=None, role=None, roles={}, scopes=())
+
+
+@creators_bp.route("/api/teams/<path:name>/issues")
+def api_team_issues(name):
+    return _issues(("characters",), name, lookup=creators.team_issues)
+
+
+@creators_bp.route("/api/person-art/<kind>/<path:name>", endpoint="person_art")
+def person_art_image(kind, name):
+    """A cached Metron photo. The file path is a hash of the name, never the name."""
+    path = person_art.served_file(kind, name)
+    if path is None:
+        abort(404)
+    return send_file(path, mimetype="image/jpeg", max_age=86400)
 
 
 # --- follow a creator (clerk+: following adds series to the shared Wanted list) ---

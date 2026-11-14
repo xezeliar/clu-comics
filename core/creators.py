@@ -51,12 +51,24 @@ def _scope(prefixes):
     return ((" AND " + clause) if clause else ""), params
 
 
-def _person_from(kinds):
-    """FROM/WHERE shared by every per-person query (params: kinds..., name)."""
+def _names(name):
+    """One name, or a team's set of member names, as a list."""
+    return [name] if isinstance(name, str) else list(name)
+
+
+def _name_match(col, names, negate=False):
+    """``col = ? COLLATE NOCASE`` for one name, ``IN (...)`` for a set."""
+    if len(names) == 1:
+        return f"{col} {'!=' if negate else '='} ? COLLATE NOCASE"
+    return f"{col} COLLATE NOCASE {'NOT IN' if negate else 'IN'} ({_in(names)})"
+
+
+def _person_from(kinds, names=("",)):
+    """FROM/WHERE shared by every per-person query (params: kinds..., names...)."""
     return (
         " FROM file_metadata_tags t JOIN file_index fi ON fi.path = t.file_path"
-        f" WHERE t.kind IN ({_in(kinds)}) AND t.value = ? COLLATE NOCASE"
-        " AND " + _COMIC_FILE_CLAUSE_FI
+        f" WHERE t.kind IN ({_in(kinds)}) AND " + _name_match("t.value", names)
+        + " AND " + _COMIC_FILE_CLAUSE_FI
     )
 
 
@@ -69,10 +81,11 @@ def person_page(kinds, name, prefixes=None, user_id=None, view="series",
     the role pills, so filtering by one role keeps the others visible.
     """
     kinds = tuple(kinds)
+    names = _names(name)
     uid = _resolve_user_id(user_id)
     scope_sql, scope_params = _scope(prefixes)
-    base = _person_from(kinds) + scope_sql
-    args = [*kinds, name, *scope_params]
+    base = _person_from(kinds, names) + scope_sql
+    args = [*kinds, *names, *scope_params]
 
     with db_conn() as conn:
         if not conn:
@@ -85,8 +98,8 @@ def person_page(kinds, name, prefixes=None, user_id=None, view="series",
 
         rk = tuple(role_kinds or kinds)
         c.execute(
-            "SELECT t.kind, COUNT(DISTINCT t.file_path) n" + _person_from(rk) + scope_sql +
-            " GROUP BY t.kind ORDER BY n DESC", [*rk, name, *scope_params])
+            "SELECT t.kind, COUNT(DISTINCT t.file_path) n" + _person_from(rk, names) + scope_sql +
+            " GROUP BY t.kind ORDER BY n DESC", [*rk, *names, *scope_params])
         roles = [{"kind": r["kind"], "label": ROLE_LABELS.get(r["kind"], r["kind"]),
                   "count": r["n"]} for r in c.fetchall()]
 
@@ -111,9 +124,9 @@ def person_page(kinds, name, prefixes=None, user_id=None, view="series",
                 "WHERE",
                 "JOIN file_metadata_tags t2 ON t2.file_path = t.file_path"
                 f" AND t2.kind IN ({_in(co_kinds)})"
-                " AND t2.value != ? COLLATE NOCASE WHERE", 1)
+                " AND " + _name_match("t2.value", names, negate=True) + " WHERE", 1)
             + " GROUP BY t2.value COLLATE NOCASE ORDER BY n DESC, t2.value LIMIT 12",
-            [*co_kinds, name, *args])
+            [*co_kinds, *names, *args])
         often_with = [dict(r) for r in c.fetchall()]
 
         c.execute(
@@ -157,9 +170,10 @@ def person_issues(kinds, name, folder, prefixes=None, user_id=None):
     caller cannot read outside what the page itself listed.
     """
     kinds = tuple(kinds)
+    names = _names(name)
     uid = _resolve_user_id(user_id)
     scope_sql, scope_params = _scope(prefixes)
-    base = _person_from(kinds).replace(
+    base = _person_from(kinds, names).replace(
         "WHERE",
         "LEFT JOIN issues_read r ON r.issue_path = fi.path AND r.user_id = ? WHERE", 1)
     with db_conn() as conn:
@@ -170,7 +184,7 @@ def person_issues(kinds, name, folder, prefixes=None, user_id=None):
             " fi.ci_number AS number, fi.ci_title AS title, fi.ci_year AS year,"
             " (r.issue_path IS NOT NULL) AS read"
             + base + " AND fi.parent = ?" + scope_sql,
-            [uid, *kinds, name, folder, *scope_params]).fetchall()
+            [uid, *kinds, *names, folder, *scope_params]).fetchall()
     issues = [dict(r) for r in rows]
     issues.sort(key=lambda i: (_issue_sort_key(i["number"]), (i["name"] or "").casefold()))
     return issues
@@ -258,6 +272,107 @@ def list_people(kinds, q="", prefixes=None, limit=300):
             + " GROUP BY t.value COLLATE NOCASE ORDER BY n DESC, name LIMIT ?",
             [*kinds, *params, *scope_params, int(limit)]).fetchall()
         return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# Teams: Metron teams with a member character in the library (core/person_art.py)
+# --------------------------------------------------------------------------
+
+# A team's members, spelled as the library spells them (person_art.name is the
+# tag value the character was resolved from).
+_TEAM_TAGS = (
+    " FROM character_teams ct"
+    " JOIN person_art pa ON pa.kind = 'character' AND pa.key = ct.character_key"
+    " JOIN file_metadata_tags t ON t.kind = 'characters' AND t.value = pa.name COLLATE NOCASE"
+    " JOIN file_index fi ON fi.path = t.file_path"
+    " WHERE " + _COMIC_FILE_CLAUSE_FI
+)
+
+
+def list_teams(q="", prefixes=None, limit=300):
+    """Teams with owned-issue counts (distinct issues with any member), most first."""
+    scope_sql, scope_params = _scope(prefixes)
+    where, params = "", []
+    if (q or "").strip():
+        where = " AND instr(lower(ct.team_name), ?) > 0"
+        params.append(q.strip().lower())
+    with db_conn() as conn:
+        if not conn:
+            return []
+        rows = conn.execute(
+            "SELECT MIN(ct.team_name) AS name, COUNT(DISTINCT t.file_path) AS n"
+            + _TEAM_TAGS + where + scope_sql
+            + " GROUP BY ct.team_key ORDER BY n DESC, name LIMIT ?",
+            [*params, *scope_params, int(limit)]).fetchall()
+        return [dict(r) for r in rows]
+
+
+def team_members(team, prefixes=None):
+    """``[{"name", "n"}]``: the team's member characters the library owns."""
+    scope_sql, scope_params = _scope(prefixes)
+    with db_conn() as conn:
+        if not conn:
+            return []
+        rows = conn.execute(
+            "SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
+            + _TEAM_TAGS + " AND ct.team_key = ?" + scope_sql
+            + " GROUP BY t.value COLLATE NOCASE ORDER BY n DESC, name",
+            [(team or "").strip().casefold(), *scope_params]).fetchall()
+        return [dict(r) for r in rows]
+
+
+def team_name(team):
+    """The team's stored spelling, or None when no character names it."""
+    with db_conn() as conn:
+        if not conn:
+            return None
+        row = conn.execute(
+            "SELECT team_name FROM character_teams WHERE team_key = ? LIMIT 1",
+            ((team or "").strip().casefold(),)).fetchone()
+        return row["team_name"] if row else None
+
+
+def team_page(team, prefixes=None, user_id=None, view="series"):
+    """A team page: ``person_page`` over the member characters, plus ``members``."""
+    members = team_members(team, prefixes)
+    if not members:
+        return None
+    data = person_page(("characters",), [m["name"] for m in members],
+                       prefixes=prefixes, user_id=user_id, view=view)
+    if data is None:
+        return None
+    data["name"] = team_name(team) or team
+    data["members"] = members
+    return data
+
+
+def team_issues(team, folder, prefixes=None, user_id=None):
+    members = team_members(team, prefixes)
+    if not members:
+        return []
+    return person_issues(("characters",), [m["name"] for m in members], folder,
+                         prefixes=prefixes, user_id=user_id)
+
+
+def read_team_counts(character_lists):
+    """``[(team, issues read), ...]`` most first: each read issue counts once per team."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT character_key, team_key, team_name FROM character_teams").fetchall() if conn else []
+    by_char = {}
+    for r in rows:
+        by_char.setdefault(r["character_key"], []).append((r["team_key"], r["team_name"]))
+    counts, labels = {}, {}
+    for chars in character_lists or ():
+        teams = {}
+        for ch in chars:
+            for tkey, tname in by_char.get(ch.strip().casefold(), ()):
+                teams.setdefault(tkey, tname)
+        for tkey, tname in teams.items():
+            labels.setdefault(tkey, tname)
+            counts[tkey] = counts.get(tkey, 0) + 1
+    ranked = sorted(counts.items(), key=lambda x: (-x[1], labels[x[0]].casefold()))
+    return [(labels[k], n) for k, n in ranked]
 
 
 # --------------------------------------------------------------------------

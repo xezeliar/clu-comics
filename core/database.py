@@ -567,6 +567,33 @@ def _init_db_locked():
             )
         """)
 
+        # person_art / character_teams: Metron photos and team membership for
+        # the creator/character/team/publisher grids (core/person_art.py).
+        # key is the casefolded name; a character row with a status is also the
+        # marker that its teams were fetched, even when it has none.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS person_art (
+                kind TEXT NOT NULL,
+                key TEXT NOT NULL,
+                name TEXT,
+                metron_id INTEGER,
+                image_file TEXT,
+                status TEXT,
+                checked_at TIMESTAMP,
+                PRIMARY KEY (kind, key)
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS character_teams (
+                character_key TEXT NOT NULL,
+                team_key TEXT NOT NULL,
+                team_name TEXT,
+                team_metron_id INTEGER,
+                PRIMARY KEY (character_key, team_key)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_character_teams_team ON character_teams(team_key)")
+
         # Create rebuild_schedule table (store file index rebuild schedule)
         c.execute("""
             CREATE TABLE IF NOT EXISTS rebuild_schedule (
@@ -7452,6 +7479,64 @@ def get_reading_stats_by_year(year=None, user_id=None):
         return {"total_read": 0, "total_pages": 0, "total_time": 0}
 
 
+def get_read_field_values(field_name, year=None, user_id=None):
+    """Each read issue's values for a field (writer, penciller, characters, publisher).
+
+    One list per read issue, already split by ``split_credit_list`` (which strips
+    "[3258]"-style provider IDs). ``year`` is the user's calendar year, as on the
+    rest of Insights. Returns None on an invalid field or a failed read, so a
+    caller can tell "could not read" from "read nothing".
+    """
+    # Validate field name to prevent SQL injection
+    valid_fields = ["writer", "penciller", "characters", "publisher"]
+    if field_name not in valid_fields:
+        app_logger.warning(f"Invalid field name for reading trends: {field_name}")
+        return None
+
+    try:
+        uid = _resolve_user_id(user_id)
+        # field_name is validated against valid_fields above
+        base = (
+            "SELECT " + field_name + " FROM issues_read"
+            " WHERE user_id = ?"
+            " AND " + field_name + " != '' AND " + field_name + " IS NOT NULL"
+        )
+        with db_conn() as conn:
+            if not conn:
+                return None
+            if year:
+                # read_at is UTC; the year is the user's, as on the rest of Insights.
+                from core.user_time import user_offset_hours
+                shift = f"{round(user_offset_hours() * 60):+d} minutes"
+                rows = conn.execute(
+                    base + " AND strftime('%Y', read_at, ?) = ?", (uid, shift, str(year))
+                ).fetchall()
+            else:
+                rows = conn.execute(base, (uid,)).fetchall()
+        return [split_credit_list(row[0]) for row in rows if row[0]]
+    except Exception as e:
+        app_logger.error(f"Failed to get reading trends for {field_name}: {e}")
+        return None
+
+
+def count_read_values(value_lists):
+    """``[(label, count), ...]`` most first, counting every occurrence.
+
+    Keyed case-insensitively (keeping the first spelling seen) because each
+    entry links to a page that matches COLLATE NOCASE -- a case-split count
+    here would disagree with the number of comics the user then sees.
+    """
+    counts = {}
+    labels = {}
+    for items in value_lists or ():
+        for item in items:
+            key = item.casefold()
+            labels.setdefault(key, item)
+            counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+    return [(labels[key], count) for key, count in ranked]
+
+
 def get_reading_trends(field_name, year=None, limit=10, user_id=None):
     """
     Get top values for a metadata field (writer, penciller, characters, publisher).
@@ -7465,63 +7550,9 @@ def get_reading_trends(field_name, year=None, limit=10, user_id=None):
     Returns:
         List of dicts: [{'name': 'Batman', 'count': 42}, ...]
     """
-    # Validate field name to prevent SQL injection
-    valid_fields = ["writer", "penciller", "characters", "publisher"]
-    if field_name not in valid_fields:
-        app_logger.warning(f"Invalid field name for reading trends: {field_name}")
-        return []
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return []
-
-        uid = _resolve_user_id(user_id)
-        c = conn.cursor()
-
-        # Query all non-empty values for the field
-        # field_name is validated against valid_fields above
-        base = (
-            "SELECT " + field_name + " FROM issues_read"
-            " WHERE user_id = ?"
-            " AND " + field_name + " != '' AND " + field_name + " IS NOT NULL"
-        )
-        if year:
-            # read_at is UTC; the year is the user's, as on the rest of Insights.
-            from core.user_time import user_offset_hours
-            shift = f"{round(user_offset_hours() * 60):+d} minutes"
-            c.execute(base + " AND strftime('%Y', read_at, ?) = ?", (uid, shift, str(year)))
-        else:
-            c.execute(base, (uid,))
-
-        rows = c.fetchall()
-        conn.close()
-
-        # Count occurrences of each value (splitting comma-separated).
-        # split_credit_list strips "[3258]"-style provider IDs, so a person
-        # counts once even if issues_read hasn't been backfilled yet.
-        #
-        # Keyed case-insensitively (keeping the first spelling seen) because
-        # each entry links straight to /browse/<field>/<name>, which matches
-        # COLLATE NOCASE — a case-split count here would disagree with the
-        # number of comics the user then sees.
-        counts = {}
-        labels = {}
-        for row in rows:
-            value = row[0]
-            if value:
-                for item in split_credit_list(value):
-                    key = item.casefold()
-                    labels.setdefault(key, item)
-                    counts[key] = counts.get(key, 0) + 1
-
-        # Sort by count descending and return top N
-        sorted_items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [{"name": labels[key], "count": count} for key, count in sorted_items]
-
-    except Exception as e:
-        app_logger.error(f"Failed to get reading trends for {field_name}: {e}")
-        return []
+    values = get_read_field_values(field_name, year=year, user_id=user_id)
+    ranked = count_read_values(values)[:limit]
+    return [{"name": name, "count": count} for name, count in ranked]
 
 
 # Browse-by-metadata categories. writer/penciller/characters are answered from

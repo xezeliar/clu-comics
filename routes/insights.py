@@ -6,9 +6,9 @@ the re-read (``/api/backfill-reading-metadata`` is in
 login-exempt for the Homepage widget.
 """
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request, url_for
 
-from core import insights
+from core import insights, person_art
 from core.app_logging import app_logger
 from core.database import current_user_id
 
@@ -21,6 +21,41 @@ def reading_overview():
     if data is None:
         return jsonify({"success": False, "error": "Reading data unavailable"}), 500
     return jsonify({"success": True, **data})
+
+
+# section -> (person_art kind, detail endpoint or None for publishers)
+_WHO_LINKS = {
+    "teams": ("team", "creators.team_page"),
+    "characters": ("character", "creators.character_page"),
+    "writers": ("creator", "creators.creator_page"),
+    "publishers": ("publisher", None),
+}
+
+
+@insights_bp.route("/api/insights/who")
+def who_you_read():
+    """Teams, Characters, Writers and Publishers the user read, with photos.
+
+    Under /api/insights but NOT login-exempt: routes/auth.py exempts the
+    Homepage widget's exact path only, since this is per-user reading data.
+    """
+    raw_year = (request.args.get("year") or "all").strip()
+    year = int(raw_year) if raw_year.isdigit() else None
+    limit = max(1, min(request.args.get("limit", 8, type=int) or 8, 100))
+    data = insights.get_who_you_read(year=year)
+    out = {}
+    for section, ranked in data.items():
+        kind, endpoint = _WHO_LINKS[section]
+        top = ranked[:limit]
+        art = person_art.art_urls(kind, [name for name, _ in top])
+        out[section] = {"total": len(ranked), "items": [{
+            "name": name,
+            "count": count,
+            "art": art.get(name),
+            "href": (url_for(endpoint, name=name) if endpoint else
+                     url_for("collection.browse_by_metadata", category="publisher", name=name)),
+        } for name, count in top]}
+    return jsonify(out)
 
 
 @insights_bp.route("/api/backfill-reading-metadata", methods=["POST"])
