@@ -2047,7 +2047,8 @@ function fmInit() {
     if (!menu.hidden && !menu.contains(ev.target) && !(fmMenuBack && fmMenuBack.contains(ev.target))) fmCloseMenu(false);
   });
   window.addEventListener('resize', () => fmCloseMenu(false));
-  document.addEventListener('scroll', () => fmCloseMenu(false), true);
+  // Capture phase sees the menu's own scroll too; scrolling the menu must not close it.
+  document.addEventListener('scroll', ev => { if (!menu.contains(ev.target)) fmCloseMenu(false); }, true);
 
   // The shortcuts reach the last-used pane when nothing else has the focus.
   document.addEventListener('keydown', ev => {
