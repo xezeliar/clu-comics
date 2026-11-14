@@ -17,11 +17,11 @@ services:
             ## update the line below to map to your library.
             ## '/data' is the default library path. Any other path (e.g. '/comics')
             ## also works once it is set under Settings -> Libraries.
-            - 'D:/clu-comics/Comics:/data/comics'
+            - '/Users/theerawee.ph/Desktop/personalProject/clu-comics/Comics:/data/comics'
             ## Additional folder if you want to use Folder Monitoring.
-            - 'D:/clu-comics/Downloads:/downloads'
+            - '/Users/theerawee.ph/Desktop/personalProject/clu-comics/Downloads:/downloads'
             - 'config-volume:/config'
-            - 'D:/clu-comics/cache:/cache' # Maps local folder for thumbnail cache (the SQLite DB lives in /config)
+            - '/Users/theerawee.ph/Desktop/personalProject/clu-comics/cache:/cache' # Maps local folder for thumbnail cache (the SQLite DB lives in /config)
         environment:
             - FLASK_ENV=development
             - MONITOR=yes

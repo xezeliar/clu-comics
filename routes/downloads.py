@@ -230,7 +230,12 @@ def _missing_issue_numbers(series_name, issue_num, year=None):
         ]
         if str(issue_num) in missing:
             found.append(missing)
-    return found[0] if len(found) == 1 else None
+    if len(found) != 1:
+        app_logger.info(
+            f"Split-post grab for '{series_name}' #{issue_num}: "
+            f"{len(found)} mapped series are missing it, queueing its own part only")
+        return None
+    return found[0]
 
 
 @downloads_bp.route('/api/getcomics/download', methods=['POST'])
