@@ -2656,6 +2656,9 @@ function bulkFetchMetadata() {
     BulkMetadataReview.startJob({
         scope: 'files',
         paths: filePaths,
+        // An explicit selection is a request to (re)tag these files, like the
+        // single-file fetch; skipping already-tagged ones made it a silent no-op.
+        overwrite_existing: true,
         onDone: function () {
             clearFileSelection();
             refreshCurrentView(true, true);
