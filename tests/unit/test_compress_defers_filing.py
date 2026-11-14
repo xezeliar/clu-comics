@@ -154,3 +154,11 @@ class TestApiWaitsForTheCompress:
 
     def test_it_asks_about_the_target_folder(self, waiter):
         assert 'target_dir = get_target_dir() or "/downloads/processed"' in waiter
+
+    def test_a_pending_archive_keeps_watch_busy(self, waiter):
+        # .zip/.rar are on IGNORED_EXTENSIONS but the monitor unpacks them; a
+        # pack's comics reach TARGET only afterwards, so the pass must wait.
+        archive = waiter.index("in ARCHIVE_EXTS")
+        ignored = waiter.index("endswith(ext) for ext in ignored")
+        assert archive < ignored
+        assert "monitor_enabled()" in waiter
