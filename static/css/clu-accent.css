@@ -1,0 +1,84 @@
+/*
+ * Accent colour for File Manager, Reading Lists, Download Status and Insights.
+ * Colour only: no rule here sets size, spacing, display or position, so the
+ * layouts are untouched. Every colour is a Bootstrap theme variable (fills use
+ * --bs-primary...; text uses the *-text-emphasis pair, which Bootstrap adapts
+ * per colour mode), so it follows all 32 themes. Load it after the page's own
+ * stylesheet: it overrides at equal specificity by order.
+ */
+
+/* ---- Page header (all four pages) ------------------------------------ */
+
+.clu-page-title > .bi { color: var(--bs-primary); }
+.clu-page-stats b { color: var(--bs-primary-text-emphasis); }
+
+/* ---- File Manager ------------------------------------------------------ */
+
+/* Source reads blue, Destination green; the top edge is an inset shadow so the
+   pane box does not grow. The active-pane ring (box-shadow) wins when set. */
+.fm-pane[data-panel="source"]      { --fm-hue: var(--bs-primary); }
+.fm-pane[data-panel="destination"] { --fm-hue: var(--bs-success); }
+.fm-pane:not(.is-active) { box-shadow: inset 0 3px 0 var(--fm-hue); }
+.fm-pane.is-active { border-color: var(--fm-hue); box-shadow: inset 0 3px 0 var(--fm-hue), 0 0 0 1px var(--fm-hue); }
+.fm-lbl { color: color-mix(in srgb, var(--fm-hue) 75%, var(--bs-emphasis-color)); }
+
+.fm-row.is-dir .fm-ty { color: var(--bs-warning); }
+.fm-row.is-file .fm-ty { color: var(--bs-info); }
+.fm-row.is-file .fm-ty.bi-file-earmark-zip { color: var(--bs-success); }
+.fm-row.is-dir .fm-nm { color: var(--bs-warning-text-emphasis); }
+.fm-row:hover { background: color-mix(in srgb, var(--fm-hue) 7%, var(--bs-tertiary-bg)); }
+.fm-row[aria-selected="true"] { background: color-mix(in srgb, var(--fm-hue) 16%, var(--bs-body-bg)); }
+.fm-trash-count { background: var(--bs-danger); color: #fff; }
+.fm-crumb [aria-current] { color: var(--bs-primary-text-emphasis); }
+
+/* ---- Reading Lists ------------------------------------------------------ */
+
+/* Each card takes the next theme colour; it tints the cover placeholder and the
+   hovered title. Real covers are untouched. */
+.rl-card:nth-child(6n+1) { --rl-hue: var(--bs-primary); }
+.rl-card:nth-child(6n+2) { --rl-hue: var(--bs-success); }
+.rl-card:nth-child(6n+3) { --rl-hue: var(--bs-warning); }
+.rl-card:nth-child(6n+4) { --rl-hue: var(--bs-info); }
+.rl-card:nth-child(6n+5) { --rl-hue: var(--bs-danger); }
+.rl-card:nth-child(6n+6) { --rl-hue: var(--bs-secondary); }
+.rl-ph {
+    background: linear-gradient(160deg, color-mix(in srgb, var(--rl-hue, var(--bs-primary)) 28%, var(--bs-body-bg)), color-mix(in srgb, var(--rl-hue, var(--bs-primary)) 8%, var(--bs-body-bg)));
+    border-color: color-mix(in srgb, var(--rl-hue, var(--bs-primary)) 45%, var(--bs-border-color));
+}
+.rl-ph .bi { color: var(--rl-hue, var(--bs-primary)); }
+.rl-card:hover .rl-t a { color: color-mix(in srgb, var(--rl-hue, var(--bs-primary)) 70%, var(--bs-emphasis-color)); }
+.rl-m b, .rl-stat b { color: var(--bs-primary-text-emphasis); }
+.rl-bar .r, .rl-run .r, .rl-key .r { background: var(--bs-primary); }
+.rl-bar .o, .rl-run .o, .rl-key .o { background: var(--bs-success); }
+.tag-pill { background: color-mix(in srgb, var(--bs-primary) 14%, var(--bs-body-bg)); color: var(--bs-primary-text-emphasis); border-color: color-mix(in srgb, var(--bs-primary) 35%, transparent); }
+
+/* ---- Download Status ---------------------------------------------------- */
+
+#statusTabs .nav-link.active { color: var(--bs-primary-text-emphasis); border-top: 0; box-shadow: inset 0 2px 0 var(--bs-primary); }
+#statusTabs .nav-link .bi { color: var(--bs-primary); }
+.dl-g[data-g="active"] { --dl-hue: var(--bs-primary); }
+.dl-g[data-g="attn"]   { --dl-hue: var(--bs-danger); }
+.dl-g[data-g="wait"]   { --dl-hue: var(--bs-warning); }
+.dl-g[data-g="done"]   { --dl-hue: var(--bs-success); }
+.dl-g > header { border-bottom: 2px solid color-mix(in srgb, var(--dl-hue, var(--bs-border-color)) 55%, transparent); }
+.dl-g h3 { color: color-mix(in srgb, var(--dl-hue, var(--bs-body-color)) 75%, var(--bs-emphasis-color)); }
+.dl-g h3 span { color: var(--dl-hue, var(--bs-secondary-color)); }
+#downloads-pane .progress-bar { background-color: var(--dl-hue, var(--bs-primary)); }
+.dl-row:hover { background: color-mix(in srgb, var(--dl-hue, var(--bs-primary)) 6%, var(--bs-tertiary-bg)); }
+.dl-grip:hover { color: var(--bs-primary); }
+.dl-g[data-g="attn"] .dl-name { color: var(--bs-danger-text-emphasis); }
+
+/* ---- Insights ------------------------------------------------------------ */
+
+/* Every chart reads --clu-select, so a section sets its own hue once. */
+.in-sec:nth-of-type(1) { --in-hue: var(--bs-primary); }
+.in-sec:nth-of-type(2) { --in-hue: var(--bs-success); }
+.in-sec { border-top-color: color-mix(in srgb, var(--in-hue, var(--bs-primary)) 60%, var(--bs-border-color)); --clu-select: color-mix(in srgb, var(--in-hue, var(--bs-primary)) 80%, var(--bs-emphasis-color)); }
+.in-sec h2 { color: color-mix(in srgb, var(--in-hue, var(--bs-primary)) 75%, var(--bs-emphasis-color)); }
+.in-lede b, .in-facts b, .in-facts dd { color: color-mix(in srgb, var(--in-hue, var(--bs-primary)) 70%, var(--bs-emphasis-color)); }
+.in-cols i { background: var(--bs-info); }
+.in-share i:nth-child(1), .in-share-k li:nth-child(1)::before { background: var(--bs-primary); }
+.in-share i:nth-child(2), .in-share-k li:nth-child(2)::before { background: var(--bs-success); }
+.in-share i:nth-child(3), .in-share-k li:nth-child(3)::before { background: var(--bs-warning); }
+.in-rank li:nth-child(3n+2) .b i { background: var(--bs-info); }
+.in-rank li:nth-child(3n+3) .b i { background: var(--bs-warning); }

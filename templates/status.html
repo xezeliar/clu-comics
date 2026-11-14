@@ -5,6 +5,10 @@
 
 {% block title %}Download Status{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/clu-accent.css') }}">
+{% endblock %}
+
 {% block content %}
 <style>
   /* Downloads: one list, grouped by what you can do (see the script below). */
