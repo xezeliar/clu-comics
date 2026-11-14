@@ -618,6 +618,13 @@ def process_download(task):
                     budget = watch_drain_timeout_seconds(
                         get_int("RECONCILE_INTERVAL_MINUTES")
                     )
+                    # .zip/.rar ride on IGNORED_EXTENSIONS, but the monitor
+                    # unpacks them -- and a pack's comics reach TARGET only
+                    # after that. Ignoring them read WATCH as empty while the
+                    # pack was still waiting, so the one filing pass ran before
+                    # any comic arrived and the pack stayed in TARGET.
+                    from core.download_utils import ARCHIVE_EXTS, monitor_enabled
+                    count_archives = monitor_enabled()
                     for _ in range(budget // 10):
                         time.sleep(10)
                         total = 0
@@ -629,6 +636,9 @@ def process_download(task):
                                        if not is_hidden(os.path.join(root, d))]
                             for f in files:
                                 if f.startswith('.') or f.startswith('_'):
+                                    continue
+                                if count_archives and os.path.splitext(f)[1].lower() in ARCHIVE_EXTS:
+                                    total += 1
                                     continue
                                 if any(f.lower().endswith(ext) for ext in ignored):
                                     continue
