@@ -6,6 +6,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/insights.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/people-tiles.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -30,7 +31,9 @@
         {% endcall %}
     {% else %}
     <div class="in" id="insights" data-home="{{ url_for('index') }}" data-timeline="{{ url_for('timeline') }}"
-         data-wanted="{{ url_for('series.wanted') }}" data-collection="{{ url_for('collection.collection') }}">
+         data-wanted="{{ url_for('series.wanted') }}" data-collection="{{ url_for('collection.collection') }}"
+         data-who="{{ url_for('insights.who_you_read') }}" data-teams="{{ url_for('creators.teams_index') }}"
+         data-characters="{{ url_for('creators.characters_index') }}" data-creators="{{ url_for('creators.creators_index') }}">
         <section class="in-sec" aria-labelledby="inReadingH">
             <header><h2 id="inReadingH">Your reading</h2><div id="inYears"></div></header>
             <div id="inReading" class="in-body"><p class="text-body-secondary">Loading your reading&hellip;</p></div>

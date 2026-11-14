@@ -5,7 +5,8 @@
 {% from 'partials/publisher_dot.html' import publisher_dot with context %}
 
 {% set is_creator = kind == 'creators' %}
-{% set kind_label = 'Creator' if is_creator else 'Character' %}
+{% set kind_label = {'creators': 'Creator', 'characters': 'Character', 'teams': 'Team'}[kind] %}
+{% set index_endpoint = {'creators': 'creators.creators_index', 'characters': 'creators.characters_index', 'teams': 'creators.teams_index'}[kind] %}
 {% block title %}{{ p.name }} - {{ kind_label }} - Comic Library{% endblock %}
 
 {% block extra_css %}
@@ -52,13 +53,13 @@
 
 {% block content %}
 <div class="person-page">
-    {% call(slot) page_header(p.name, 'bi-pencil' if is_creator else 'bi-people',
+    {% call(slot) page_header(p.name, 'bi-pencil' if is_creator else ('bi-people-fill' if kind == 'teams' else 'bi-people'),
                               subtitle=(p.series | length) ~ ' series · ' ~ p.issues ~ ' issues owned · ' ~ p.read ~ ' read'
                                        ~ (' · first seen ' ~ p.first_year if p.first_year else '')
                                        ~ (' · last read ' ~ p.last_read[:10] if p.last_read else ''),
                               stats=[]) %}
         {% if slot == 'crumbs' %}
-            <li class="breadcrumb-item"><a href="{{ url_for('creators.creators_index' if is_creator else 'creators.characters_index') }}">{{ kind_label }}s</a></li>
+            <li class="breadcrumb-item"><a href="{{ url_for(index_endpoint) }}">{{ kind_label }}s</a></li>
         {% elif slot == 'actions' and is_creator %}
             <button class="btn btn-sm {{ 'btn-outline-secondary' if follow else 'btn-primary' }}" id="followBtn"
                     data-bs-toggle="modal" data-bs-target="#followModal">
@@ -131,7 +132,17 @@
         {{ empty_state('Nothing to show', 'Every issue here is read.', 'bi-check2-all', tone='success') }}
     {% endif %}
 
-    {% if p.often_with %}
+    {% if kind == 'teams' and p.members %}
+    <h2 class="person-section">Members you own</h2>
+    <div class="clu-filter-options clu-filter-scroll">
+        {% for m in p.members %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="{{ url_for('creators.character_page', name=m.name) }}">{{ m.name }}<span class="clu-filter-count">{{ m.n }}</span></a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if p.often_with and kind != 'teams' %}
     <h2 class="person-section">{{ 'Works often with' if is_creator else 'Often appears with' }}</h2>
     <div class="clu-filter-options clu-filter-scroll">
         {% for o in p.often_with %}
@@ -197,7 +208,7 @@
 <script src="{{ url_for('static', filename='js/reader.js') }}"></script>
 <script>
 (function () {
-    const apiUrl = {{ (url_for('creators.api_creator_issues', name=p.name) if is_creator else url_for('creators.api_character_issues', name=p.name)) | tojson }};
+    const apiUrl = {{ (url_for('creators.api_creator_issues', name=p.name) if is_creator else url_for('creators.api_team_issues' if kind == 'teams' else 'creators.api_character_issues', name=p.name)) | tojson }};
     const role = {{ (role or '') | tojson }};
     const grid = document.querySelector('.person-grid');
     if (!grid) return;

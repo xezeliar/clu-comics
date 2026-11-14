@@ -1,0 +1,80 @@
+/*
+ * The photo tile: Creators, Characters and Teams index pages and the Insights
+ * "Who you read" sections (partials/person_tile.html, static/js/insights.js).
+ * Theme variables only. A tile with no cached image keeps the same box and
+ * shows the initials, so Metron being down changes no layout.
+ */
+
+.pt-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+    gap: 1.25rem 1rem;
+}
+.pt-grid > li { min-width: 0; }
+.pt-grid > li[hidden] { display: none; }
+
+.pt {
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--bs-border-radius);
+    transition: transform .2s cubic-bezier(.16, 1, .3, 1);
+}
+@media (hover: hover) { .pt:hover { transform: translateY(-4px); } }
+.pt:active { transform: scale(.97); }
+.pt:hover, .pt:focus-visible { color: inherit; }
+.pt:focus-visible { outline: 2px solid var(--clu-select, var(--bs-primary)); outline-offset: 3px; }
+
+.pt-img {
+    aspect-ratio: 3 / 4;
+    border-radius: var(--bs-border-radius-lg);
+    overflow: clip;
+    display: grid;
+    place-items: center;
+    container-type: inline-size;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+}
+.pt-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pt-ini { font-weight: 600; font-size: clamp(1rem, 30cqw, 2rem); letter-spacing: .03em; }
+
+/* A publisher logo sits whole on white; it is never cropped. */
+.pt-pub .pt-img { aspect-ratio: 4 / 3; background: #fff; }
+.pt-pub .pt-img img { object-fit: contain; padding: .75rem; }
+.pt-pub .pt-ini { color: #5a6169; }
+
+.pt-n {
+    font-size: .9rem;
+    font-weight: 500;
+    color: var(--bs-emphasis-color);
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.pt-c {
+    font-size: .75rem;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+    margin-top: -.25rem;
+}
+
+/* Insights: one section per type inside "Who you read". */
+.in-who { display: flex; flex-direction: column; gap: .75rem; }
+.in-who + .in-who { margin-top: 1.5rem; }
+.in-who > header { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; }
+.in-who h4 { margin: 0 auto 0 0; font-size: 1.05rem; font-weight: 600; }
+.in-who h4 span { font-weight: 400; font-size: .875rem; color: var(--bs-secondary-color); margin-left: .4rem; }
+
+@media (max-width: 575.98px) {
+    .pt-grid { grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); gap: 1rem .75rem; }
+}

@@ -1,0 +1,28 @@
+{#
+  The photo tile for Creators, Characters and Teams (static/css/people-tiles.css).
+
+    {% from 'partials/person_tile.html' import person_tile %}
+    {{ person_tile(person, url_for(detail, name=person.name)) }}
+
+  `person.art` is a URL into the server's Metron image cache, or None: the tile
+  then shows the initials in the same box, so a missing image (or Metron being
+  down) never changes the layout. The image is decorative; the link's name is
+  the person's name and the issue count. static/js/insights.js draws the same
+  markup, so change one and change the other.
+#}
+{% macro person_initials(name) -%}
+{{- ((name | replace('The ', '', 1)).replace('-', ' ').split()[:2] | map('first') | join) | upper -}}
+{%- endmacro %}
+
+{% macro person_tile(person, href) -%}
+<li data-name="{{ person.name }}">
+  <a class="pt" href="{{ href }}">
+    <span class="pt-img" aria-hidden="true">
+      {%- if person.art %}<img src="{{ person.art }}" alt="" loading="lazy" decoding="async">
+      {%- else %}<span class="pt-ini">{{ person_initials(person.name) }}</span>{% endif -%}
+    </span>
+    <span class="pt-n" title="{{ person.name }}">{{ person.name }}</span>
+    <span class="pt-c">{{ '{:,}'.format(person.n) }} issue{{ 's' if person.n != 1 }}</span>
+  </a>
+</li>
+{%- endmacro %}

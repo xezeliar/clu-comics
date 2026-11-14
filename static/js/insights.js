@@ -15,7 +15,8 @@
   var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   var MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  var TABS = [['writer', 'Writers'], ['penciller', 'Artists'], ['characters', 'Characters'], ['publisher', 'Publishers']];
+  // Who you read: one photo-tile section per type, in this order (key = /api/insights/who).
+  var WHO = [['teams', 'Teams', 'teams'], ['characters', 'Characters', 'characters'], ['writers', 'Writers', 'creators'], ['publishers', 'Publishers', null]];
 
   var fmt = function (n) { return Number(n || 0).toLocaleString(); };
   var esc = function (s) {
@@ -41,7 +42,7 @@
   var sum = function (o) { return Object.keys(o).reduce(function (a, k) { return a + o[k]; }, 0); };
   var lvl = function (n, max) { return n ? 'in-l' + Math.min(4, Math.ceil(n / max * 4)) : ''; };
 
-  var state = { data: null, year: null, tab: 'writer', all: {}, who: {}, cont: null, recent: null, error: false };
+  var state = { data: null, year: null, all: {}, who: {}, cont: null, recent: null, error: false };
 
   // ── Ranked lists ────────────────────────────────────────────────────────
   // Bars say nothing for one or two names, or for tiny counts: a sentence then.
@@ -159,23 +160,36 @@
     }
     return h + '</div>';
   }
+  var issuesOf = function (n) { return fmt(n) + (n === 1 ? ' issue' : ' issues'); };
+  var initials = function (n) {
+    return String(n).replace(/^The /, '').split(/[\s-]+/).filter(Boolean).slice(0, 2).map(function (w) { return w.charAt(0); }).join('').toUpperCase();
+  };
+  // The photo tile (the markup partials/person_tile.html draws for the index pages).
+  function tile(it, pub) {
+    var img = it.art ? '<img src="' + esc(it.art) + '" alt="" loading="lazy" decoding="async">' : '<span class="pt-ini">' + esc(initials(it.name)) + '</span>';
+    return '<li><a class="pt' + (pub ? ' pt-pub' : '') + '" href="' + esc(it.href) + '"><span class="pt-img" aria-hidden="true">' + img +
+      '</span><span class="pt-n">' + esc(it.name) + '</span><span class="pt-c">' + issuesOf(it.count) + '</span></a></li>';
+  }
   function whoList(y) {
-    var key = state.tab + ':' + y, list = state.who[key];
-    var label = TABS.filter(function (t) { return t[0] === state.tab; })[0][1].toLowerCase();
-    if (list === undefined) return '<p class="text-body-secondary small">Loading&hellip;</p>';
-    if (list === null) return '<p class="text-danger small">Could not load the ' + label + '.</p>';
-    if (!list.length) return '<p class="text-body-secondary small">No ' + label + ' recorded for these issues.</p>';
-    var field = state.tab;
-    return rank('who', list, 10, function (name) { return '/browse/' + field + '/' + encodeURIComponent(name); });
+    var d = state.who[y];
+    if (d === undefined) return '<p class="text-body-secondary small">Loading&hellip;</p>';
+    if (d === null) return '<p class="text-danger small">Could not load who you read.</p>';
+    var out = WHO.map(function (t) {
+      var sec = d[t[0]];
+      if (!sec || !sec.items || !sec.items.length) return '';
+      var all = t[2] && URLS[t[2]] ? '<a class="in-lk" href="' + esc(URLS[t[2]]) + '">See all ' + t[1].toLowerCase() + '</a>' : '';
+      return '<section class="in-who" aria-label="' + t[1] + '"><header><h4>' + t[1] + '<span>' + fmt(sec.total) + ' in your library</span></h4>' + all +
+        '</header><ul class="pt-grid">' + sec.items.map(function (it) { return tile(it, t[0] === 'publishers'); }).join('') + '</ul></section>';
+    }).join('');
+    return out || '<p class="text-body-secondary small">No teams, characters, writers or publishers recorded for these issues.</p>';
   }
   function loadWho(y) {
-    var key = state.tab + ':' + y;
-    if (key in state.who) return;
-    state.who[key] = undefined;
-    fetch('/api/reading-trends/' + state.tab + '?limit=50' + (y === 'all' ? '' : '&year=' + y))
+    if (y in state.who) return;
+    state.who[y] = undefined;
+    fetch(URLS.who + '?limit=8' + (y === 'all' ? '' : '&year=' + y))
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then(function (list) { state.who[key] = list; })
-      .catch(function () { state.who[key] = null; })
+      .then(function (d) { state.who[y] = d; })
+      .catch(function () { state.who[y] = null; })
       .then(renderReading);
   }
 
@@ -224,9 +238,7 @@
       '<div><p class="in-lede"><b>' + fmt(t.issues) + '</b> ' + (t.issues === 1 ? 'issue' : 'issues') + ', <b>' + fmt(t.pages) +
       '</b> pages and <b>' + hm(t.seconds) + '</b> of reading ' + label + '.</p>' + run + '</div>' +
       '<div>' + cal + '</div>' + strips() +
-      '<div class="in-solo"><h3>Who you read</h3><div class="in-tabs" role="group" aria-label="Rank by">' + TABS.map(function (tb) {
-        return '<button type="button" class="btn btn-sm btn-outline-secondary" data-in-tab="' + tb[0] + '" aria-pressed="' + (tb[0] === state.tab) + '">' + tb[1] + '</button>';
-      }).join('') + '</div>' + whoList(y) + gap + '</div>';
+      '<div class="in-solo"><h3>Who you read</h3>' + whoList(y) + gap + '</div>';
     var w = box.querySelector('.in-cal-wrap');
     if (w) w.scrollLeft = w.scrollWidth;
   }
@@ -351,10 +363,9 @@
 
   document.addEventListener('click', function (e) {
     if (e.target.closest('[data-in-backfill]')) { e.preventDefault(); startBackfill(); return; }
-    var t = e.target.closest('#insights [data-in-yr], #insights [data-in-tab], #insights [data-in-all]');
+    var t = e.target.closest('#insights [data-in-yr], #insights [data-in-all]');
     if (!t) return;
     if (t.dataset.inYr) { state.year = t.dataset.inYr; renderReading(); loadWho(state.year); }
-    else if (t.dataset.inTab) { state.tab = t.dataset.inTab; renderReading(); loadWho(state.year); }
     else {
       var k = t.dataset.inAll;
       state.all[k] = !state.all[k];

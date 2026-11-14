@@ -8286,6 +8286,15 @@ def scheduled_comicvine_db_update():
     run_scheduled_update()
 
 
+def scheduled_person_art_sweep():
+    """Wrapper. The body is core.person_art.run_sweep (Metron photos and teams
+    for the creator/character/team/publisher grids). Quiet while Metron is
+    unconfigured, paused or down."""
+    from core.person_art import run_sweep
+
+    run_sweep(app)
+
+
 def start_background_services():
     """Start all background services. Called once on app startup."""
     app_logger.info("Flask app is starting up...")
@@ -8334,6 +8343,17 @@ def start_background_services():
         id="comicvine_db_update",
         name="ComicVine Local DB Update",
         next_run_time=datetime.now() + timedelta(minutes=15),
+        replace_existing=True,
+    )
+
+    # Person art: a small batch of Metron lookups (photos, character teams)
+    # per run. The index pages also kick one, debounced, off-request.
+    app_state.scheduler.add_job(
+        scheduled_person_art_sweep,
+        trigger=IntervalTrigger(minutes=30, jitter=120),
+        id="person_art_sweep",
+        name="Creator & Character Photos",
+        next_run_time=datetime.now() + timedelta(minutes=10),
         replace_existing=True,
     )
 
