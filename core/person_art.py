@@ -18,8 +18,8 @@ Things that look arbitrary and are not:
   usable teams. The character's own row (any status) marks its teams as
   fetched, so a character on no team is not asked again.
 * **Metron down or paused is a quiet no-op**: ``paused_reason()`` stops a sweep
-  before it starts, a failed call is stored as ``error`` and retried after a
-  day, a clean "not on Metron" as ``missing`` and retried after 30 days.
+  before it starts, a failed call is stored as ``error`` and retried after 15 minutes (a detail-page open is the only caller), a
+  clean "not on Metron" as ``missing`` and retried after 30 days.
 * **Files are written through a temp file + ``os.replace`` in the shard dir**,
   never saved onto the cache path (see the thumbnail cache's #548 notes).
 """
@@ -44,7 +44,7 @@ _DETAIL_METHOD = {"creator": "creator", "character": "character",
 CREDIT_KINDS = ("writer", "penciller", "inker", "colorist", "letterer", "coverartist")
 
 MAX_EDGE = 400
-ERROR_RETRY = timedelta(days=1)
+ERROR_RETRY = timedelta(minutes=15)
 MISSING_RETRY = timedelta(days=30)
 
 
@@ -141,6 +141,13 @@ def _write_image(kind, key, data):
 # Resolve one name
 # --------------------------------------------------------------------------
 
+def _fail(kind, name, metron_id, why):
+    """Store ``error`` and say why: at most one line per name per retry window."""
+    app_logger.warning(f"Person art: {kind} {name!r} (Metron id {metron_id}): {why}")
+    _save(kind, name, metron_id, "error")
+    return "error"
+
+
 def resolve(kind, name, api, fetch_image):
     """Look one name up on Metron and store what was found. Returns the status.
 
@@ -156,8 +163,7 @@ def resolve(kind, name, api, fetch_image):
     if metron_id is None:
         results = getattr(api, _LIST_METHOD[kind])({"name": name})
         if results is None:
-            _save(kind, name, None, "error")
-            return "error"
+            return _fail(kind, name, None, "Metron search request failed")
         match = next((r for r in results if key_for(getattr(r, "name", "")) == key), None)
         if match is None:
             _save(kind, name, None, "missing")
@@ -166,8 +172,7 @@ def resolve(kind, name, api, fetch_image):
 
     detail = getattr(api, _DETAIL_METHOD[kind])(metron_id)
     if detail is None:
-        _save(kind, name, metron_id, "error")
-        return "error"
+        return _fail(kind, name, metron_id, "Metron detail request failed")
     if kind == "character":
         _save_teams(name, getattr(detail, "teams", None) or [])
 
@@ -177,14 +182,11 @@ def resolve(kind, name, api, fetch_image):
         return "missing"
     data = fetch_image(str(url))
     if not data:
-        _save(kind, name, metron_id, "error")
-        return "error"
+        return _fail(kind, name, metron_id, f"image download failed ({url})")
     try:
         image_file = _write_image(kind, key, data)
     except Exception as e:
-        app_logger.debug(f"Person art: could not store image for {kind} {name}: {e}")
-        _save(kind, name, metron_id, "error")
-        return "error"
+        return _fail(kind, name, metron_id, f"could not store image: {e}")
     _save(kind, name, metron_id, "ok", image_file)
     return "ok"
 
