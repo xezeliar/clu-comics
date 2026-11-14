@@ -236,6 +236,22 @@ class TestGetcomicsDownload:
 
     @patch("api.download_queue")
     @patch("api.download_progress", {})
+    @patch("routes.downloads._missing_issue_numbers", return_value=["1", "16", "20"])
+    @patch("models.getcomics.get_download_parts", return_value=SUPERGIRL_PARTS)
+    @patch("routes.downloads.get_setting")
+    def test_split_post_queues_every_part_holding_a_missing_issue(
+            self, mock_config, mock_parts, mock_missing, mock_queue, client):
+        """A mapped series missing #1 and #16+ wants both ranges, not just #1's."""
+        mock_config.return_value = "pixeldrain,download_now,mega"
+        resp = client.post("/api/getcomics/download",
+                           json={"url": "https://getcomics.org/dc/supergirl-vol-4",
+                                 "series": "Supergirl", "issue": "1"})
+        assert resp.status_code == 200
+        urls = [c.args[0]["url"] for c in mock_queue.put.call_args_list]
+        assert urls == ["https://getcomics.org/dls/pd1", "https://getcomics.org/dls/pd2"]
+
+    @patch("api.download_queue")
+    @patch("api.download_progress", {})
     @patch("core.config.is_download_packs_enabled", return_value=False)
     @patch("models.getcomics.get_download_parts", return_value=SUPERGIRL_PARTS)
     @patch("routes.downloads.get_setting")
@@ -805,3 +821,34 @@ class TestFlareSolverrTest:
 
     def test_get_is_not_allowed(self, client):
         assert client.get("/api/config/flaresolverr/test").status_code == 405
+
+
+class TestMissingIssueNumbers:
+    """Which mapped series a search-window grab is for is never guessed."""
+
+    def _run(self, tmp_path, series, issue="1", year=None):
+        from routes import downloads as d
+        issues = [{"number": str(n), "store_date": "2000-01-01"} for n in range(1, 4)]
+        with patch.object(d, "get_all_mapped_series", return_value=series), \
+             patch.object(d, "get_issues_for_series", return_value=issues), \
+             patch.object(d, "get_manual_status_for_series", return_value={"3": 1}), \
+             patch.object(d, "match_issues_to_collection",
+                          return_value={"2": {"found": True}}):
+            return d._missing_issue_numbers("Green Lantern", issue, year)
+
+    def test_returns_missing_issues_of_the_one_matching_series(self, tmp_path):
+        s = [{"id": 1, "name": "Green Lantern", "mapped_path": str(tmp_path),
+              "volume_year": 2005, "year_end": 2011}]
+        assert self._run(tmp_path, s) == ["1"]
+
+    def test_two_same_name_volumes_are_not_guessed(self, tmp_path):
+        s = [{"id": 1, "name": "Green Lantern", "mapped_path": str(tmp_path)},
+             {"id": 2, "name": "Green Lantern", "mapped_path": str(tmp_path)}]
+        assert self._run(tmp_path, s) is None
+
+    def test_year_outside_the_run_rules_a_volume_out(self, tmp_path):
+        s = [{"id": 1, "name": "Green Lantern", "mapped_path": str(tmp_path),
+              "volume_year": 2005, "year_end": 2011},
+             {"id": 2, "name": "Green Lantern", "mapped_path": str(tmp_path),
+              "volume_year": 2018, "year_end": 2021}]
+        assert self._run(tmp_path, s, year="2006") == ["1"]
