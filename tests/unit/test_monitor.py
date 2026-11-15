@@ -59,11 +59,29 @@ def _write(path, content=b"comic-bytes"):
 
 
 def _moved_path(target_dir, name):
-    """Where _move_file lands a file: it runs clean_directory_name over the
-    destination dir. (In pytest temp paths that rewrites underscores to spaces,
-    so we must mirror it rather than assume the raw path.)"""
+    """Where _move_file lands a file. Only folders below TARGET are cleaned, and
+    every caller passes TARGET or an already-clean folder under it."""
+    return os.path.join(target_dir, name)
+
+
+def test_target_dir_name_is_never_cleaned(handler, tmp_path):
+    """TARGET is the user's path: /downloads/my_comics must not become a new
+    /downloads/my comics. Only folders below TARGET are cleaned."""
+    h, watch, _ = handler
+    target = tmp_path / "my_comics (2024-05)"
+    target.mkdir()
+    h.target_directory = str(target)
+    h.move_directories = True
+    os.makedirs(os.path.join(watch, "job_folder [scene]"))
+    _write(os.path.join(watch, "job_folder [scene]", "Series 001 (2024).cbz"))
+
+    h.reconcile_directory()
+
+    assert os.listdir(tmp_path / "my_comics (2024-05)") != []
+    assert not (tmp_path / "my comics (2024)").exists()
     from cbz_ops.rename import clean_directory_name
-    return os.path.join(clean_directory_name(target_dir), name)
+    sub = clean_directory_name("job_folder [scene]")
+    assert os.path.exists(os.path.join(str(target), sub, "Series 001 (2024).cbz"))
 
 
 def test_reconcile_directory_moves_stranded_cbz(handler):
@@ -713,8 +731,6 @@ def test_existing_cbz_in_target_skips_conversion(converting_handler):
     h, watch, target, calls = converting_handler
     name = "Series 013 (2024).cbr"
     _write(os.path.join(watch, name))
-    from cbz_ops.rename import clean_directory_name
-    os.makedirs(clean_directory_name(target), exist_ok=True)
     _write(_moved_path(target, "Series 013 (2024).cbz"), b"already-there")
 
     h.reconcile_directory()

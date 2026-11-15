@@ -1052,8 +1052,14 @@ class DownloadCompleteHandler(FileSystemEventHandler):
 
         # Apply cleaning to the directory portion of target_path
         # This cleans the folder names (as per our directory cleaning rules)
+        # Only the folders below TARGET: TARGET is the user's configured path, and
+        # cleaning it turned /downloads/my_comics into a new /downloads/my comics.
         target_dir = os.path.dirname(target_path)
-        cleaned_target_dir = clean_directory_name(target_dir)
+        rel_dir = os.path.relpath(target_dir, self.target_directory)
+        if rel_dir == "." or rel_dir == ".." or rel_dir.startswith(".." + os.sep):
+            cleaned_target_dir = target_dir
+        else:
+            cleaned_target_dir = os.path.join(self.target_directory, clean_directory_name(rel_dir))
         # Never let a sub-folder of TARGET keep a comic extension (a download
         # client's job folder named after the requested file).
         if os.path.abspath(cleaned_target_dir) != os.path.abspath(self.target_directory):
