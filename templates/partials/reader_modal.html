@@ -1,21 +1,44 @@
 <div id="comicReaderModal" class="comic-reader-modal" style="display: none;">
     <div class="comic-reader-overlay"></div>
     <div class="comic-reader-container">
-        <div class="comic-reader-header">
-            <div class="comic-reader-title" id="comicReaderTitle">Loading...</div>
-            <div class="comic-reader-progress">
-                <div class="comic-reader-progress-bar">
-                    <div class="comic-reader-progress-fill"></div>
-                </div>
-                <span class="comic-reader-progress-text">0%</span>
+        <div class="comic-reader-header reader-top">
+            <div class="reader-pill reader-title-pill">
+                <div class="comic-reader-title" id="comicReaderTitle">Loading...</div>
+                <div class="reader-subtitle" id="comicReaderSubtitle" hidden></div>
             </div>
             <div class="comic-reader-controls">
-                <span class="comic-reader-page-info" id="comicReaderPageInfo">Page 1 of 1</span>
-                <button aria-label="Save Position" class="btn btn-sm btn-outline-light" id="comicReaderBookmark" title="Save Position">
-                    <i class="bi bi-bookmark text-primary"></i>
+                <button type="button" aria-label="Save position" class="reader-pill reader-round" id="comicReaderBookmark" title="Save position">
+                    <i class="bi bi-bookmark" aria-hidden="true"></i>
                 </button>
-                <button aria-label="Close" class="btn btn-sm btn-outline-light" id="comicReaderClose" title="Close">
-                    <i class="bi bi-x-lg text-light"></i>
+                <button type="button" class="reader-pill reader-round" id="readerViewBtn" aria-expanded="false" aria-controls="readerViewPanel" aria-label="View options" title="View options">
+                    <i class="bi bi-sliders" aria-hidden="true"></i>
+                </button>
+                <div id="readerViewPanel" class="reader-view-panel" role="group" aria-label="View options" hidden>
+                    <div class="reader-view-row" data-row="mode">
+                        <span id="readerViewModeLabel">Layout</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewModeLabel">
+                            <button type="button" data-set="mode" data-v="paged" aria-pressed="false">Pages</button>
+                            <button type="button" data-set="mode" data-v="scroll" aria-pressed="false">Scroll</button>
+                        </div>
+                    </div>
+                    <div class="reader-view-row" data-row="fit">
+                        <span id="readerViewFitLabel">Fit</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewFitLabel">
+                            <button type="button" data-set="fit" data-v="width" aria-pressed="false">Width</button>
+                            <button type="button" data-set="fit" data-v="height" aria-pressed="false">Height</button>
+                        </div>
+                    </div>
+                    <div class="reader-view-row" data-row="turn">
+                        <span id="readerViewTurnLabel">Page turn</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewTurnLabel">
+                            <button type="button" data-set="turn" data-v="slide" aria-pressed="false">Slide</button>
+                            <button type="button" data-set="turn" data-v="turn" aria-pressed="false">Turn</button>
+                            <button type="button" data-set="turn" data-v="none" aria-pressed="false">None</button>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" aria-label="Close reader" class="reader-pill reader-round" id="comicReaderClose" title="Close (Esc)">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
                 </button>
             </div>
         </div>
@@ -23,21 +46,6 @@
             <div class="swiper-wrapper" id="comicReaderWrapper"></div>
             <div class="swiper-button-next"></div>
             <div class="swiper-button-prev"></div>
-        </div>
-        <div id="nextIssueOverlay" class="next-issue-overlay" style="display: none;">
-            <div class="next-issue-panel">
-                <h4>Continue Reading?</h4>
-                <div class="next-issue-thumbnail-container">
-                    <img id="nextIssueThumbnail" src="" alt="Next Issue">
-                </div>
-                <p id="nextIssueName" class="next-issue-name">Next Issue Name</p>
-                <div class="next-issue-buttons">
-                    <button id="nextIssueContinue" class="btn btn-primary">
-                        <i class="bi bi-arrow-right-circle me-1"></i>Continue
-                    </button>
-                    <button id="nextIssueClose" class="btn btn-outline-light text-light">Close</button>
-                </div>
-            </div>
         </div>
         <div id="resumeReadingOverlay" class="resume-reading-overlay" style="display: none;">
             <div class="resume-reading-panel">
@@ -52,21 +60,20 @@
             </div>
         </div>
         <div class="comic-reader-footer">
-            <div class="comic-reader-footer-progress" aria-live="off">
-                <div class="comic-reader-footer-line" role="presentation"><i></i></div>
-                <span id="readerProgressLine"></span>
-            </div>
-            <div class="comic-reader-footer-controls">
-                <button aria-label="Zoom Out (Arrow Down)" class="btn btn-sm btn-outline-light zoom-btn" id="zoomOutBtn" title="Zoom Out (Arrow Down)">
-                    <i class="bi bi-zoom-out text-light"></i>
+            <div class="reader-capsule">
+                <button type="button" aria-label="Zoom out (Arrow Down)" class="reader-round zoom-btn" id="zoomOutBtn" title="Zoom out (Arrow Down)">
+                    <i class="bi bi-zoom-out" aria-hidden="true"></i>
                 </button>
-                <button aria-label="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre" class="btn btn-sm btn-outline-light zoom-btn" id="zoomInBtn" title="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre">
-                    <i class="bi bi-zoom-in text-light"></i>
+                <button type="button" aria-label="Zoom in (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre" class="reader-round zoom-btn" id="zoomInBtn" title="Zoom in (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre">
+                    <i class="bi bi-zoom-in" aria-hidden="true"></i>
                 </button>
-                <select class="form-select form-select-sm page-selector" id="pageSelector">
-                    <option value="0">Page 1</option>
-                </select>
+                <div class="reader-scrub">
+                    <input type="range" class="reader-scrub-range" id="pageScrubber" min="1" max="1" step="1" value="1" aria-label="Page">
+                    <div class="reader-scrub-tip" hidden></div>
+                </div>
+                <span class="reader-count" id="readerProgressLine" aria-live="off"></span>
             </div>
         </div>
+        <div class="reader-hidden-line" aria-hidden="true"><i></i></div>
     </div>
 </div>

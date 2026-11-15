@@ -5,7 +5,7 @@
 // Extracted from collection.js so it can be reused by source_wall and other pages.
 //
 // External contracts:
-//   - window._readerAllItems: Array of {name, path, type, thumbnailUrl?} for next-issue detection
+//   - window._readerAllItems: Array of {name, path, type, thumbnailUrl?} for next issue detection
 //   - window._readerReadIssuesSet: Set of paths already read (optional, for mark-read tracking)
 //   - showError(msg) / showSuccess(msg): toast helpers (optional; errors silently ignored if missing)
 //   - Swiper must be loaded before this script.
@@ -17,7 +17,6 @@ let currentComicPageCount = 0;
 let highestPageViewed = 0;
 let currentComicSiblings = [];  // All comic files in current folder
 let currentComicIndex = -1;     // Index of current comic in siblings
-let nextIssueOverlayShown = false;  // Track if overlay is currently shown
 let savedReadingPosition = null;  // Track saved reading position for current comic
 let readingStartTime = null;      // Start time of current reading session
 let accumulatedTime = 0;          // Total time spent reading prior to this session
@@ -26,7 +25,7 @@ let pageEdgeColors = new Map();   // Cache of extracted edge colors per page ind
 // --- Reading-position bookkeeping -------------------------------------------
 // `highestPageViewed` is EVIDENCE OF READING: the furthest page the user
 // actually paged to. It must never be advanced by a programmatic jump (resume,
-// page-selector), or merely resuming a bookmark near the end would look like
+// scrubber), or merely resuming a bookmark near the end would look like
 // "finished" and destroy that bookmark. `suppressProgressOnNextChange` is set
 // by readerSlideTo() for exactly that reason. The progress bar reads
 // activeIndex instead, so display and evidence stay separate concerns.
@@ -194,8 +193,8 @@ function encodeFilePath(path) {
 /**
  * Is the key going to a control that owns its own keyboard handling?
  *
- * The reader's own page selector is a <select>: swallowing Space there would
- * stop it opening, and swallowing W/A/S/D would break its typeahead. The reader
+ * The reader's page scrubber is a range input: swallowing the arrows there would
+ * stop it stepping (each arrow there is a jump), and other fields own theirs. The reader
  * binds on `document`, so this is the only thing keeping those keys off it.
  *
  * @param {EventTarget} target
@@ -215,12 +214,22 @@ function _isFormControlTarget(target) {
 function handleComicReaderKeydown(e) {
     if (!readerHasView()) return;
     if (_isFormControlTarget(e.target)) return;
+    // Space on a keyboard-focused toolbar button presses it; it must not also
+    // turn the page. A button that only holds focus from a mouse click lets go,
+    // so Space reads on instead of pressing it again.
+    const focusedButton = e.target.closest && e.target.closest('button');
+    if (focusedButton) {
+        if (focusedButton.matches(':focus-visible')) return;
+        focusedButton.blur();
+    }
 
     // Spacebar to advance
     if (e.code === 'Space') {
         e.preventDefault(); // Prevent page scroll
         if (scrollState) {
-            scrollReaderBy((e.shiftKey ? -1 : 1) * 0.9);
+            const sc = scrollState.scroller;
+            if (!e.shiftKey && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1) goToIssue(1);
+            else scrollReaderBy((e.shiftKey ? -1 : 1) * 0.9);
         } else {
             readerAdvance();
         }
@@ -256,6 +265,7 @@ function loadReaderPrefs() {
             if (READER_MODES.includes(data.mode)) readerMode = data.mode;
             if (READER_FITS.includes(data.fit)) readerFit = data.fit;
             if (READER_TURNS.includes(data.turn)) readerTurn = data.turn;
+            updateReaderViewControls();
         })
         .catch(() => { /* keep whatever we had */ });
 }
@@ -269,82 +279,104 @@ function saveReaderPrefs() {
     }).catch(err => console.error('Failed to save reader preferences:', err));
 }
 
-/**
- * Build the layout buttons on first use.
- *
- * Created here rather than in markup because the reader modal is duplicated
- * across four templates; injecting them keeps those copies from drifting (the
- * pan hint does the same).
- */
+/** Wire the View panel (markup in partials/reader_modal.html) and show the current choices. */
 function ensureReaderViewControls() {
-    const controls = document.querySelector('.comic-reader-footer-controls');
-    if (!controls) return;
-
-    if (!document.getElementById('readerModeBtn')) {
-        const modeBtn = document.createElement('button');
-        modeBtn.id = 'readerModeBtn';
-        modeBtn.type = 'button';
-        modeBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        modeBtn.innerHTML = '<i class="bi bi-view-stacked text-light" aria-hidden="true"></i>';
-        modeBtn.onclick = () => setReaderMode(readerMode === 'scroll' ? 'paged' : 'scroll');
-        controls.insertBefore(modeBtn, document.getElementById('pageSelector'));
-    }
-    if (!document.getElementById('readerFitBtn')) {
-        const fitBtn = document.createElement('button');
-        fitBtn.id = 'readerFitBtn';
-        fitBtn.type = 'button';
-        fitBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        fitBtn.innerHTML = '<i class="bi text-light" aria-hidden="true"></i>';
-        fitBtn.onclick = () => setReaderFit(readerFit === 'width' ? 'height' : 'width');
-        controls.insertBefore(fitBtn, document.getElementById('pageSelector'));
-    }
-    if (!document.getElementById('readerTurnBtn')) {
-        const turnBtn = document.createElement('button');
-        turnBtn.id = 'readerTurnBtn';
-        turnBtn.type = 'button';
-        turnBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        turnBtn.innerHTML = '<i class="bi bi-book text-light" aria-hidden="true"></i>';
-        turnBtn.onclick = () => setReaderTurn(READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]);
-        controls.insertBefore(turnBtn, document.getElementById('pageSelector'));
-    }
+    initializeReaderViewPanel();
+    setReaderViewPanel(false, { restoreFocus: false });
     updateReaderViewControls();
 }
 
-/** Make the buttons say what they are doing and what a click will do. */
-function updateReaderViewControls() {
-    const modeBtn = document.getElementById('readerModeBtn');
-    if (modeBtn) {
-        const scroll = readerMode === 'scroll';
-        const label = scroll ? 'Scroll mode is on. Switch to page-by-page' : 'Switch to continuous scroll';
-        modeBtn.title = label;
-        modeBtn.setAttribute('aria-label', label);
-        modeBtn.setAttribute('aria-pressed', scroll ? 'true' : 'false');
-        modeBtn.classList.toggle('active', scroll);
-    }
-    const turnBtn = document.getElementById('readerTurnBtn');
-    if (turnBtn) {
-        const names = { slide: 'Slide', turn: 'Turn', none: 'None' };
-        const next = names[READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]];
-        const label = `Page turn: ${names[readerTurn]}. Switch to ${next}`;
-        turnBtn.title = label;
-        turnBtn.setAttribute('aria-label', label);
-        turnBtn.classList.toggle('active', readerTurn === 'turn');
-        turnBtn.style.display = readerMode === 'scroll' ? 'none' : '';
-    }
-    const fitBtn = document.getElementById('readerFitBtn');
-    if (fitBtn) {
-        const width = readerFit === 'width';
-        const label = width ? 'Fitted to width. Fit whole page instead' : 'Whole page shown. Fit to width instead';
-        fitBtn.title = label;
-        fitBtn.setAttribute('aria-label', label);
-        const icon = fitBtn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('bi-arrow-left-right', width);
-            icon.classList.toggle('bi-arrow-down-up', !width);
+let readerPanelDismissedAt = 0;
+
+/** True for the tap or click that just closed the View panel. */
+function readerPanelJustDismissed() {
+    return Date.now() - readerPanelDismissedAt < 600;
+}
+
+/** One delegated click for every choice; bound once, the markup outlives each comic. */
+function initializeReaderViewPanel() {
+    const btn = document.getElementById('readerViewBtn');
+    const panel = document.getElementById('readerViewPanel');
+    if (!btn || !panel || panel.dataset.bound) return;
+    panel.dataset.bound = '1';
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setReaderViewPanel(panel.hidden);
+    });
+    panel.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const choice = e.target.closest('[data-set]');
+        if (!choice) return;
+        const v = choice.dataset.v;
+        if (choice.dataset.set === 'mode') setReaderMode(v);
+        else if (choice.dataset.set === 'fit') setReaderFit(v);
+        else if (choice.dataset.set === 'turn') setReaderTurn(v);
+    });
+    // A press anywhere else closes it, as a menu would, and that press does
+    // nothing else (no page turn, no chrome toggle, no closing the reader).
+    document.addEventListener('pointerdown', (e) => {
+        if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) {
+            setReaderViewPanel(false, { restoreFocus: false });
+            readerPanelDismissedAt = Date.now();
         }
-        // Scroll mode is always as wide as its column; fit has no meaning there.
-        fitBtn.style.display = readerMode === 'scroll' ? 'none' : '';
+    }, { capture: true });
+}
+
+/**
+ * Arrow keys in the View panel move focus between choices: left/right within a
+ * row, up/down to the chosen button of the row above or below. Enter or Space
+ * picks, as on any button.
+ */
+function handleViewPanelArrows(event) {
+    const btn = event.target.closest('[data-set]');
+    if (!btn) return;
+    const panel = document.getElementById('readerViewPanel');
+    let next = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const row = [...btn.parentElement.querySelectorAll('[data-set]')];
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        next = row[(row.indexOf(btn) + step + row.length) % row.length];
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const rows = [...panel.querySelectorAll('.reader-view-row:not([hidden])')];
+        const at = rows.indexOf(btn.closest('.reader-view-row'));
+        const row = rows[at + (event.key === 'ArrowDown' ? 1 : -1)];
+        if (row) next = row.querySelector('[aria-pressed="true"]') || row.querySelector('[data-set]');
+    } else {
+        return;
     }
+    event.preventDefault();
+    if (next) next.focus();
+}
+
+/**
+ * Open or close the View panel. Opening focuses the current choice; closing
+ * hands focus back to the View button unless the close came from elsewhere.
+ */
+function setReaderViewPanel(open, { restoreFocus = true } = {}) {
+    const btn = document.getElementById('readerViewBtn');
+    const panel = document.getElementById('readerViewPanel');
+    if (!btn || !panel) return;
+    const wasOpen = !panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        const current = panel.querySelector('[aria-pressed="true"]');
+        if (current) current.focus();
+    } else if (wasOpen && restoreFocus) {
+        btn.focus();
+    }
+}
+
+/** Mark the current choices. Scroll mode is always as wide as its column, so fit and page turn mean nothing there. */
+function updateReaderViewControls() {
+    const panel = document.getElementById('readerViewPanel');
+    if (!panel) return;
+    const current = { mode: readerMode, fit: readerFit, turn: readerTurn };
+    panel.querySelectorAll('[data-set]').forEach(b => {
+        b.setAttribute('aria-pressed', current[b.dataset.set] === b.dataset.v ? 'true' : 'false');
+    });
+    const scroll = readerMode === 'scroll';
+    panel.querySelectorAll('[data-row="turn"], [data-row="fit"]').forEach(row => { row.hidden = scroll; });
 }
 
 /** Switch between paged and scroll, staying on the same page. */
@@ -433,11 +465,14 @@ function isMobileOrTablet() {
  * Toggle the reader chrome (header/footer) visibility. Works at every size:
  * the chrome overlays the page, so hiding it never resizes the swiper.
  */
-function toggleReaderChrome() {
+function toggleReaderChrome(hide = !readerChromeHidden) {
     const container = document.querySelector('.comic-reader-container');
     if (!container) return;
-    readerChromeHidden = !readerChromeHidden;
-    container.classList.toggle('reader-chrome-hidden', readerChromeHidden);
+    readerChromeHidden = hide;
+    container.classList.toggle('reader-chrome-hidden', hide);
+    // Hidden pills are still in the tab order unless they are inert.
+    container.querySelectorAll('.reader-top, .reader-capsule').forEach(el => { el.inert = hide; });
+    if (hide) setReaderViewPanel(false, { restoreFocus: false });
 }
 
 /** Helper: get the items array for sibling detection */
@@ -567,7 +602,7 @@ function scheduleAutoSave() {
 
 /**
  * Mark the current comic finished: record the read and drop the bookmark.
- * Guarded so the next-issue overlay and closeComicReader can't both fire it.
+ * Guarded so continueToNextIssue and closeComicReader can't both fire it.
  */
 function markCurrentComicFinished() {
     if (!currentComicPath || currentComicPageCount <= 0 || completionSent) return;
@@ -615,8 +650,32 @@ function readerSlideTo(index) {
         return;
     }
     if (!comicReaderSwiper) return;
+    // Already there: Swiper fires no slideChange, so a set flag would swallow
+    // the next real page turn.
+    if (index === comicReaderSwiper.activeIndex) {
+        syncPageScrubber(index);
+        return;
+    }
     suppressProgressOnNextChange = true;
+    paceSkipGap = true;
     comicReaderSwiper.slideTo(index);
+}
+
+/**
+ * "Saga #12" when the issue is tagged, else the file name; the story title,
+ * when there is one, on the line under it.
+ */
+function setReaderTitle(info) {
+    const titleEl = document.getElementById('comicReaderTitle');
+    const subtitleEl = document.getElementById('comicReaderSubtitle');
+    if (info.series) {
+        const number = info.number ? String(info.number).replace(/^0+(?=\d)/, '') : '';
+        titleEl.textContent = number ? `${info.series} #${number}` : info.series;
+    }
+    if (subtitleEl) {
+        subtitleEl.textContent = info.title || '';
+        subtitleEl.hidden = !info.title;
+    }
 }
 
 /**
@@ -629,7 +688,6 @@ function openComicReader(filePath) {
     // stale page count and would evaluate completion for the previous comic.
     currentComicPageCount = 0;
     highestPageViewed = 0;
-    nextIssueOverlayShown = false;
     savedReadingPosition = null;
     readingStartTime = Date.now();
     accumulatedTime = 0;
@@ -654,10 +712,9 @@ function openComicReader(filePath) {
 
     const modal = document.getElementById('comicReaderModal');
     const titleEl = document.getElementById('comicReaderTitle');
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
+    const subtitleEl = document.getElementById('comicReaderSubtitle');
 
     // Hide overlays if visible from previous session
-    hideNextIssueOverlay();
     hideResumeReadingOverlay();
 
     // Reset bookmark button state
@@ -668,25 +725,22 @@ function openComicReader(filePath) {
     // Show modal
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
-    // Grow from the tapped cover (clu-motion.js); a no-op for next-issue reopens.
+    // Grow from the tapped cover (clu-motion.js); a no-op for next issue reopens.
     if (window.CLU && CLU.readerOpened) CLU.readerOpened(modal);
     blockNativePageZoom();
 
     // Immersive mode: hide chrome by default on mobile/tablet
     if (isMobileOrTablet()) {
-        const container = document.querySelector('.comic-reader-container');
-        if (container) {
-            container.classList.add('reader-chrome-hidden');
-            readerChromeHidden = true;
-        }
+        toggleReaderChrome(true);
     }
 
-    // Set title
+    // Title: the file name until the info call says what the issue is.
     const fileName = filePath.split(/[/\\]/).pop();
-    titleEl.textContent = fileName;
-
-    // Show loading
-    pageInfoEl.textContent = 'Loading...';
+    titleEl.textContent = fileName.replace(/\.(cbz|cbr|zip)$/i, '');
+    subtitleEl.textContent = '';
+    subtitleEl.hidden = true;
+    const progressLine = document.getElementById('readerProgressLine');
+    if (progressLine) progressLine.textContent = '';
 
     // Encode the path properly for URL
     const encodedPath = encodeFilePath(filePath);
@@ -704,6 +758,7 @@ function openComicReader(filePath) {
         .then(([comicData, positionData]) => {
             if (comicData.success) {
                 currentComicPageCount = comicData.page_count;
+                setReaderTitle(comicData);
 
                 // Get accumulated time if available
                 if (positionData && positionData.time_spent) {
@@ -749,14 +804,12 @@ function initializeComicReader(pageCount, startPage = 0) {
     if (readerMode === 'scroll') {
         readerSpread = false;
         initializeScrollReader(pageCount, startPage);
-        initializePageSelector(pageCount, startPage);
+        initializePageScrubber(pageCount, startPage);
         initializeZoomControls();
         return;
     }
 
     const wrapper = document.getElementById('comicReaderWrapper');
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
-
     // Clear existing slides
     wrapper.innerHTML = '';
 
@@ -828,18 +881,11 @@ function initializeComicReader(pageCount, startPage = 0) {
                 lastPageChangeAt = Date.now();
                 // In a spread the right-hand page is on screen too.
                 const lastSeen = readerSpread ? Math.min(currentIndex + 1, pageCount - 1) : currentIndex;
-                pageInfoEl.textContent = readerSpread && lastSeen > currentIndex
-                    ? `Pages ${currentIndex + 1}-${lastSeen + 1} of ${pageCount}`
-                    : `Page ${currentIndex + 1} of ${pageCount}`;
 
-                // Update page selector dropdown
-                const pageSelector = document.getElementById('pageSelector');
-                if (pageSelector) {
-                    pageSelector.value = currentIndex;
-                }
+                syncPageScrubber(currentIndex);
 
                 // Track highest page viewed for read progress. A programmatic
-                // jump (resume / page-selector) is not evidence of reading, so
+                // jump (resume / scrubber) is not evidence of reading, so
                 // it must not advance the high-water mark.
                 if (suppressProgressOnNextChange) {
                     suppressProgressOnNextChange = false;
@@ -862,14 +908,6 @@ function initializeComicReader(pageCount, startPage = 0) {
                 fitBaseScale = 1;
                 applyReaderFit(pendingFitAlign);
                 pendingFitAlign = 'top';
-
-                // Check if reached last page - show next issue overlay if available
-                if (lastSeen === pageCount - 1) {
-                    checkAndShowNextIssueOverlay();
-                } else {
-                    // Hide overlay if navigating away from last page
-                    hideNextIssueOverlay();
-                }
 
                 // Load current page
                 loadComicPage(currentIndex);
@@ -900,6 +938,7 @@ function initializeComicReader(pageCount, startPage = 0) {
             // Not gated on device: a mouse click hides it on desktop too, and the
             // gate is what left a rotated tablet unable to hide it.
             tap: function (swiper, event) {
+                if (readerPanelJustDismissed()) return;
                 // Don't toggle chrome when zoomed in (user is panning). Being
                 // fitted to the width is not "zoomed in".
                 if (readerZoomedBeyondFit()) return;
@@ -934,7 +973,6 @@ function initializeComicReader(pageCount, startPage = 0) {
             },
             init: function () {
                 const initialPage = this.activeIndex;
-                pageInfoEl.textContent = `Page ${initialPage + 1} of ${pageCount}`;
                 // max(): a mode switch rebuilds mid-comic, and must not lower
                 // the evidence of how far the user has actually read.
                 if (!rebuildingReaderView) {
@@ -951,8 +989,8 @@ function initializeComicReader(pageCount, startPage = 0) {
         }
     });
 
-    // Initialize page selector dropdown
-    initializePageSelector(pageCount, startPage);
+    // Initialize the page scrubber
+    initializePageScrubber(pageCount, startPage);
 
     // Initialize zoom controls
     initializeZoomControls();
@@ -1022,40 +1060,98 @@ function initReaderLoupe() {
     ['touchend', 'touchcancel'].forEach(n => window.addEventListener(n, close, { capture: true, passive: true }));
 }
 
+const SCRUB_PREVIEW_MS = 120;
+
 /**
- * Initialize page selector dropdown
+ * Set up the page scrubber for this comic. Dragging previews a page above the
+ * thumb; the reader jumps only on release, so a drag across 200 pages loads a
+ * handful of previews rather than 200 pages.
  * @param {number} pageCount - Total number of pages
  * @param {number} startPage - Initial page (0-indexed)
  */
-function initializePageSelector(pageCount, startPage) {
-    const pageSelector = document.getElementById('pageSelector');
-    if (!pageSelector) return;
+function initializePageScrubber(pageCount, startPage) {
+    const scrubber = document.getElementById('pageScrubber');
+    if (!scrubber) return;
+    scrubber.max = Math.max(1, pageCount);
+    syncPageScrubber(startPage);
+    // Runs on every (re)build; the listeners must not pile up.
+    if (scrubber.dataset.bound) return;
+    scrubber.dataset.bound = '1';
 
-    // Clear existing options
-    pageSelector.innerHTML = '';
-
-    // Populate dropdown with page options
-    for (let i = 0; i < pageCount; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = `Page ${i + 1} of ${pageCount}`;
-        if (i === startPage) {
-            option.selected = true;
+    let lastPreviewAt = 0;
+    let previewTimer = null;
+    scrubber.addEventListener('input', () => {
+        const page = parseInt(scrubber.value, 10) - 1;
+        setScrubFill(scrubber);
+        clearTimeout(previewTimer);
+        const wait = SCRUB_PREVIEW_MS - (Date.now() - lastPreviewAt);
+        if (wait <= 0) {
+            lastPreviewAt = Date.now();
+            showScrubTip(scrubber, page);
+        } else {
+            previewTimer = setTimeout(() => {
+                lastPreviewAt = Date.now();
+                showScrubTip(scrubber, parseInt(scrubber.value, 10) - 1);
+            }, wait);
         }
-        pageSelector.appendChild(option);
+    });
+    // After a drag, hand the keys back to the reader: focus left on the range
+    // would make → step the scrubber (a jump, not counted as reading).
+    // Keyboard users who tab to it keep arrow stepping.
+    scrubber.addEventListener('pointerup', () => scrubber.blur());
+    scrubber.addEventListener('change', () => {
+        clearTimeout(previewTimer);
+        hideScrubTip();
+        const page = parseInt(scrubber.value, 10) - 1;
+        if (!readerHasView() || isNaN(page)) return;
+        // A jump is navigation, not reading (readerSlideTo keeps it out of progress).
+        if (scrollState) scrollToReaderPage(page);
+        else readerSlideTo(wantsSpread() ? spreadStart(page) : page);
+    });
+}
+
+/** Move the scrubber to a page (0-indexed) and say where it is. */
+function syncPageScrubber(index) {
+    const scrubber = document.getElementById('pageScrubber');
+    if (!scrubber) return;
+    const total = parseInt(scrubber.max, 10) || 1;
+    scrubber.value = index + 1;
+    scrubber.setAttribute('aria-valuetext', `Page ${index + 1} of ${total}`);
+    setScrubFill(scrubber);
+}
+
+/** The filled part of the track, as a percent for the CSS gradient. */
+function setScrubFill(scrubber) {
+    const total = parseInt(scrubber.max, 10) || 1;
+    const pct = total > 1 ? (parseInt(scrubber.value, 10) - 1) / (total - 1) * 100 : 100;
+    scrubber.style.setProperty('--p', `${pct}%`);
+}
+
+/** Preview of a page above the thumb while dragging. */
+function showScrubTip(scrubber, page) {
+    const tip = scrubber.parentElement.querySelector('.reader-scrub-tip');
+    if (!tip || isNaN(page)) return;
+    let img = tip.querySelector('img');
+    let label = tip.querySelector('span');
+    if (!img) {
+        img = document.createElement('img');
+        img.alt = '';
+        label = document.createElement('span');
+        tip.append(img, label);
     }
+    img.src = readerPageUrl(page);
+    label.textContent = page + 1;
+    tip.hidden = false;
+    // Centred over the thumb, but kept on screen at either end.
+    const track = scrubber.parentElement.getBoundingClientRect();
+    const pct = parseFloat(scrubber.style.getPropertyValue('--p')) || 0;
+    const half = tip.offsetWidth / 2 + 8;
+    const x = Math.min(Math.max(track.left + track.width * pct / 100, half), window.innerWidth - half);
+    tip.style.left = `${x - track.left}px`;
+}
 
-    // Add change event listener
-    // `onchange`, not addEventListener: this runs on every (re)build, and
-    // listeners would pile up.
-    pageSelector.onchange = function() {
-        const selectedPage = parseInt(this.value, 10);
-        if (readerHasView() && !isNaN(selectedPage)) {
-            // Jumping is navigation, not reading -- don't let it count as
-            // progress, or a peek at the last page marks the issue finished.
-            readerSlideTo(selectedPage);
-        }
-    };
+function hideScrubTip() {
+    document.querySelectorAll('.reader-scrub-tip').forEach(t => { t.hidden = true; });
 }
 
 /**
@@ -1192,6 +1288,8 @@ function readerAdvance() {
             return;
         }
     }
+    // The last page leads straight into the next issue (none: nothing happens).
+    if (comicReaderSwiper.isEnd) { goToIssue(1); return; }
     comicReaderSwiper.slideNext();
 }
 
@@ -1294,7 +1392,7 @@ function attachReaderSwipes(modal) {
         const resume = document.getElementById('resumeReadingOverlay');
         const blocked = e.touches.length !== 1 || !readerHasView() ||
             (resume && resume.style.display === 'flex') ||
-            e.target.closest('button, select, a, input, .comic-reader-header, .comic-reader-footer');
+            e.target.closest('button, select, a, input, .reader-top, .reader-capsule');
         overscrollTouch = blocked ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY, edges: readerEdges() };
     }, { passive: true });
     modal.addEventListener('touchmove', e => {
@@ -1554,22 +1652,15 @@ function ensurePanHintElement() {
 }
 
 /**
- * Check if an RGB color is perceptually light
- * @param {number} r - Red (0-255)
- * @param {number} g - Green (0-255)
- * @param {number} b - Blue (0-255)
- * @returns {boolean} True if the color is light
- */
-function isLightColor(r, g, b) {
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-    return luminance > 140;
-}
-
-/**
  * Handle keyboard events for zoom (arrow keys)
  * @param {KeyboardEvent} event
  */
 function handleZoomKeyboard(event) {
+    // Keys inside the View panel belong to the panel, in either layout.
+    if (event.target && event.target.closest && event.target.closest('#readerViewPanel')) {
+        handleViewPanelArrows(event);
+        return;
+    }
     // Only handle if comic reader is open
     if (scrollState) {
         handleScrollKeyboard(event);
@@ -1630,7 +1721,8 @@ function handleZoomKeyboard(event) {
         case 'ArrowRight':
             // Always navigate to next page (zoom resets on slide change)
             event.preventDefault();
-            comicReaderSwiper.slideNext();
+            if (comicReaderSwiper.isEnd) goToIssue(1);
+            else comicReaderSwiper.slideNext();
             break;
     }
 }
@@ -1738,7 +1830,7 @@ function initializeMousewheelHandler() {
 }
 
 /**
- * Update reading progress bar display
+ * Update the page count and pace in the capsule, and the hidden-state line.
  */
 function updateReadingProgress(pageIndex) {
     if (currentComicPageCount === 0) return;
@@ -1750,45 +1842,53 @@ function updateReadingProgress(pageIndex) {
     if (currentIndex === undefined) {
         currentIndex = readerHasView() ? getReaderCurrentIndex() : highestPageViewed;
     }
-    const progress = ((currentIndex + 1) / currentComicPageCount) * 100;
-    const progressBar = document.querySelector('.comic-reader-progress-fill');
-    const progressText = document.querySelector('.comic-reader-progress-text');
-    if (progressBar) progressBar.style.width = `${progress}%`;
-    if (progressText) progressText.textContent = `${Math.round(progress)}%`;
     updateReaderPaceLine(currentIndex);
 }
 
-// "Page 12 of 24 · about 6 min left" in the footer. The estimate is pages left
+// "12 / 24 · about 6 min left" in the capsule (the pace is dropped on a phone). The estimate is pages left
 // times the median time per page turn this session (30s before three turns).
 let paceGaps = [];
 let paceLast = null;   // {index, at}
 let paceFor = 0;       // page count the history belongs to
+let paceSkipGap = false;  // the next change is a jump, not a page read
 function updateReaderPaceLine(index) {
     const text = document.getElementById('readerProgressLine');
-    const fill = document.querySelector('.comic-reader-footer-line > i');
+    const fill = document.querySelector('.reader-hidden-line > i');
     if (!text) return;
     const total = currentComicPageCount;
     if (paceFor !== total) { paceGaps = []; paceLast = null; paceFor = total; }
     const now = Date.now();
+    const jumped = paceSkipGap || (scrollState && scrollState.programmatic);
     if (paceLast && index !== paceLast.index) {
+        paceSkipGap = false;
         const gap = now - paceLast.at;
-        if (gap < 5 * 60 * 1000) paceGaps.push(gap);   // a long idle is not reading
+        // A long idle is not reading, and neither is a jump.
+        if (!jumped && gap < 5 * 60 * 1000) paceGaps.push(gap);
     }
     if (!paceLast || index !== paceLast.index) paceLast = { index: index, at: now };
-    const left = total - (index + 1);
-    let label = `Page ${index + 1} of ${total}`;
+    // Pages not on screen yet; in a spread the right-hand page is on screen too,
+    // and each turn shows two.
+    const lastShown = readerSpread ? Math.min(index + 1, total - 1) : index;
+    const left = total - (lastShown + 1);
+    const turnsLeft = readerSpread ? Math.ceil(left / 2) : left;
+    const shown = readerSpread && index + 1 < total ? `${index + 1}\u2013${index + 2}` : `${index + 1}`;
+    let pace;
     if (left <= 0) {
-        label += ' \u00b7 last page';
+        pace = 'last page';
     } else {
         let per = 30000;
         if (paceGaps.length >= 3) {
             const sorted = paceGaps.slice().sort((a, b) => a - b);
             per = sorted[Math.floor(sorted.length / 2)];
         }
-        const mins = Math.round(left * per / 60000);
-        label += mins < 1 ? ' \u00b7 under a minute left' : ` \u00b7 about ${mins} min left`;
+        const mins = Math.round(turnsLeft * per / 60000);
+        pace = mins < 1 ? 'under a minute left' : `about ${mins} min left`;
     }
-    text.textContent = label;
+    text.replaceChildren(`${shown} / ${total}`);
+    const paceEl = document.createElement('span');
+    paceEl.className = 'pace';
+    paceEl.textContent = ` \u00b7 ${pace}`;
+    text.append(paceEl);
     if (fill) fill.style.width = `${((index + 1) / total) * 100}%`;
 }
 
@@ -1846,47 +1946,25 @@ function extractEdgeColor(img) {
  * @param {number} b - Blue component (0-255)
  */
 function applyReaderBackgroundColor(r, g, b) {
+    // The pills are their own dark surface, so only the backdrop takes the colour.
     const overlay = document.querySelector('.comic-reader-overlay');
-    const header = document.querySelector('.comic-reader-header');
-    const footer = document.querySelector('.comic-reader-footer');
     const slides = document.querySelectorAll('.comic-reader-swiper .swiper-slide');
-
     if (overlay) overlay.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-    if (header) header.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-    if (footer) footer.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
     slides.forEach(slide => {
         slide.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
     });
-
-    // Toggle button styling based on background brightness
-    const light = isLightColor(r, g, b);
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.toggle('reader-light-bg', light);
-    }
 }
 
 /**
- * Reset reader chrome background colors to CSS defaults
+ * Reset the backdrop colour to the CSS default
  */
 function resetReaderBackgroundColor() {
     const overlay = document.querySelector('.comic-reader-overlay');
-    const header = document.querySelector('.comic-reader-header');
-    const footer = document.querySelector('.comic-reader-footer');
     const slides = document.querySelectorAll('.comic-reader-swiper .swiper-slide');
-
     if (overlay) overlay.style.backgroundColor = '';
-    if (header) header.style.backgroundColor = '';
-    if (footer) footer.style.backgroundColor = '';
     slides.forEach(slide => {
         slide.style.backgroundColor = '';
     });
-
-    // Reset button styling to default (light buttons on dark background)
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.remove('reader-light-bg');
-    }
 }
 
 /**
@@ -2125,6 +2203,7 @@ function initializeScrollReader(pageCount, startPage = 0) {
     // attachScrollTap below: iOS WebKit never sends `click` for a tap on a
     // plain element, so on an iPhone this listener alone did nothing.
     s.onClick = () => {
+        if (readerPanelJustDismissed()) return;
         if (s.lastPointerType && s.lastPointerType !== 'mouse') return;
         if (s.suppressClickUntil && Date.now() < s.suppressClickUntil) return;
         const sel = window.getSelection && window.getSelection();
@@ -2255,10 +2334,7 @@ function scrollPageIndexAtLine(s) {
 function applyScrollIndexUi(index) {
     const s = scrollState;
     const total = s ? s.pageCount : currentComicPageCount;
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
-    if (pageInfoEl) pageInfoEl.textContent = `Page ${index + 1} of ${total}`;
-    const pageSelector = document.getElementById('pageSelector');
-    if (pageSelector) pageSelector.value = index;
+    syncPageScrubber(index);
     updateReadingProgress(index);
     const cached = pageEdgeColors.get(index);
     if (cached) applyReaderBackgroundColor(cached.r, cached.g, cached.b);
@@ -2277,11 +2353,6 @@ function syncScrollIndex() {
     if (!s.programmatic) {
         if (index > highestPageViewed) highestPageViewed = index;
         scheduleAutoSave();
-    }
-    if (index === s.pageCount - 1) {
-        checkAndShowNextIssueOverlay();
-    } else {
-        hideNextIssueOverlay();
     }
 }
 
@@ -2434,6 +2505,7 @@ function attachScrollTap(s) {
 }
 
 function handleScrollTap(s, x, y) {
+    if (readerPanelJustDismissed()) return;
     const zone = readerTapZone(s.scroller, x);
     if (zone !== 'middle') {
         scrollReaderBy(zone === 'back' ? -0.9 : 0.9);
@@ -2505,7 +2577,9 @@ function handleScrollKeyboard(event) {
         case 'PageUp':
             scrollReaderBy(-0.9); break;
         case 'ArrowRight':
-            scrollToReaderPage(s.index + 1); break;
+            if (s.index === s.pageCount - 1) goToIssue(1);
+            else scrollToReaderPage(s.index + 1);
+            break;
         case 'ArrowLeft':
             scrollToReaderPage(s.index - 1); break;
         case 'd': case 'D':
@@ -2561,12 +2635,8 @@ function closeComicReader() {
     document.body.style.overflow = ''; // Restore scrolling
     allowNativePageZoom();
 
-    // Reset immersive reader chrome state
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.remove('reader-chrome-hidden');
-    }
-    readerChromeHidden = false;
+    // Reset immersive reader chrome state (and its inert, or the next open's pills are dead)
+    toggleReaderChrome(false);
     if (chromeToggleTimeout) {
         clearTimeout(chromeToggleTimeout);
         chromeToggleTimeout = null;
@@ -2581,7 +2651,6 @@ function closeComicReader() {
     highestPageViewed = 0;
     currentComicSiblings = [];
     currentComicIndex = -1;
-    nextIssueOverlayShown = false;
     savedReadingPosition = null;
     lastPersistedPage = null;
 
@@ -2592,7 +2661,6 @@ function closeComicReader() {
     pendingFitAlign = 'top';
 
     // Hide overlays
-    hideNextIssueOverlay();
     hideResumeReadingOverlay();
 
     // Remove keyboard listeners
@@ -2616,63 +2684,6 @@ function closeComicReader() {
         clearTimeout(wheelTimeout);
         wheelTimeout = null;
     }
-}
-
-/**
- * Check if there's a next issue and show the overlay
- */
-function checkAndShowNextIssueOverlay() {
-    // Check if there's a next comic in the folder
-    if (currentComicIndex >= 0 && currentComicIndex + 1 < currentComicSiblings.length) {
-        const nextComic = currentComicSiblings[currentComicIndex + 1];
-        showNextIssueOverlay(nextComic);
-    }
-    // If no next issue, do nothing (close normally per user preference)
-}
-
-/**
- * Show the next issue overlay with comic info
- * @param {Object} nextComic - The next comic file object {name, path}
- */
-function showNextIssueOverlay(nextComic) {
-    if (nextIssueOverlayShown) return;  // Already shown
-
-    const overlay = document.getElementById('nextIssueOverlay');
-    const thumbnail = document.getElementById('nextIssueThumbnail');
-    const nameEl = document.getElementById('nextIssueName');
-
-    if (!overlay) return;
-
-    // Set the next comic name
-    nameEl.textContent = nextComic.name;
-    nameEl.title = nextComic.name;
-
-    // Set thumbnail URL - use existing thumbnailUrl from allItems if available
-    if (nextComic.thumbnailUrl) {
-        thumbnail.src = nextComic.thumbnailUrl;
-    } else {
-        // Fallback to placeholder if no thumbnail available
-        thumbnail.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 150"%3E%3Crect fill="%23333" width="100" height="150"/%3E%3Ctext x="50" y="75" text-anchor="middle" fill="%23666" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
-    }
-    thumbnail.onerror = function () {
-        // Fallback to placeholder on error
-        this.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 150"%3E%3Crect fill="%23333" width="100" height="150"/%3E%3Ctext x="50" y="75" text-anchor="middle" fill="%23666" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
-    };
-
-    // Show overlay
-    overlay.style.display = 'flex';
-    nextIssueOverlayShown = true;
-}
-
-/**
- * Hide the next issue overlay
- */
-function hideNextIssueOverlay() {
-    const overlay = document.getElementById('nextIssueOverlay');
-    if (overlay) {
-        overlay.style.display = 'none';
-    }
-    nextIssueOverlayShown = false;
 }
 
 /**
@@ -2728,13 +2739,14 @@ function updateBookmarkButtonState(hasSavedPosition) {
         if (hasSavedPosition) {
             icon.classList.remove('bi-bookmark');
             icon.classList.add('bi-bookmark-fill');
-            bookmarkBtn.title = 'Position Saved';
+            bookmarkBtn.title = 'Position saved';
         } else {
             icon.classList.remove('bi-bookmark-fill');
             icon.classList.add('bi-bookmark');
-            bookmarkBtn.title = 'Save Position';
+            bookmarkBtn.title = 'Save position';
         }
     }
+    bookmarkBtn.setAttribute('aria-pressed', hasSavedPosition ? 'true' : 'false');
 }
 
 /**
@@ -2758,16 +2770,6 @@ function saveReadingPosition() {
             const bookmarked = !data.cleared;
             savedReadingPosition = bookmarked ? currentPage : null;
             updateBookmarkButtonState(bookmarked);
-            // Brief visual feedback
-            const bookmarkBtn = document.getElementById('comicReaderBookmark');
-            if (bookmarkBtn) {
-                bookmarkBtn.classList.add('btn-success');
-                bookmarkBtn.classList.remove('btn-outline-light');
-                setTimeout(() => {
-                    bookmarkBtn.classList.remove('btn-success');
-                    bookmarkBtn.classList.add('btn-outline-light');
-                }, 1000);
-            }
         }).catch(err => console.error('Failed to save reading position:', err));
 }
 
@@ -2795,7 +2797,6 @@ function continueToNextIssue() {
     currentComicPath = null;
     currentComicPageCount = 0;
     highestPageViewed = 0;
-    hideNextIssueOverlay();
 
     // Open the next comic (keeping the siblings list intact)
     openComicReader(nextComic.path);
@@ -2826,7 +2827,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close on overlay click
     const overlay = document.querySelector('.comic-reader-overlay');
     if (overlay) {
-        overlay.addEventListener('click', closeComicReader);
+        overlay.addEventListener('click', () => {
+            if (!readerPanelJustDismissed()) closeComicReader();
+        });
     }
 
     // Close on Escape key. If a decision overlay is up, Escape dismisses that
@@ -2838,8 +2841,9 @@ document.addEventListener('DOMContentLoaded', () => {
             dismissResumeOverlay();
             return;
         }
-        if (nextIssueOverlayShown) {
-            hideNextIssueOverlay();
+        const viewPanel = document.getElementById('readerViewPanel');
+        if (viewPanel && !viewPanel.hidden) {
+            setReaderViewPanel(false);
             return;
         }
         closeComicReader();
@@ -2875,33 +2879,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 150);
     });
-
-    // Next issue overlay handlers
-    const nextIssueContinue = document.getElementById('nextIssueContinue');
-    if (nextIssueContinue) {
-        nextIssueContinue.addEventListener('click', continueToNextIssue);
-    }
-
-    const nextIssueClose = document.getElementById('nextIssueClose');
-    if (nextIssueClose) {
-        nextIssueClose.addEventListener('click', () => {
-            // Reaching this overlay means the comic was finished. The guard
-            // inside markCurrentComicFinished() stops closeComicReader() from
-            // firing a second mark-read + delete for the same comic.
-            markCurrentComicFinished();
-            closeComicReader();
-        });
-    }
-
-    // Close overlay when clicking outside the panel (just dismiss, don't mark as read)
-    const nextIssueOverlay = document.getElementById('nextIssueOverlay');
-    if (nextIssueOverlay) {
-        nextIssueOverlay.addEventListener('click', (e) => {
-            if (e.target === nextIssueOverlay) {
-                hideNextIssueOverlay();
-            }
-        });
-    }
 
     // Bookmark button handler
     const bookmarkBtn = document.getElementById('comicReaderBookmark');

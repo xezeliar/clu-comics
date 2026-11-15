@@ -291,7 +291,7 @@ A list's toolbar is built from shared parts, never by hand: Jinja macros in `tem
 - **Loading:** a pulsing muted italic metadata line on cover cards; `loading.svg` / `error.svg` placeholders in cover frames.
 
 ### Reader
-Full-screen over a Reader Black backdrop at `100dvh`, with translucent black header and footer bars carrying a white title and page progress. The only surface where the theme steps aside entirely.
+Full-screen at `100dvh`. The backdrop takes each page's edge colour; the controls float over it as dark pills (`rgba(18,18,18,.86)`, a 1px white ring, white ink, no blur or gradient) that stay dark on any page: a title pill and round Bookmark, View and Close buttons on top, and a centred capsule at most 34rem wide with zoom (mouse only), a page scrubber and the count. A middle tap hides them, leaving a 2px progress line. The View panel holds Layout, Fit and Page turn as labelled choices. `--clu-select` on the scrubber fill and that line is the only theme colour; otherwise the theme steps aside entirely.
 
 ## Do's and Don'ts
 
