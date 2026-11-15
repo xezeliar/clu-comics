@@ -323,6 +323,32 @@ function initializeReaderViewPanel() {
 }
 
 /**
+ * Arrow keys in the View panel move focus between choices: left/right within a
+ * row, up/down to the chosen button of the row above or below. Enter or Space
+ * picks, as on any button.
+ */
+function handleViewPanelArrows(event) {
+    const btn = event.target.closest('[data-set]');
+    if (!btn) return;
+    const panel = document.getElementById('readerViewPanel');
+    let next = null;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        const row = [...btn.parentElement.querySelectorAll('[data-set]')];
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        next = row[(row.indexOf(btn) + step + row.length) % row.length];
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const rows = [...panel.querySelectorAll('.reader-view-row:not([hidden])')];
+        const at = rows.indexOf(btn.closest('.reader-view-row'));
+        const row = rows[at + (event.key === 'ArrowDown' ? 1 : -1)];
+        if (row) next = row.querySelector('[aria-pressed="true"]') || row.querySelector('[data-set]');
+    } else {
+        return;
+    }
+    event.preventDefault();
+    if (next) next.focus();
+}
+
+/**
  * Open or close the View panel. Opening focuses the current choice; closing
  * hands focus back to the View button unless the close came from elsewhere.
  */
@@ -631,6 +657,7 @@ function readerSlideTo(index) {
         return;
     }
     suppressProgressOnNextChange = true;
+    paceSkipGap = true;
     comicReaderSwiper.slideTo(index);
 }
 
@@ -1114,8 +1141,13 @@ function showScrubTip(scrubber, page) {
     }
     img.src = readerPageUrl(page);
     label.textContent = page + 1;
-    tip.style.left = scrubber.style.getPropertyValue('--p') || '0%';
     tip.hidden = false;
+    // Centred over the thumb, but kept on screen at either end.
+    const track = scrubber.parentElement.getBoundingClientRect();
+    const pct = parseFloat(scrubber.style.getPropertyValue('--p')) || 0;
+    const half = tip.offsetWidth / 2 + 8;
+    const x = Math.min(Math.max(track.left + track.width * pct / 100, half), window.innerWidth - half);
+    tip.style.left = `${x - track.left}px`;
 }
 
 function hideScrubTip() {
@@ -1624,6 +1656,11 @@ function ensurePanHintElement() {
  * @param {KeyboardEvent} event
  */
 function handleZoomKeyboard(event) {
+    // Keys inside the View panel belong to the panel, in either layout.
+    if (event.target && event.target.closest && event.target.closest('#readerViewPanel')) {
+        handleViewPanelArrows(event);
+        return;
+    }
     // Only handle if comic reader is open
     if (scrollState) {
         handleScrollKeyboard(event);
@@ -1813,6 +1850,7 @@ function updateReadingProgress(pageIndex) {
 let paceGaps = [];
 let paceLast = null;   // {index, at}
 let paceFor = 0;       // page count the history belongs to
+let paceSkipGap = false;  // the next change is a jump, not a page read
 function updateReaderPaceLine(index) {
     const text = document.getElementById('readerProgressLine');
     const fill = document.querySelector('.reader-hidden-line > i');
@@ -1820,13 +1858,19 @@ function updateReaderPaceLine(index) {
     const total = currentComicPageCount;
     if (paceFor !== total) { paceGaps = []; paceLast = null; paceFor = total; }
     const now = Date.now();
+    const jumped = paceSkipGap || (scrollState && scrollState.programmatic);
     if (paceLast && index !== paceLast.index) {
+        paceSkipGap = false;
         const gap = now - paceLast.at;
-        if (gap < 5 * 60 * 1000) paceGaps.push(gap);   // a long idle is not reading
+        // A long idle is not reading, and neither is a jump.
+        if (!jumped && gap < 5 * 60 * 1000) paceGaps.push(gap);
     }
     if (!paceLast || index !== paceLast.index) paceLast = { index: index, at: now };
-    const left = total - (index + 1);
-    // In a spread the right-hand page is on screen too.
+    // Pages not on screen yet; in a spread the right-hand page is on screen too,
+    // and each turn shows two.
+    const lastShown = readerSpread ? Math.min(index + 1, total - 1) : index;
+    const left = total - (lastShown + 1);
+    const turnsLeft = readerSpread ? Math.ceil(left / 2) : left;
     const shown = readerSpread && index + 1 < total ? `${index + 1}\u2013${index + 2}` : `${index + 1}`;
     let pace;
     if (left <= 0) {
@@ -1837,7 +1881,7 @@ function updateReaderPaceLine(index) {
             const sorted = paceGaps.slice().sort((a, b) => a - b);
             per = sorted[Math.floor(sorted.length / 2)];
         }
-        const mins = Math.round(left * per / 60000);
+        const mins = Math.round(turnsLeft * per / 60000);
         pace = mins < 1 ? 'under a minute left' : `about ${mins} min left`;
     }
     text.replaceChildren(`${shown} / ${total}`);

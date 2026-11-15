@@ -278,7 +278,8 @@
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 0;
+    /* Above the home indicator in the home-screen app. */
+    bottom: env(safe-area-inset-bottom, 0px);
     z-index: 3;
     height: 2px;
     background: rgba(255, 255, 255, 0.12);
@@ -291,12 +292,25 @@
     display: block;
     height: 100%;
     width: 0;
-    background: var(--clu-select);
+    background: var(--reader-accent);
     transition: width 0.2s ease;
 }
 
 .comic-reader-container.reader-chrome-hidden .reader-hidden-line {
     opacity: 1;
+}
+
+/* The theme's accent, lifted toward white: the capsule is always near-black,
+   and on light themes the shared selection colour is pushed dark, which vanishes
+   there. Plain primary first, as color-mix() support is not universal. */
+.comic-reader-container {
+    --reader-accent: var(--bs-primary);
+}
+
+@supports (color: color-mix(in srgb, red, blue)) {
+    .comic-reader-container {
+        --reader-accent: color-mix(in srgb, var(--bs-primary) 70%, #fff);
+    }
 }
 
 /* Page scrubber. The only theme colour in the reader chrome is the filled part. */
@@ -324,7 +338,7 @@
 .reader-scrub-range::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: 2px;
-    background: linear-gradient(to right, var(--clu-select) var(--p), rgba(255, 255, 255, 0.45) var(--p));
+    background: linear-gradient(to right, var(--reader-accent) var(--p), rgba(255, 255, 255, 0.45) var(--p));
 }
 
 .reader-scrub-range::-webkit-slider-thumb {
@@ -346,7 +360,7 @@
 .reader-scrub-range::-moz-range-progress {
     height: 4px;
     border-radius: 2px;
-    background: var(--clu-select);
+    background: var(--reader-accent);
 }
 
 .reader-scrub-range::-moz-range-thumb {

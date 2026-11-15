@@ -87,7 +87,7 @@ def test_hidden_chrome_is_inert(js):
 def test_hidden_line_shows_only_when_hidden(css):
     assert rules_for(css, ".reader-chrome-hidden .reader-hidden-line")
     line = rules_for(css, ".reader-hidden-line > i")
-    assert any("var(--clu-select)" in r for r in line)
+    assert any("var(--reader-accent)" in r for r in line)
 
 
 def test_zoom_only_with_mouse(css):
