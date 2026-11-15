@@ -356,3 +356,10 @@ class TestBadgePrefersTheIndexedNumber:
         # /api/browse and /api/browse-recursive supply it; the other modes do
         # not and keep the filename answer.
         assert js_src.count("ciNumber: file.ci_number") == 2
+
+
+def test_issue_keyword_with_hash_batcave_style():
+    """batcave.biz names: 'Batman_(2011)_Issue_#1' must keep its issue number."""
+    from cbz_ops.rename import extract_comic_values
+    v = extract_comic_values("Batman_(2011)_Issue_#1.cbz")
+    assert (v["series_name"], v["issue_number"], v["year"]) == ("Batman", "001", "2011")

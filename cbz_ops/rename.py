@@ -1204,7 +1204,7 @@ def extract_comic_values(filename, width=3):
     # e.g., "The Amazing Spider-Man (2018) Issue 080.BEY.cbz"
     # e.g., "The Amazing Spider-Man (1999) Issue 700.1.cbz"
     issue_keyword_match = re.match(
-        r"^(?P<series>.*?)\s*\((?P<year>\d{4})\)\s*[Ii]ssue\s*(?P<issue>\d+(?:\.\w+)?)(?P<extra>.*?)(?P<ext>\.\w+)$",
+        r"^(?P<series>.*?)\s*\((?P<year>\d{4})\)\s*[Ii]ssue\s*#?\s*(?P<issue>\d+(?:\.\w+)?)(?P<extra>.*?)(?P<ext>\.\w+)$",
         filename,
         re.IGNORECASE,
     )
