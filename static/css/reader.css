@@ -87,6 +87,90 @@
     display: flex;
     align-items: center;
     gap: 1rem;
+    position: relative;
+}
+
+/* View panel: a dark surface of its own, so its ink stays white on any page edge colour. */
+.reader-view-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    z-index: 20;
+    width: min(calc(100vw - 1rem), 17rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.75rem;
+    color: #fff;
+    background: #1c1c1e;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    transform-origin: top right;
+    animation: readerViewPanelIn 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.reader-view-panel[hidden],
+.reader-view-row[hidden] {
+    display: none;
+}
+
+@keyframes readerViewPanelIn {
+    from { opacity: 0; transform: scale(0.96); }
+}
+
+.reader-view-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.reader-view-row > span {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.66);
+}
+
+.reader-view-seg {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    padding: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+}
+
+.reader-view-seg button {
+    min-height: 2rem;
+    padding: 0.3rem 0.5rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: none;
+    color: rgba(255, 255, 255, 0.75);
+    font: inherit;
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.reader-view-seg button:hover {
+    color: #fff;
+}
+
+.reader-view-seg button[aria-pressed="true"] {
+    background: #fff;
+    color: #000;
+    font-weight: 500;
+}
+
+@media (pointer: coarse) {
+    .reader-view-seg button {
+        min-height: 2.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reader-view-panel {
+        animation: none;
+    }
 }
 
 .comic-reader-page-info {

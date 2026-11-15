@@ -69,14 +69,13 @@ class TestSettings:
 
 
 class TestControlsAreBuiltInJs:
-    def test_not_hand_rolled_in_the_four_templates(self, js):
-        # The modal is duplicated across four templates; building the buttons in
-        # JS is what keeps those copies from drifting.
-        assert "readerModeBtn" in js and "readerFitBtn" in js
+    def test_view_choices_live_in_the_one_partial(self, js):
+        # One partial now, so the choices are markup; JS only marks and wires them.
         for name in READER_TEMPLATES:
             html = read("templates", name)
-            assert "readerModeBtn" not in html
-            assert "readerFitBtn" not in html
+            assert 'data-set="mode"' in html and 'data-set="fit"' in html
+        assert "readerModeBtn" not in js and "readerFitBtn" not in js
+        assert "setReaderMode(" in function_body(js, "initializeReaderViewPanel")
 
     def test_handlers_are_assigned_not_stacked(self, js):
         # initializeZoomControls / initializePageSelector run on every (re)build,

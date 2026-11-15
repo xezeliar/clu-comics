@@ -14,6 +14,33 @@
                 <button aria-label="Save Position" class="btn btn-sm btn-outline-light" id="comicReaderBookmark" title="Save Position">
                     <i class="bi bi-bookmark text-primary"></i>
                 </button>
+                <button type="button" class="btn btn-sm btn-outline-light" id="readerViewBtn" aria-expanded="false" aria-controls="readerViewPanel" aria-label="View options" title="View options">
+                    <i class="bi bi-sliders text-light" aria-hidden="true"></i>
+                </button>
+                <div id="readerViewPanel" class="reader-view-panel" role="group" aria-label="View options" hidden>
+                    <div class="reader-view-row" data-row="mode">
+                        <span id="readerViewModeLabel">Layout</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewModeLabel">
+                            <button type="button" data-set="mode" data-v="paged" aria-pressed="false">Pages</button>
+                            <button type="button" data-set="mode" data-v="scroll" aria-pressed="false">Scroll</button>
+                        </div>
+                    </div>
+                    <div class="reader-view-row" data-row="fit">
+                        <span id="readerViewFitLabel">Fit</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewFitLabel">
+                            <button type="button" data-set="fit" data-v="width" aria-pressed="false">Width</button>
+                            <button type="button" data-set="fit" data-v="height" aria-pressed="false">Height</button>
+                        </div>
+                    </div>
+                    <div class="reader-view-row" data-row="turn">
+                        <span id="readerViewTurnLabel">Page turn</span>
+                        <div class="reader-view-seg" role="group" aria-labelledby="readerViewTurnLabel">
+                            <button type="button" data-set="turn" data-v="slide" aria-pressed="false">Slide</button>
+                            <button type="button" data-set="turn" data-v="turn" aria-pressed="false">Turn</button>
+                            <button type="button" data-set="turn" data-v="none" aria-pressed="false">None</button>
+                        </div>
+                    </div>
+                </div>
                 <button aria-label="Close" class="btn btn-sm btn-outline-light" id="comicReaderClose" title="Close">
                     <i class="bi bi-x-lg text-light"></i>
                 </button>

@@ -270,82 +270,69 @@ function saveReaderPrefs() {
     }).catch(err => console.error('Failed to save reader preferences:', err));
 }
 
-/**
- * Build the layout buttons on first use.
- *
- * Created here rather than in markup because the reader modal is duplicated
- * across four templates; injecting them keeps those copies from drifting (the
- * pan hint does the same).
- */
+/** Wire the View panel (markup in partials/reader_modal.html) and show the current choices. */
 function ensureReaderViewControls() {
-    const controls = document.querySelector('.comic-reader-footer-controls');
-    if (!controls) return;
-
-    if (!document.getElementById('readerModeBtn')) {
-        const modeBtn = document.createElement('button');
-        modeBtn.id = 'readerModeBtn';
-        modeBtn.type = 'button';
-        modeBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        modeBtn.innerHTML = '<i class="bi bi-view-stacked text-light" aria-hidden="true"></i>';
-        modeBtn.onclick = () => setReaderMode(readerMode === 'scroll' ? 'paged' : 'scroll');
-        controls.insertBefore(modeBtn, document.getElementById('pageSelector'));
-    }
-    if (!document.getElementById('readerFitBtn')) {
-        const fitBtn = document.createElement('button');
-        fitBtn.id = 'readerFitBtn';
-        fitBtn.type = 'button';
-        fitBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        fitBtn.innerHTML = '<i class="bi text-light" aria-hidden="true"></i>';
-        fitBtn.onclick = () => setReaderFit(readerFit === 'width' ? 'height' : 'width');
-        controls.insertBefore(fitBtn, document.getElementById('pageSelector'));
-    }
-    if (!document.getElementById('readerTurnBtn')) {
-        const turnBtn = document.createElement('button');
-        turnBtn.id = 'readerTurnBtn';
-        turnBtn.type = 'button';
-        turnBtn.className = 'btn btn-sm btn-outline-light zoom-btn';
-        turnBtn.innerHTML = '<i class="bi bi-book text-light" aria-hidden="true"></i>';
-        turnBtn.onclick = () => setReaderTurn(READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]);
-        controls.insertBefore(turnBtn, document.getElementById('pageSelector'));
-    }
+    initializeReaderViewPanel();
+    setReaderViewPanel(false, { restoreFocus: false });
     updateReaderViewControls();
 }
 
-/** Make the buttons say what they are doing and what a click will do. */
-function updateReaderViewControls() {
-    const modeBtn = document.getElementById('readerModeBtn');
-    if (modeBtn) {
-        const scroll = readerMode === 'scroll';
-        const label = scroll ? 'Scroll mode is on. Switch to page-by-page' : 'Switch to continuous scroll';
-        modeBtn.title = label;
-        modeBtn.setAttribute('aria-label', label);
-        modeBtn.setAttribute('aria-pressed', scroll ? 'true' : 'false');
-        modeBtn.classList.toggle('active', scroll);
-    }
-    const turnBtn = document.getElementById('readerTurnBtn');
-    if (turnBtn) {
-        const names = { slide: 'Slide', turn: 'Turn', none: 'None' };
-        const next = names[READER_TURNS[(READER_TURNS.indexOf(readerTurn) + 1) % READER_TURNS.length]];
-        const label = `Page turn: ${names[readerTurn]}. Switch to ${next}`;
-        turnBtn.title = label;
-        turnBtn.setAttribute('aria-label', label);
-        turnBtn.classList.toggle('active', readerTurn === 'turn');
-        turnBtn.style.display = readerMode === 'scroll' ? 'none' : '';
-    }
-    const fitBtn = document.getElementById('readerFitBtn');
-    if (fitBtn) {
-        const width = readerFit === 'width';
-        const label = width ? 'Fitted to width. Fit whole page instead' : 'Whole page shown. Fit to width instead';
-        fitBtn.title = label;
-        fitBtn.setAttribute('aria-label', label);
-        const icon = fitBtn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('bi-arrow-left-right', width);
-            icon.classList.toggle('bi-arrow-down-up', !width);
+/** One delegated click for every choice; bound once, the markup outlives each comic. */
+function initializeReaderViewPanel() {
+    const btn = document.getElementById('readerViewBtn');
+    const panel = document.getElementById('readerViewPanel');
+    if (!btn || !panel || panel.dataset.bound) return;
+    panel.dataset.bound = '1';
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setReaderViewPanel(panel.hidden);
+    });
+    panel.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const choice = e.target.closest('[data-set]');
+        if (!choice) return;
+        const v = choice.dataset.v;
+        if (choice.dataset.set === 'mode') setReaderMode(v);
+        else if (choice.dataset.set === 'fit') setReaderFit(v);
+        else if (choice.dataset.set === 'turn') setReaderTurn(v);
+    });
+    // A click anywhere else in the reader closes it, as a menu would.
+    document.addEventListener('click', (e) => {
+        if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) {
+            setReaderViewPanel(false, { restoreFocus: false });
         }
-        // Scroll mode is always as wide as its column; fit has no meaning there.
-        fitBtn.style.display = readerMode === 'scroll' ? 'none' : '';
+    });
+}
+
+/**
+ * Open or close the View panel. Opening focuses the current choice; closing
+ * hands focus back to the View button unless the close came from elsewhere.
+ */
+function setReaderViewPanel(open, { restoreFocus = true } = {}) {
+    const btn = document.getElementById('readerViewBtn');
+    const panel = document.getElementById('readerViewPanel');
+    if (!btn || !panel) return;
+    const wasOpen = !panel.hidden;
+    panel.hidden = !open;
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+        const current = panel.querySelector('[aria-pressed="true"]');
+        if (current) current.focus();
+    } else if (wasOpen && restoreFocus) {
+        btn.focus();
     }
+}
+
+/** Mark the current choices. Scroll mode is always as wide as its column, so fit and page turn mean nothing there. */
+function updateReaderViewControls() {
+    const panel = document.getElementById('readerViewPanel');
+    if (!panel) return;
+    const current = { mode: readerMode, fit: readerFit, turn: readerTurn };
+    panel.querySelectorAll('[data-set]').forEach(b => {
+        b.setAttribute('aria-pressed', current[b.dataset.set] === b.dataset.v ? 'true' : 'false');
+    });
+    const scroll = readerMode === 'scroll';
+    panel.querySelectorAll('[data-row="turn"], [data-row="fit"]').forEach(row => { row.hidden = scroll; });
 }
 
 /** Switch between paged and scroll, staying on the same page. */
@@ -2767,6 +2754,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const resumeOverlayEl = document.getElementById('resumeReadingOverlay');
         if (resumeOverlayEl && resumeOverlayEl.style.display !== 'none') {
             dismissResumeOverlay();
+            return;
+        }
+        const viewPanel = document.getElementById('readerViewPanel');
+        if (viewPanel && !viewPanel.hidden) {
+            setReaderViewPanel(false);
             return;
         }
         closeComicReader();
