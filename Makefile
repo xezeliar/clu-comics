@@ -16,7 +16,7 @@
 # docker-compose.yaml must use the same image name; it uses :latest.
 
 IMAGE ?= xezeliars/comic-utils-web
-TAG   ?= latest
+TAG   ?= 7.2.1.20261116.1.0.0
 REF   := $(IMAGE):$(TAG)
 ARGS  ?=
 
@@ -54,3 +54,13 @@ sync-upstream:
 
 test:
 	docker run --rm -v "$(CURDIR):/work" -w /work --entrypoint sh $(REF) scripts/docker-pytest.sh $(ARGS)
+
+down_prd:
+	docker compose -f ../CLU/docker-compose.yml down
+
+up_prd:
+	make down_prd
+	-git fetch
+	-git pull
+	make push
+	docker compose -f ../CLU/docker-compose.yml up -d
