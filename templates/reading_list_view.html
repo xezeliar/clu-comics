@@ -182,7 +182,7 @@
                     style='background-image: url("{{ url_for('get_thumbnail', path=file_path) }}");'
                     onclick="openReadingListComic(this.dataset.filePath)"
                     onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openReadingListComic(this.dataset.filePath); }">
-                    <span class="issue-badge">#{{ entry.issue_number }}<i class="bi bi-check-lg read-icon ms-1" hidden></i><span class="visually-hidden read-label" hidden>, read</span></span>
+                    <span class="issue-badge">#{{ entry.issue_number }}<i class="bi bi-book read-icon"></i><span class="visually-hidden read-label" hidden>, read</span></span>
                 </div>
                 {% else %}
                 <div class="rl-slot">
@@ -225,6 +225,10 @@
                         {% if file_path %}
                         <li><button type="button" class="dropdown-item" onclick="openReadingListComic(this.closest('.rl-it').querySelector('[data-file-path]').dataset.filePath)">
                             <i class="bi bi-book me-2" aria-hidden="true"></i>Read</button></li>
+                        {# Personal data like Read itself, so Readers get it too. #}
+                        <li><button type="button" class="dropdown-item"
+                            onclick="const li = this.closest('.rl-it'); openSetReadDateModal(li.querySelector('[data-file-path]').dataset.filePath, rlIsRead(li))">
+                            <i class="bi bi-calendar-check me-2" aria-hidden="true"></i><span class="set-read-date-text">Set read date</span></button></li>
                         {% endif %}
                         {% if _can_manage %}
                         <li><button type="button" class="dropdown-item"
@@ -507,6 +511,7 @@
 </script>
 {% endif %}
 
+{% include 'partials/modal_set_read_date.html' %}
 <script>
     const LIST_ID = {{ reading_list.id }};
     document.addEventListener('DOMContentLoaded', () => {

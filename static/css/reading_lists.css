@@ -268,11 +268,12 @@ body.reading-list-select-mode .rl-card { cursor: pointer; }
     .rl-it .book-cover:hover { transform: translateY(-4px); }
 }
 .rl-it .book-cover:focus-visible { outline: 2px solid var(--rl-accent); outline-offset: 3px; }
-/* The gold sticker (collection.css .issue-badge); a read issue's carries a
-   tick (.read-icon, bi-check-lg, so collection.css's green read badge, keyed
-   on bi-book-fill, does not apply). */
-.rl-it .issue-badge { top: auto; bottom: 8px; }
-.rl-it .issue-badge .read-icon[hidden] { display: none; }
+/* The issue sticker is collection.css's: gold with an open book, green with a
+   filled one once read (refreshReadState flips bi-book / bi-book-fill), as on
+   Library and Home. Bottom left of the cover here, and below the issue menu
+   (.rl-menu, z-index 4): at collection.css's z-index 10 the sticker drew over
+   an opened menu. */
+.rl-it .issue-badge { top: auto; bottom: 8px; z-index: 1; }
 
 /* A missing issue: a quiet dashed slot, not a grey "?" tile. */
 .rl-slot {

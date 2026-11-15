@@ -1698,10 +1698,17 @@ function refreshReadState() {
         if (path) owned++;
         if (isRead) read++;
         if (path && !isRead && !next) next = li;
+        // The sticker's book is always there, as on Library: open, then filled
+        // (and the sticker green, in collection.css) once read.
         const icon = li.querySelector('.read-icon');
-        if (icon) icon.hidden = !isRead;
+        if (icon) {
+            icon.classList.toggle('bi-book-fill', isRead);
+            icon.classList.toggle('bi-book', !isRead);
+        }
         const label = li.querySelector('.read-label');
         if (label) label.hidden = !isRead;
+        const dateText = li.querySelector('.set-read-date-text');
+        if (dateText) dateText.textContent = isRead ? 'Update read date' : 'Set read date';
         const st = li.querySelector('.rl-st-text');
         if (st) st.textContent = isRead ? 'Read' : (path ? 'In library' : 'Missing');
     });
@@ -1906,6 +1913,41 @@ function openReadingListComic(filePath) {
 function updateReadIcon(comicPath, isRead) {
     if (isRead) readIssuesSet.add(comicPath); else readIssuesSet.delete(comicPath);
     refreshReadState();
+}
+
+// Set Read Date: the dialog and endpoint Library uses (partials/modal_set_read_date.html,
+// POST /api/mark-comic-read). Saving marks the issue read, dated as chosen.
+function openSetReadDateModal(comicPath, isRead) {
+    document.getElementById('readDateComicPath').value = comicPath;
+    document.getElementById('setReadDateModalTitle').textContent = isRead ? 'Update Read Date' : 'Set Read Date';
+    document.getElementById('readDateInput').value = new Date().toISOString().split('T')[0];
+    new bootstrap.Modal(document.getElementById('setReadDateModal')).show();
+}
+
+function submitReadDate() {
+    const comicPath = document.getElementById('readDateComicPath').value;
+    const dateValue = document.getElementById('readDateInput').value;
+    if (!dateValue) {
+        CLU.showError('Please select a date');
+        return;
+    }
+    const readAt = `${dateValue}T${new Date().toTimeString().split(' ')[0]}`;
+    fetch('/api/mark-comic-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: comicPath, read_at: readAt })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                CLU.showError(data.error || 'Failed to save read date');
+                return;
+            }
+            bootstrap.Modal.getInstance(document.getElementById('setReadDateModal')).hide();
+            updateReadIcon(comicPath, true);
+            CLU.showSuccess('Read date saved successfully');
+        })
+        .catch(err => CLU.showError('Error saving read date: ' + err.message));
 }
 
 function buildReadingListEntries() {

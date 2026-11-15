@@ -536,27 +536,7 @@
         </div>
     </div>
 </div>
-<!-- Set Read Date Modal -->
-<div class="modal fade" id="setReadDateModal" tabindex="-1">
-    <div class="modal-dialog modal-sm modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="setReadDateModalTitle">Set Read Date</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <label for="readDateInput" class="form-label">Select the date you read this comic:</label>
-                <input type="date" id="readDateInput" class="form-control">
-                <input type="hidden" id="readDateComicPath">
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="submitReadDate()">Save</button>
-            </div>
-        </div>
-    </div>
-</div>
-<!-- End of Set Read Date Modal -->
+{% include 'partials/modal_set_read_date.html' %}
 {% include 'partials/modal_update_xml.html' %}
 {% include 'partials/modal_series_json.html' %}
 <!-- Bulk Action Bar -->
