@@ -2156,7 +2156,7 @@ document.addEventListener('DOMContentLoaded', function () {
         updateReadIcon(path, true);
     };
 
-    // All reader controls (close, bookmark, resume, next-issue, Escape) are
+    // All reader controls (close, bookmark, resume, Escape) are
     // wired by reader.js -- do not re-bind them here or handlers fire twice.
 });
 

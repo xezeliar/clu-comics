@@ -5,7 +5,7 @@
 // Extracted from collection.js so it can be reused by source_wall and other pages.
 //
 // External contracts:
-//   - window._readerAllItems: Array of {name, path, type, thumbnailUrl?} for next-issue detection
+//   - window._readerAllItems: Array of {name, path, type, thumbnailUrl?} for next issue detection
 //   - window._readerReadIssuesSet: Set of paths already read (optional, for mark-read tracking)
 //   - showError(msg) / showSuccess(msg): toast helpers (optional; errors silently ignored if missing)
 //   - Swiper must be loaded before this script.
@@ -17,7 +17,6 @@ let currentComicPageCount = 0;
 let highestPageViewed = 0;
 let currentComicSiblings = [];  // All comic files in current folder
 let currentComicIndex = -1;     // Index of current comic in siblings
-let nextIssueOverlayShown = false;  // Track if overlay is currently shown
 let savedReadingPosition = null;  // Track saved reading position for current comic
 let readingStartTime = null;      // Start time of current reading session
 let accumulatedTime = 0;          // Total time spent reading prior to this session
@@ -220,7 +219,9 @@ function handleComicReaderKeydown(e) {
     if (e.code === 'Space') {
         e.preventDefault(); // Prevent page scroll
         if (scrollState) {
-            scrollReaderBy((e.shiftKey ? -1 : 1) * 0.9);
+            const sc = scrollState.scroller;
+            if (!e.shiftKey && sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1) goToIssue(1);
+            else scrollReaderBy((e.shiftKey ? -1 : 1) * 0.9);
         } else {
             readerAdvance();
         }
@@ -567,7 +568,7 @@ function scheduleAutoSave() {
 
 /**
  * Mark the current comic finished: record the read and drop the bookmark.
- * Guarded so the next-issue overlay and closeComicReader can't both fire it.
+ * Guarded so continueToNextIssue and closeComicReader can't both fire it.
  */
 function markCurrentComicFinished() {
     if (!currentComicPath || currentComicPageCount <= 0 || completionSent) return;
@@ -629,7 +630,6 @@ function openComicReader(filePath) {
     // stale page count and would evaluate completion for the previous comic.
     currentComicPageCount = 0;
     highestPageViewed = 0;
-    nextIssueOverlayShown = false;
     savedReadingPosition = null;
     readingStartTime = Date.now();
     accumulatedTime = 0;
@@ -657,7 +657,6 @@ function openComicReader(filePath) {
     const pageInfoEl = document.getElementById('comicReaderPageInfo');
 
     // Hide overlays if visible from previous session
-    hideNextIssueOverlay();
     hideResumeReadingOverlay();
 
     // Reset bookmark button state
@@ -668,7 +667,7 @@ function openComicReader(filePath) {
     // Show modal
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent scrolling
-    // Grow from the tapped cover (clu-motion.js); a no-op for next-issue reopens.
+    // Grow from the tapped cover (clu-motion.js); a no-op for next issue reopens.
     if (window.CLU && CLU.readerOpened) CLU.readerOpened(modal);
     blockNativePageZoom();
 
@@ -862,14 +861,6 @@ function initializeComicReader(pageCount, startPage = 0) {
                 fitBaseScale = 1;
                 applyReaderFit(pendingFitAlign);
                 pendingFitAlign = 'top';
-
-                // Check if reached last page - show next issue overlay if available
-                if (lastSeen === pageCount - 1) {
-                    checkAndShowNextIssueOverlay();
-                } else {
-                    // Hide overlay if navigating away from last page
-                    hideNextIssueOverlay();
-                }
 
                 // Load current page
                 loadComicPage(currentIndex);
@@ -1192,6 +1183,8 @@ function readerAdvance() {
             return;
         }
     }
+    // The last page leads straight into the next issue (none: nothing happens).
+    if (comicReaderSwiper.isEnd) { goToIssue(1); return; }
     comicReaderSwiper.slideNext();
 }
 
@@ -1630,7 +1623,8 @@ function handleZoomKeyboard(event) {
         case 'ArrowRight':
             // Always navigate to next page (zoom resets on slide change)
             event.preventDefault();
-            comicReaderSwiper.slideNext();
+            if (comicReaderSwiper.isEnd) goToIssue(1);
+            else comicReaderSwiper.slideNext();
             break;
     }
 }
@@ -2278,11 +2272,6 @@ function syncScrollIndex() {
         if (index > highestPageViewed) highestPageViewed = index;
         scheduleAutoSave();
     }
-    if (index === s.pageCount - 1) {
-        checkAndShowNextIssueOverlay();
-    } else {
-        hideNextIssueOverlay();
-    }
 }
 
 /**
@@ -2505,7 +2494,9 @@ function handleScrollKeyboard(event) {
         case 'PageUp':
             scrollReaderBy(-0.9); break;
         case 'ArrowRight':
-            scrollToReaderPage(s.index + 1); break;
+            if (s.index === s.pageCount - 1) goToIssue(1);
+            else scrollToReaderPage(s.index + 1);
+            break;
         case 'ArrowLeft':
             scrollToReaderPage(s.index - 1); break;
         case 'd': case 'D':
@@ -2581,7 +2572,6 @@ function closeComicReader() {
     highestPageViewed = 0;
     currentComicSiblings = [];
     currentComicIndex = -1;
-    nextIssueOverlayShown = false;
     savedReadingPosition = null;
     lastPersistedPage = null;
 
@@ -2592,7 +2582,6 @@ function closeComicReader() {
     pendingFitAlign = 'top';
 
     // Hide overlays
-    hideNextIssueOverlay();
     hideResumeReadingOverlay();
 
     // Remove keyboard listeners
@@ -2616,63 +2605,6 @@ function closeComicReader() {
         clearTimeout(wheelTimeout);
         wheelTimeout = null;
     }
-}
-
-/**
- * Check if there's a next issue and show the overlay
- */
-function checkAndShowNextIssueOverlay() {
-    // Check if there's a next comic in the folder
-    if (currentComicIndex >= 0 && currentComicIndex + 1 < currentComicSiblings.length) {
-        const nextComic = currentComicSiblings[currentComicIndex + 1];
-        showNextIssueOverlay(nextComic);
-    }
-    // If no next issue, do nothing (close normally per user preference)
-}
-
-/**
- * Show the next issue overlay with comic info
- * @param {Object} nextComic - The next comic file object {name, path}
- */
-function showNextIssueOverlay(nextComic) {
-    if (nextIssueOverlayShown) return;  // Already shown
-
-    const overlay = document.getElementById('nextIssueOverlay');
-    const thumbnail = document.getElementById('nextIssueThumbnail');
-    const nameEl = document.getElementById('nextIssueName');
-
-    if (!overlay) return;
-
-    // Set the next comic name
-    nameEl.textContent = nextComic.name;
-    nameEl.title = nextComic.name;
-
-    // Set thumbnail URL - use existing thumbnailUrl from allItems if available
-    if (nextComic.thumbnailUrl) {
-        thumbnail.src = nextComic.thumbnailUrl;
-    } else {
-        // Fallback to placeholder if no thumbnail available
-        thumbnail.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 150"%3E%3Crect fill="%23333" width="100" height="150"/%3E%3Ctext x="50" y="75" text-anchor="middle" fill="%23666" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
-    }
-    thumbnail.onerror = function () {
-        // Fallback to placeholder on error
-        this.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 150"%3E%3Crect fill="%23333" width="100" height="150"/%3E%3Ctext x="50" y="75" text-anchor="middle" fill="%23666" font-size="12"%3ENo Preview%3C/text%3E%3C/svg%3E';
-    };
-
-    // Show overlay
-    overlay.style.display = 'flex';
-    nextIssueOverlayShown = true;
-}
-
-/**
- * Hide the next issue overlay
- */
-function hideNextIssueOverlay() {
-    const overlay = document.getElementById('nextIssueOverlay');
-    if (overlay) {
-        overlay.style.display = 'none';
-    }
-    nextIssueOverlayShown = false;
 }
 
 /**
@@ -2795,7 +2727,6 @@ function continueToNextIssue() {
     currentComicPath = null;
     currentComicPageCount = 0;
     highestPageViewed = 0;
-    hideNextIssueOverlay();
 
     // Open the next comic (keeping the siblings list intact)
     openComicReader(nextComic.path);
@@ -2838,10 +2769,6 @@ document.addEventListener('DOMContentLoaded', () => {
             dismissResumeOverlay();
             return;
         }
-        if (nextIssueOverlayShown) {
-            hideNextIssueOverlay();
-            return;
-        }
         closeComicReader();
     });
 
@@ -2875,33 +2802,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 150);
     });
-
-    // Next issue overlay handlers
-    const nextIssueContinue = document.getElementById('nextIssueContinue');
-    if (nextIssueContinue) {
-        nextIssueContinue.addEventListener('click', continueToNextIssue);
-    }
-
-    const nextIssueClose = document.getElementById('nextIssueClose');
-    if (nextIssueClose) {
-        nextIssueClose.addEventListener('click', () => {
-            // Reaching this overlay means the comic was finished. The guard
-            // inside markCurrentComicFinished() stops closeComicReader() from
-            // firing a second mark-read + delete for the same comic.
-            markCurrentComicFinished();
-            closeComicReader();
-        });
-    }
-
-    // Close overlay when clicking outside the panel (just dismiss, don't mark as read)
-    const nextIssueOverlay = document.getElementById('nextIssueOverlay');
-    if (nextIssueOverlay) {
-        nextIssueOverlay.addEventListener('click', (e) => {
-            if (e.target === nextIssueOverlay) {
-                hideNextIssueOverlay();
-            }
-        });
-    }
 
     // Bookmark button handler
     const bookmarkBtn = document.getElementById('comicReaderBookmark');
