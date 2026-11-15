@@ -113,6 +113,9 @@
         <div class="rl-desc reading-list-description" id="rlDesc">{{ reading_list.description|safe }}</div>
         <button type="button" class="rl-more" id="rlDescMore" aria-expanded="false" aria-controls="rlDesc" hidden>More</button>
         {% endif %}
+        {% if _can_manage %}
+        <button type="button" class="btn btn-link btn-sm p-0" onclick="openDescriptionModal()">{{ 'Edit description' if reading_list.description else 'Add description' }}</button>
+        {% endif %}
         {% if _total %}
         <div class="rl-run" id="rlRun" aria-hidden="true">
             {%- for entry in _entries %}<i class="{{ 'o' if (entry.manual_override_path or entry.matched_file_path) else 'm' }}"></i>{% endfor -%}
@@ -283,6 +286,27 @@
 </div>
 
 {% if _can_manage %}
+<!-- Description Modal -->
+<div class="modal fade" id="descriptionModal" tabindex="-1" aria-labelledby="descriptionModalTitle" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="descriptionModalTitle">Description</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="descriptionInput">What this list is about</label>
+                <textarea class="form-control" id="descriptionInput" rows="8" maxlength="5000"></textarea>
+                <div class="form-text">Plain text; a blank line starts a new paragraph. Leave it empty to remove the description. Once you write one, a sync from Metron no longer replaces it.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveDescriptionBtn" onclick="saveDescription()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Map File Modal -->
 <div class="modal fade" id="mapFileModal" tabindex="-1">
     <div class="modal-dialog modal-lg">

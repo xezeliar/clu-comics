@@ -160,3 +160,19 @@ class TestAddEntriesPositionAndPaths:
         assert reading_list_paths_in_list(lid, ["/d/a.cbz", "/d/b.cbz", "/d/c.cbz"]) == {
             "/d/a.cbz", "/d/b.cbz"}
         assert reading_list_paths_in_list(lid, []) == set()
+
+
+class TestDescriptionEditedFlag:
+    def test_flag_set_cleared_and_kept(self, db_connection):
+        from core.database import (
+            create_reading_list, get_reading_list, update_reading_list_description,
+        )
+        lid = create_reading_list("L")
+        update_reading_list_description(lid, "<p>mine</p>", edited=True)
+        row = get_reading_list(lid)
+        assert row["description"] == "<p>mine</p>" and row["description_edited"] == 1
+        update_reading_list_description(lid, "<p>x</p>")  # edited=None keeps the flag
+        assert get_reading_list(lid)["description_edited"] == 1
+        update_reading_list_description(lid, None, edited=False)
+        row = get_reading_list(lid)
+        assert row["description"] is None and row["description_edited"] == 0

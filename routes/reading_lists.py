@@ -815,6 +815,30 @@ def update_name(list_id):
         return jsonify({'success': False, 'message': 'Failed to update name'})
 
 
+def _description_html(text):
+    """Plain text from the editor to the stored form: blank-line separated
+    paragraphs as <p>, single newlines as <br>, everything escaped."""
+    import html as _html
+    paras = [p.strip() for p in re_module.split(r'\n\s*\n', text.replace('\r\n', '\n')) if p.strip()]
+    return ''.join(f"<p>{_html.escape(p).replace(chr(10), '<br>')}</p>" for p in paras)
+
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/description', methods=['POST'])
+def update_description(list_id):
+    """Set a reading list's description from plain text; empty clears it."""
+    data = request.get_json(silent=True) or {}
+    text = data.get('description', '')
+    if not isinstance(text, str) or len(text) > 5000:
+        return jsonify({'success': False, 'message': 'Description must be text up to 5000 characters'}), 400
+    html_text = _description_html(text.strip())
+    # A cleared description goes back to the sync (edited=False); text is the user's.
+    ok = update_reading_list_description(
+        list_id, html_text or None, edited=bool(html_text))
+    if not ok:
+        return jsonify({'success': False, 'message': 'Failed to update description'}), 500
+    return jsonify({'success': True, 'message': 'Description updated'})
+
+
 @reading_lists_bp.route('/api/reading-lists/<int:list_id>/tags', methods=['POST'])
 def update_tags(list_id):
     """Update the tags for a reading list."""
