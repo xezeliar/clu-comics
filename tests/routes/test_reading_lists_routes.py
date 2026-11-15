@@ -1015,3 +1015,45 @@ class TestExcludeAutoSync:
                     json={"enabled": True})
         html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
         assert 'data-tracking="1"' in html
+
+
+class TestReadingListTagDisplay:
+    """Tags are shown, not only filterable: the first as a pill on the card,
+    all of them on the list's own page."""
+
+    @staticmethod
+    def _tagged(tags):
+        from core.database import create_reading_list, update_reading_list_tags
+        list_id = create_reading_list("Dead Letters")
+        if tags:
+            update_reading_list_tags(list_id, tags)
+        return list_id
+
+    def test_card_shows_only_the_first_tag(self, client):
+        self._tagged(["Event", "Crossover", "Favourites"])
+        html = client.get("/reading-lists").get_data(as_text=True)
+        assert html.count('class="rl-tagpill"') == 1
+        assert 'data-tag="Event"' in html.split('class="rl-tagpill"', 1)[1].split("</button>", 1)[0]
+        assert 'rl-tagpill" data-tag="Crossover"' not in html
+
+    def test_untagged_card_has_no_pill(self, client):
+        self._tagged([])
+        assert 'class="rl-tagpill"' not in client.get("/reading-lists").get_data(as_text=True)
+
+    def test_pill_is_pressed_when_its_tag_filter_is_active(self, client):
+        self._tagged(["Event"])
+        html = client.get("/reading-lists?tag=Event").get_data(as_text=True)
+        assert re.search(r'class="rl-tagpill" data-tag="Event" aria-pressed="true"', html)
+        page = client.get("/api/reading-lists/page?tag=Event").get_json()["html"]
+        assert 'aria-pressed="true"' in page.split('class="rl-tagpill"', 1)[1].split(">", 1)[0] + ">"
+
+    def test_list_page_shows_every_tag_as_a_link_to_the_filtered_index(self, client):
+        list_id = self._tagged(["Event", "Crossover"])
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+        assert 'href="/reading-lists?tag=Event"' in html
+        assert 'href="/reading-lists?tag=Crossover"' in html
+        assert "Edit tags" in html
+
+    def test_list_page_offers_add_tags_when_there_are_none(self, client):
+        list_id = self._tagged([])
+        assert "Add tags" in client.get(f"/reading-lists/{list_id}").get_data(as_text=True)

@@ -21,6 +21,19 @@ function initTagFilters() {
     });
 }
 
+// A card's tag pill is a shortcut to the same Tags filter: it presses the
+// matching #rlTags button, so the filter state has one owner. The grid is
+// re-rendered by the filter, which also redraws the pill's pressed state.
+document.addEventListener('click', e => {
+    const pill = e.target.closest('.rl-tagpill');
+    if (!pill) return;
+    const group = document.getElementById('rlTags');
+    if (!group) return;
+    const btn = Array.from(group.querySelectorAll('[data-value]'))
+        .find(b => b.getAttribute('data-value') === pill.dataset.tag);
+    if (btn) btn.click();
+});
+
 // The server filters (a list must carry ALL active tags), sorts and pages;
 // this asks for page 1 of the new filter. A selected list the new filter
 // excludes is dropped, so a bulk delete never reaches a card you cannot see.

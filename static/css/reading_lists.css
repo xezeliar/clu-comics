@@ -121,6 +121,59 @@
     box-shadow: inset 0 0 0 1px var(--rl-accent);
 }
 
+/* Tag pill: the list's first tag, a sticker on the cover (top left; Want to
+   Read keeps top right). Art, so literal colours, as on Library stickers. */
+.rl-tagpill {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3; /* above the title link stretched over the card (z-index 2) */
+    max-width: calc(100% - 3.25rem);
+    display: inline-flex;
+    align-items: center;
+    gap: .3em;
+    padding: .05rem .5rem;
+    border: 0;
+    border-radius: 1rem;
+    font-size: .75rem;
+    line-height: 1.4;
+    background: rgba(0, 0, 0, .6);
+    color: #fff;
+    cursor: pointer;
+    transition: background-color .12s;
+}
+.rl-tagpill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rl-tagpill .bi { font-size: .85em; flex: none; }
+.rl-tagpill:hover { background: rgba(0, 0, 0, .78); }
+.rl-tagpill[aria-pressed="true"] {
+    background: rgba(255, 255, 255, .94);
+    color: #212529;
+    outline: 1px solid rgba(0, 0, 0, .65);
+}
+.rl-tagpill:focus-visible { outline: 2px solid #fff; outline-offset: 0; box-shadow: 0 0 0 4px rgba(0, 0, 0, .75); }
+.rl-tagpill::before { content: ""; position: absolute; inset: -.5rem -.15rem; }
+@media (pointer: fine) { .rl-tagpill::before { display: none; } }
+/* The select-mode checkbox takes that corner. */
+body.reading-list-select-mode .rl-tagpill { display: none; }
+
+/* A list's page: every tag, linking to the index filtered by it. */
+.rl-ltags { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: .5rem; }
+.rl-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: .3em;
+    padding: .1rem .6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 1rem;
+    font-size: .8125rem;
+    line-height: 1.4;
+    color: var(--bs-body-color);
+    text-decoration: none;
+}
+.rl-tag:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+.rl-tag .bi { font-size: .85em; opacity: .75; }
+@media (pointer: coarse) { .rl-ltags .btn-link { min-height: 2.75rem; } }
+
 .rl-foot { display: flex; gap: .15rem; align-items: flex-start; margin-top: .55rem; }
 .rl-foot > div:first-child { flex: 1; min-width: 0; }
 .rl-t {

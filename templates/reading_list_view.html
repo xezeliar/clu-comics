@@ -95,6 +95,20 @@
         {% if source_label %}
         <p class="rl-src">{{ source_label }}{% if reading_list.last_synced %} · synced {{ reading_list.last_synced|string|truncate(10, True, '') }}{% endif %}</p>
         {% endif %}
+        {#- Every tag; each shows the index filtered by it. A Clerk edits them
+            in the existing Tags dialog; a Reader sees them and nothing else. -#}
+        {% set _tags = reading_list.tags or [] %}
+        {% if _tags or _can_manage %}
+        <div class="rl-ltags" role="group" aria-label="Tags">
+            {%- for tag in _tags %}
+            <a class="rl-tag" href="{{ url_for('reading_lists.index', tag=tag) }}"><i class="bi bi-tag" aria-hidden="true"></i>{{ tag }}</a>
+            {%- endfor %}
+            {% if _can_manage %}
+            <button type="button" class="btn btn-link btn-sm p-0 ms-1"
+                onclick='openTagsModal({{ reading_list.id }}, {{ _tags|tojson|safe }})'>{{ 'Edit tags' if _tags else 'Add tags' }}</button>
+            {% endif %}
+        </div>
+        {% endif %}
         {% if reading_list.description %}
         <div class="rl-desc reading-list-description" id="rlDesc">{{ reading_list.description|safe }}</div>
         <button type="button" class="rl-more" id="rlDescMore" aria-expanded="false" aria-controls="rlDesc" hidden>More</button>
@@ -505,6 +519,7 @@
 <script>
     window._cluSeriesSetupDefaultLibrary = {{ (libraries[0].path if libraries else '')|tojson }};
 </script>
+{% include 'partials/modal_reading_list_tags.html' %}
 {% endif %}
 
 <script>

@@ -12816,6 +12816,8 @@ def get_reading_list(list_id):
             return None
 
         result = dict(list_row)
+        # A list of strings, as the grid query returns it, never the raw JSON.
+        result["tags"] = _reading_list_tags(result.get("tags"))
 
         # Get entries
         c.execute(

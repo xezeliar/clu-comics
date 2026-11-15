@@ -194,7 +194,7 @@ def grid_page():
                                     query=query, show=show)
     html = render_template('partials/reading_list_cards.html', lists=result['lists'],
                            grid_query=query, grid_filtered=bool(tags or show),
-                           source_label=source_label)
+                           active_tags=tags, source_label=source_label)
     return jsonify({
         'success': True,
         'html': html,
