@@ -1600,7 +1600,7 @@ function renderAddQueue() {
     const n = addQueue.length;
     box.replaceChildren();
     if (!n) {
-        box.innerHTML = '<div class="list-group-item text-body-secondary small">Click covers to queue them. The number is the add order; Shift-click picks a range.</div>';
+        box.innerHTML = '<div class="list-group-item add-issue-empty text-body-secondary small">Click covers to queue them. The number is the add order; Shift-click picks a range.</div>';
     }
     addQueue.forEach((file, i) => {
         const row = document.createElement('div');
