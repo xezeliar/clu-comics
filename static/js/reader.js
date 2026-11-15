@@ -214,8 +214,14 @@ function _isFormControlTarget(target) {
 function handleComicReaderKeydown(e) {
     if (!readerHasView()) return;
     if (_isFormControlTarget(e.target)) return;
-    // Space on a focused toolbar button presses it; it must not also turn the page.
-    if (e.target.closest && e.target.closest('button')) return;
+    // Space on a keyboard-focused toolbar button presses it; it must not also
+    // turn the page. A button that only holds focus from a mouse click lets go,
+    // so Space reads on instead of pressing it again.
+    const focusedButton = e.target.closest && e.target.closest('button');
+    if (focusedButton) {
+        if (focusedButton.matches(':focus-visible')) return;
+        focusedButton.blur();
+    }
 
     // Spacebar to advance
     if (e.code === 'Space') {
@@ -280,6 +286,13 @@ function ensureReaderViewControls() {
     updateReaderViewControls();
 }
 
+let readerPanelDismissedAt = 0;
+
+/** True for the tap or click that just closed the View panel. */
+function readerPanelJustDismissed() {
+    return Date.now() - readerPanelDismissedAt < 600;
+}
+
 /** One delegated click for every choice; bound once, the markup outlives each comic. */
 function initializeReaderViewPanel() {
     const btn = document.getElementById('readerViewBtn');
@@ -299,12 +312,14 @@ function initializeReaderViewPanel() {
         else if (choice.dataset.set === 'fit') setReaderFit(v);
         else if (choice.dataset.set === 'turn') setReaderTurn(v);
     });
-    // A click anywhere else in the reader closes it, as a menu would.
-    document.addEventListener('click', (e) => {
+    // A press anywhere else closes it, as a menu would, and that press does
+    // nothing else (no page turn, no chrome toggle, no closing the reader).
+    document.addEventListener('pointerdown', (e) => {
         if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) {
             setReaderViewPanel(false, { restoreFocus: false });
+            readerPanelDismissedAt = Date.now();
         }
-    });
+    }, { capture: true });
 }
 
 /**
@@ -609,6 +624,12 @@ function readerSlideTo(index) {
         return;
     }
     if (!comicReaderSwiper) return;
+    // Already there: Swiper fires no slideChange, so a set flag would swallow
+    // the next real page turn.
+    if (index === comicReaderSwiper.activeIndex) {
+        syncPageScrubber(index);
+        return;
+    }
     suppressProgressOnNextChange = true;
     comicReaderSwiper.slideTo(index);
 }
@@ -890,6 +911,7 @@ function initializeComicReader(pageCount, startPage = 0) {
             // Not gated on device: a mouse click hides it on desktop too, and the
             // gate is what left a rotated tablet unable to hide it.
             tap: function (swiper, event) {
+                if (readerPanelJustDismissed()) return;
                 // Don't toggle chrome when zoomed in (user is panning). Being
                 // fitted to the width is not "zoomed in".
                 if (readerZoomedBeyondFit()) return;
@@ -1046,6 +1068,10 @@ function initializePageScrubber(pageCount, startPage) {
             }, wait);
         }
     });
+    // After a drag, hand the keys back to the reader: focus left on the range
+    // would make → step the scrubber (a jump, not counted as reading).
+    // Keyboard users who tab to it keep arrow stepping.
+    scrubber.addEventListener('pointerup', () => scrubber.blur());
     scrubber.addEventListener('change', () => {
         clearTimeout(previewTimer);
         hideScrubTip();
@@ -2133,6 +2159,7 @@ function initializeScrollReader(pageCount, startPage = 0) {
     // attachScrollTap below: iOS WebKit never sends `click` for a tap on a
     // plain element, so on an iPhone this listener alone did nothing.
     s.onClick = () => {
+        if (readerPanelJustDismissed()) return;
         if (s.lastPointerType && s.lastPointerType !== 'mouse') return;
         if (s.suppressClickUntil && Date.now() < s.suppressClickUntil) return;
         const sel = window.getSelection && window.getSelection();
@@ -2434,6 +2461,7 @@ function attachScrollTap(s) {
 }
 
 function handleScrollTap(s, x, y) {
+    if (readerPanelJustDismissed()) return;
     const zone = readerTapZone(s.scroller, x);
     if (zone !== 'middle') {
         scrollReaderBy(zone === 'back' ? -0.9 : 0.9);
@@ -2563,12 +2591,8 @@ function closeComicReader() {
     document.body.style.overflow = ''; // Restore scrolling
     allowNativePageZoom();
 
-    // Reset immersive reader chrome state
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.remove('reader-chrome-hidden');
-    }
-    readerChromeHidden = false;
+    // Reset immersive reader chrome state (and its inert, or the next open's pills are dead)
+    toggleReaderChrome(false);
     if (chromeToggleTimeout) {
         clearTimeout(chromeToggleTimeout);
         chromeToggleTimeout = null;
@@ -2759,7 +2783,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close on overlay click
     const overlay = document.querySelector('.comic-reader-overlay');
     if (overlay) {
-        overlay.addEventListener('click', closeComicReader);
+        overlay.addEventListener('click', () => {
+            if (!readerPanelJustDismissed()) closeComicReader();
+        });
     }
 
     // Close on Escape key. If a decision overlay is up, Escape dismisses that
