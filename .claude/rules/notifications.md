@@ -98,3 +98,17 @@ covers the other two in one call, and the page fires both.
 - **Untracked DC++ bundles are never cleared.** They mirror AirDC++'s own queue
   out of `_bundle_snapshot`, not `dcpp_downloads`, and they are not CLU's to
   forget.
+
+### Message format: HTML bodies, icons, covers
+
+Bodies are **HTML** (`core.notifications.BODY_FORMAT`), built with `esc()` and
+`source_line()`. Apprise 2.2 converts HTML to Markdown (Discord, ntfy) and to
+text (SMS), but has no Markdown-to-text converter, so a Markdown body would reach
+text-only services with its asterisks showing. Every interpolated value goes
+through `esc()`. `notify()` prefixes the title with `EVENT_DEFS[event]["icon"]`.
+A cover is attached only when one comic is the subject (`cover_path` on a
+completed download, and on a wanted digest of exactly one issue). `_cover_image`
+reuses a fresh cached thumbnail, else renders to a temp file that is deleted
+after the send — never the thumbnail cache, because a fresh download sits in
+WATCH and is about to move. Asserted in `tests/unit/test_notifications.py` and
+`tests/unit/test_download_notify_hooks.py`.

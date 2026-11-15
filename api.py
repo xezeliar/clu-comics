@@ -583,7 +583,10 @@ def process_download(task):
             notify_async(
                 EVENT_DOWNLOAD_COMPLETE,
                 "Download complete",
-                download_notification_body(dest_filename, file_path, provider_name),
+                download_notification_body(
+                    dest_filename, file_path, provider_name, page_url=source_page_url,
+                ),
+                cover_path=file_path,
             )
             record_event(
                 'download', f"Downloaded {dest_filename or os.path.basename(file_path or '') or 'a file'}",

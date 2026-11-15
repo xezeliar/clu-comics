@@ -25,7 +25,7 @@ class TestDownloadNotificationBody:
         from core.download_utils import download_notification_body
 
         body = download_notification_body("Batman 001.cbz")
-        assert body.startswith("Batman 001.cbz")
+        assert body.startswith("<b>Batman 001.cbz</b>")
 
     def test_includes_the_provider(self):
         from core.download_utils import download_notification_body
@@ -46,18 +46,18 @@ class TestDownloadNotificationBody:
         body = download_notification_body(
             None, file_path=os.path.join("downloads", "temp", "Batman 001.cbz")
         )
-        assert body.startswith("Batman 001.cbz")
+        assert body.startswith("<b>Batman 001.cbz</b>")
 
     def test_falls_back_to_unknown_file(self):
         from core.download_utils import download_notification_body
 
-        assert download_notification_body(None) == "Unknown file"
+        assert download_notification_body(None) == "<b>Unknown file</b>"
 
     def test_one_field_per_line(self):
         from core.download_utils import download_notification_body
 
         body = download_notification_body("a.cbz", provider="MEGA", error="boom")
-        assert body.splitlines() == ["a.cbz", "Source: MEGA", "Error: boom"]
+        assert body.split("<br/>") == ["<b>a.cbz</b>", "Source: MEGA", "Error: boom"]
 
     def test_reports_the_automatic_retries_that_were_spent(self):
         """Distinguishes "a mirror hiccuped" from "CLU tried for twenty minutes
@@ -65,25 +65,54 @@ class TestDownloadNotificationBody:
         from core.download_utils import download_notification_body
 
         body = download_notification_body("a.cbz", error="boom", attempts=3)
-        assert body.splitlines()[-1] == "Gave up after 3 automatic retries"
+        assert body.split("<br/>")[-1] == "Gave up after 3 automatic retries"
 
     def test_a_single_retry_reads_naturally(self):
         from core.download_utils import download_notification_body
 
         body = download_notification_body("a.cbz", attempts=1)
-        assert body.splitlines()[-1] == "Gave up after 1 automatic retry"
+        assert body.split("<br/>")[-1] == "Gave up after 1 automatic retry"
 
     def test_no_retry_line_when_none_were_spent(self):
         """A Cloudflare failure is reported immediately, with no retries."""
         from core.download_utils import download_notification_body
 
-        assert download_notification_body("a.cbz", attempts=0) == "a.cbz"
-        assert download_notification_body("a.cbz") == "a.cbz"
+        assert download_notification_body("a.cbz", attempts=0) == "<b>a.cbz</b>"
+        assert download_notification_body("a.cbz") == "<b>a.cbz</b>"
 
     def test_a_junk_attempt_count_is_ignored(self):
         from core.download_utils import download_notification_body
 
-        assert download_notification_body("a.cbz", attempts=None) == "a.cbz"
+        assert download_notification_body("a.cbz", attempts=None) == "<b>a.cbz</b>"
+
+
+    def test_links_the_source_page(self):
+        from core.download_utils import download_notification_body
+
+        body = download_notification_body(
+            "a.cbz", provider="GetComics", page_url="https://getcomics.org/a?b=1&c=2"
+        )
+        assert 'Source: <a href="https://getcomics.org/a?b=1&amp;c=2">GetComics</a>' in body
+
+    def test_a_page_without_a_provider_is_labelled_by_its_host(self):
+        from core.download_utils import download_notification_body
+
+        body = download_notification_body("a.cbz", page_url="https://getcomics.org/x")
+        assert '>getcomics.org</a>' in body
+
+    def test_no_page_url_means_no_link(self):
+        from core.download_utils import download_notification_body
+
+        body = download_notification_body("a.cbz", provider="GetComics")
+        assert "Source: GetComics" in body
+        assert "<a" not in body
+
+    def test_names_and_errors_are_escaped(self):
+        from core.download_utils import download_notification_body
+
+        body = download_notification_body("a & <b>.cbz", error="<boom>")
+        assert "<b>a &amp; &lt;b&gt;.cbz</b>" in body
+        assert "Error: &lt;boom&gt;" in body
 
 
 def _process_download_body():
@@ -216,3 +245,40 @@ class TestAutoRetryDefersTheFailureNotification:
             assert any(isinstance(x, ast.Return) for x in stmt.body)
             return
         pytest.fail("_schedule_auto_retry not found in process_download")
+
+
+def _notify_calls(path, event):
+    """Every ``notify_async(<event>, ...)`` call in ``path``, by AST."""
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    return [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "notify_async" and n.args
+        and isinstance(n.args[0], ast.Name) and n.args[0].id == event
+    ]
+
+
+def _kwargs(call):
+    return {k.arg for k in call.keywords}
+
+
+class TestCoverAndSourceLinkWiring:
+    """api.py and app.py cannot be imported in tests, so this is structural."""
+
+    def test_download_complete_attaches_the_cover_and_links_the_page(self):
+        calls = _notify_calls(API_PATH, "EVENT_DOWNLOAD_COMPLETE")
+        assert calls
+        for call in calls:
+            assert "cover_path" in _kwargs(call)
+            body = call.args[2]
+            assert "page_url" in _kwargs(body)
+
+    def test_a_failed_download_attaches_nothing(self):
+        for call in _notify_calls(API_PATH, "EVENT_DOWNLOAD_FAILED"):
+            assert "cover_path" not in _kwargs(call)
+
+    def test_wanted_digest_passes_a_cover(self):
+        calls = _notify_calls(os.path.join(PROJECT_ROOT, "app.py"), "EVENT_WANTED_ADDED")
+        assert len(calls) == 1
+        assert "cover_path" in _kwargs(calls[0])

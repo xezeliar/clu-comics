@@ -121,7 +121,7 @@ class TestNotify:
 
         fake_apprise.add.assert_called_once_with("ntfy://ntfy.sh/test")
         fake_apprise.notify.assert_called_once_with(
-            title="Title", body="Body", notify_type="success"
+            title="✅ Title", body="Body", notify_type="success", body_format="html"
         )
 
     def test_failure_event_uses_failure_notify_type(self, fake_apprise):
@@ -211,6 +211,121 @@ class TestNotify:
         fake_apprise.notify.assert_not_called()
 
 
+class TestIconsAndCover:
+    def test_every_event_has_its_icon(self):
+        from core.notifications import (
+            EVENT_DB_CORRUPT, EVENT_DEFS, EVENT_DOWNLOAD_COMPLETE,
+            EVENT_DOWNLOAD_FAILED, EVENT_WANTED_ADDED,
+        )
+
+        assert EVENT_DEFS[EVENT_DOWNLOAD_COMPLETE]["icon"] == "✅"
+        assert EVENT_DEFS[EVENT_DOWNLOAD_FAILED]["icon"] == "❌"
+        assert EVENT_DEFS[EVENT_WANTED_ADDED]["icon"] == "📚"
+        assert EVENT_DEFS[EVENT_DB_CORRUPT]["icon"] == "⚠️"
+
+    def test_cover_is_attached(self, fake_apprise):
+        from core.notifications import EVENT_DOWNLOAD_COMPLETE, notify
+
+        with patch("core.notifications.get_settings", return_value=_settings()), \
+                patch("core.notifications._cover_image", return_value=("/c/x.jpg", False)):
+            assert notify(EVENT_DOWNLOAD_COMPLETE, "T", "B", cover_path="/l/a.cbz")
+
+        assert fake_apprise.notify.call_args.kwargs["attach"] == "/c/x.jpg"
+
+    def test_unresolvable_cover_still_sends(self, fake_apprise):
+        from core.notifications import EVENT_DOWNLOAD_COMPLETE, notify
+
+        with patch("core.notifications.get_settings", return_value=_settings()), \
+                patch("core.notifications._cover_image", return_value=(None, False)):
+            assert notify(EVENT_DOWNLOAD_COMPLETE, "T", "B", cover_path="/l/a.cbz")
+
+        assert "attach" not in fake_apprise.notify.call_args.kwargs
+
+    def test_a_temp_cover_is_removed_after_sending(self, fake_apprise, tmp_path):
+        from core.notifications import EVENT_DOWNLOAD_COMPLETE, notify
+
+        tmp = tmp_path / "c.jpg"
+        tmp.write_bytes(b"x")
+        with patch("core.notifications.get_settings", return_value=_settings()), \
+                patch("core.notifications._cover_image", return_value=(str(tmp), True)):
+            notify(EVENT_DOWNLOAD_COMPLETE, "T", "B", cover_path="/l/a.cbz")
+
+        assert not tmp.exists()
+
+    def test_missing_file_has_no_cover(self):
+        from core.notifications import _cover_image
+
+        assert _cover_image("/nope/a.cbz") == (None, False)
+        assert _cover_image(None) == (None, False)
+
+    def test_unreadable_archive_has_no_cover(self, tmp_path):
+        from core.notifications import _cover_image
+
+        bad = tmp_path / "a.cbz"
+        bad.write_bytes(b"not a zip")
+        with patch("core.thumbnail_cache.thumbnail_cache_path",
+                   return_value=str(tmp_path / "none.jpg")):
+            assert _cover_image(str(bad)) == (None, False)
+
+    def test_a_pdf_has_no_cover(self, tmp_path):
+        from core.notifications import _cover_image
+
+        pdf = tmp_path / "a.pdf"
+        pdf.write_bytes(b"%PDF")
+        assert _cover_image(str(pdf)) == (None, False)
+
+    def test_a_fresh_cached_thumbnail_is_reused(self, tmp_path):
+        from core.notifications import _cover_image
+
+        comic = tmp_path / "a.cbz"
+        comic.write_bytes(b"x")
+        cached = tmp_path / "t.jpg"
+        cached.write_bytes(b"jpg")
+        with patch("core.thumbnail_cache.thumbnail_cache_path", return_value=str(cached)), \
+                patch("core.thumbnail_cache.is_thumbnail_stale", return_value=False), \
+                patch("core.thumbnail_cache._first_page") as render:
+            assert _cover_image(str(comic)) == (str(cached), False)
+        render.assert_not_called()
+
+    def test_renders_to_a_temp_file_when_not_cached(self, tmp_path):
+        import os
+        import zipfile
+        from PIL import Image
+        from core.notifications import _cover_image
+
+        page = tmp_path / "p.jpg"
+        Image.new("RGB", (40, 60), "red").save(page)
+        comic = tmp_path / "a.cbz"
+        with zipfile.ZipFile(comic, "w") as zf:
+            zf.write(page, "001.jpg")
+        with patch("core.thumbnail_cache.thumbnail_cache_path",
+                   return_value=str(tmp_path / "none.jpg")):
+            path, is_temp = _cover_image(str(comic))
+        try:
+            assert is_temp and os.path.getsize(path) > 0
+        finally:
+            os.remove(path)
+
+    def test_test_message_has_the_bell(self, fake_apprise):
+        from core.notifications import send_test
+
+        send_test("ntfy://ntfy.sh/test")
+        assert fake_apprise.notify.call_args.kwargs["title"].startswith("\U0001F514 ")
+
+    def test_digest_items_are_escaped(self):
+        from core.notifications import format_digest
+
+        assert "X &amp; Y #1" in format_digest("Added:", ["X & Y #1"])
+
+    def test_poller_body_escapes_the_filename(self):
+        from core.notifications import notify_download_terminal
+
+        with patch("core.notifications.notify_async") as notify:
+            notify_download_terminal("complete", "a&b.cbz", source="SABnzbd")
+
+        assert "<b>a&amp;b.cbz</b>" in notify.call_args.args[2]
+
+
 class TestNotifyAsync:
     def test_skips_thread_when_disabled(self):
         from core.notifications import EVENT_DOWNLOAD_COMPLETE, notify_async
@@ -233,7 +348,7 @@ class TestNotifyAsync:
         assert thread.call_args.kwargs["daemon"] is True
         assert thread.call_args.kwargs["target"] is notify
         assert thread.call_args.kwargs["args"] == (
-            EVENT_DOWNLOAD_COMPLETE, "Title", "Body",
+            EVENT_DOWNLOAD_COMPLETE, "Title", "Body", None,
         )
         thread.return_value.start.assert_called_once()
 

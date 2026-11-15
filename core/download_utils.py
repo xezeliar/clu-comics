@@ -754,7 +754,7 @@ def watch_drain_timeout_seconds(reconcile_interval_minutes=5) -> int:
 
 
 def download_notification_body(dest_filename, file_path=None, provider=None,
-                               error=None, attempts=0):
+                               error=None, attempts=0, page_url=None):
     """Build the body of a download-complete/failed notification.
 
     Lives here rather than in api.py so it can be tested without triggering
@@ -771,11 +771,16 @@ def download_notification_body(dest_filename, file_path=None, provider=None,
     name = dest_filename
     if not name and file_path:
         name = os.path.basename(file_path)
-    lines = [name or "Unknown file"]
-    if provider:
-        lines.append(f"Source: {provider}")
+    # The body is HTML (see core.notifications.BODY_FORMAT); page_url is the
+    # post page the comic was found on, never the expiring file link.
+    from core.notifications import esc, source_line
+
+    lines = [f"<b>{esc(name or 'Unknown file')}</b>"]
+    source = source_line(provider, page_url)
+    if source:
+        lines.append(source)
     if error:
-        lines.append(f"Error: {error}")
+        lines.append(f"Error: {esc(error)}")
     try:
         attempts = int(attempts)
     except (TypeError, ValueError):
@@ -784,7 +789,7 @@ def download_notification_body(dest_filename, file_path=None, provider=None,
         lines.append("Gave up after 1 automatic retry")
     elif attempts > 1:
         lines.append(f"Gave up after {attempts} automatic retries")
-    return "\n".join(lines)
+    return "<br/>".join(lines)
 
 
 # ---------------------------------------------------------------------------
