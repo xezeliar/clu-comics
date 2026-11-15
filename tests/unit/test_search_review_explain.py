@@ -2,6 +2,7 @@
 
 import ast
 import os
+import re
 
 from models.getcomics import (
     ACCEPT_THRESHOLD, BORDERLINE_MARGIN, ComicScore, explain_decision, is_borderline,
@@ -54,8 +55,9 @@ def _func():
 
 def test_sweep_wiring():
     src = ast.get_source_segment(open(APP, encoding="utf-8").read(), _func())
-    # hold is never applied to a scoped run
-    assert 'get_bool("REVIEW_BEFORE_DOWNLOAD") and only_series_id is None' in src
+    # hold is never applied to a scoped run (one series, or Wanted's bulk Search)
+    assert re.search(r'get_bool\("REVIEW_BEFORE_DOWNLOAD"\)\s+and only_series_id is None'
+                     r' and only_issues is None', src)
     assert "is_borderline(" in src and "explain_decision(" in src
     assert src.count("return_detail=True") == 2
     assert "record_search_attempt(" in src

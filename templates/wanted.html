@@ -94,7 +94,8 @@
     {% set wanted_rows = missing|length + upcoming|length + reading_list_wanted|length %}
     {% call toolbar('Filter wanted issues', id='wantedToolbar') %}
         <div class="clu-toolbar-row">
-            {{ search_input('wantedSearch', 'Search series and reading lists', value=request.args.get('q', '')) }}
+            {% set wanted_q = request.args.get('q', '') %}
+            {{ search_input('wantedSearch', 'Search series and reading lists', value=wanted_q) }}
             <div class="clu-toolbar-end">
                 {{ result_count('wantedCount', wanted_rows, 'wanted issues', one='wanted issue') }}
                 {% if missing or ignored %}

@@ -14,8 +14,15 @@ def test_series_routes_writers_use_the_fallback():
     src = _read("routes/series.py")
     writes = re.findall(r"write_series_json\(", src)
     fallbacks = re.findall(r"with_description_fallback\(", src)
-    assert len(writes) == 3
-    assert len(fallbacks) == 3
+    assert len(writes) == 2
+    assert len(fallbacks) == 2
+
+
+def test_subscribe_writer_uses_the_fallback():
+    # Subscribe's series.json write moved here from routes/series.py.
+    src = _read("core/series_subscribe.py")
+    assert src.count("write_series_json(") == 1
+    assert "with_description_fallback(series, path)" in src
 
 
 def test_bulk_sidecar_writer_uses_the_fallback():

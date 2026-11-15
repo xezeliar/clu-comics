@@ -1566,7 +1566,8 @@ let addAnchor = -1;
 let addPosition = 'end';
 
 function addCoverUrl(path) {
-    return `/api/thumbnail?path=${encodeURIComponent(path)}`;
+    // %27: encodeURIComponent leaves ' alone, which would end the CSS url('...') string.
+    return `/api/thumbnail?path=${encodeURIComponent(path).replace(/'/g, '%27')}`;
 }
 
 function addSelectable() {

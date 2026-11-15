@@ -13,7 +13,7 @@
 {% set ns = namespace(letters=[]) %}
 {% for person in people %}
   {% set c = person.name[:1] | upper %}
-  {% set key = c if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' else '#' %}
+  {% set key = c if 'A' <= c <= 'Z' else '#' %}
   {% if key not in ns.letters %}{% set ns.letters = ns.letters + [key] %}{% endif %}
 {% endfor %}
 {% set letters = ns.letters %}
@@ -37,7 +37,7 @@
 
     {% call toolbar('Search and filter ' ~ noun) %}
         <div class="clu-toolbar-row">
-            {{ search_input('peopleSearch', 'Search ' ~ noun, q) }}
+            {{ search_input('peopleSearch', 'Search ' ~ noun, value=q) }}
             <div class="clu-toolbar-end">
                 {{ result_count('peopleCount', people | length, noun, one) }}
             </div>

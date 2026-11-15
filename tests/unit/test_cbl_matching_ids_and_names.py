@@ -399,7 +399,10 @@ class TestMapModalEscaping:
                # reduced to [A-Za-z0-9_] for an id -- nothing left to inject
                if "replace(/[^a-zA-Z0-9]/g" not in m]
         assert raw == [], raw
-        assert js.count("CLU.escapeHtml(file.path)") >= 3
+        assert (js.count("CLU.escapeHtml(file.path)")
+                + js.count("CLU.escapeHtml(addCoverUrl(file.path))")) >= 3
+        # A ' in a filename must not end the url('...') the cover sits in.
+        assert ".replace(/'/g, '%27')" in js[js.index("function addCoverUrl"):][:300]
 
     @pytest.mark.parametrize("template", ["reading_lists.html", "reading_list_view.html"])
     def test_every_page_loading_the_script_loads_the_escaper(self, template):
