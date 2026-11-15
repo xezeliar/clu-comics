@@ -1057,3 +1057,52 @@ class TestReadingListTagDisplay:
     def test_list_page_offers_add_tags_when_there_are_none(self, client):
         list_id = self._tagged([])
         assert "Add tags" in client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+
+
+class TestReadingListIssueCards:
+    """The issue sticker reads like Library's, its menu offers a read date, and
+    the sticker no longer draws over an opened menu."""
+
+    @staticmethod
+    def _list(*entries):
+        from core.database import add_reading_list_entry, create_reading_list
+        list_id = create_reading_list("Arc")
+        for e in entries:
+            add_reading_list_entry(list_id, e)
+        return list_id
+
+    def test_sticker_carries_the_book_icon_not_a_hidden_tick(self, client):
+        list_id = self._list({"series": "Batman", "issue_number": "1",
+                              "matched_file_path": "/data/Batman/Batman 001.cbz"})
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+        badge = html.split('class="issue-badge"', 1)[1].split("</i>", 1)[0]
+        assert 'class="bi bi-book read-icon"' in badge
+        assert "bi-check-lg" not in badge and "hidden" not in badge
+
+    def test_mapped_issue_menu_has_set_read_date_and_the_dialog_is_on_the_page(self, client):
+        list_id = self._list({"series": "Batman", "issue_number": "1",
+                              "matched_file_path": "/data/Batman/Batman 001.cbz"})
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+        assert "openSetReadDateModal(" in html
+        assert 'id="setReadDateModal"' in html and 'onclick="submitReadDate()"' in html
+
+    def test_missing_issue_has_no_set_read_date(self, client):
+        list_id = self._list({"series": "Batman", "issue_number": "1"})
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+        assert "openSetReadDateModal(" not in html
+
+    def test_library_page_still_has_the_shared_dialog(self, client):
+        html = client.get("/collection").get_data(as_text=True)
+        assert 'id="setReadDateModal"' in html and 'id="readDateInput"' in html
+
+    def test_sticker_sits_below_the_issue_menu(self):
+        import pathlib
+        css = pathlib.Path("static/css/reading_lists.css").read_text()
+        badge_z = int(re.search(r"\.rl-it \.issue-badge\s*\{[^}]*z-index:\s*(\d+)", css).group(1))
+        menu_z = int(re.search(r"\.rl-menu\s*\{[^}]*z-index:\s*(\d+)", css).group(1))
+        assert badge_z < menu_z
+
+    def test_read_state_flips_the_book_icon(self):
+        import pathlib
+        js = pathlib.Path("static/js/reading_list.js").read_text()
+        assert "classList.toggle('bi-book-fill', isRead)" in js
