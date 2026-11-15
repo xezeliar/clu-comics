@@ -537,6 +537,10 @@ function refreshCollectionStatus() {
                                                 <span class="visually-hidden">Toggle Dropdown</span>
                                             </button>
                                             <ul class="dropdown-menu dropdown-menu-end shadow">
+                                                ${document.getElementById('monitorSeries')?.checked === false ? `<li><a class="dropdown-item" href="#"
+                                                        onclick="setIssueWanted('${issueNum}', true); return false;">
+                                                        <i class="bi bi-plus-circle me-2"></i>Mark as Wanted
+                                                    </a></li>` : ''}
                                                 <li><a class="dropdown-item" href="#"
                                                         onclick="markIssue('${issueNum}', 'owned'); return false;">
                                                         <i class="bi bi-bookmark-check me-2"></i>Mark as Owned
@@ -759,6 +763,28 @@ function submitMarkIssue() {
             console.error('Error marking issue:', error);
             CLU.toast('Error marking issue', 'error');
         });
+}
+
+/**
+ * Mark or unmark an issue Wanted (Not monitored series only), then reload so
+ * the row, badge and Wanted page agree.
+ */
+function setIssueWanted(issueNumber, wanted) {
+    if (!seriesData || !seriesData.id) return;
+    fetch(`/api/series/${seriesData.id}/wanted-marks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue_numbers: [issueNumber], wanted: wanted })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                CLU.toast(data.error || 'Failed to update wanted mark', 'danger');
+            }
+        })
+        .catch(() => CLU.toast('Error updating wanted mark', 'danger'));
 }
 
 /**
@@ -1005,6 +1031,16 @@ function updateBulkActionBar() {
             });
             wantedBtn.style.display = hasManualSelected ? 'inline-block' : 'none';
         }
+
+        // Wanted marks (Not monitored series): only rows carrying data-wantable.
+        const wantable = state => Array.from(selectedIssues).some(num => {
+            const row = document.querySelector(`tr[data-issue-number="${CSS.escape(String(num))}"]`);
+            return row && row.dataset.wantable === state;
+        });
+        const wantBtn = document.getElementById('bulkWantBtn');
+        const unwantBtn = document.getElementById('bulkUnwantBtn');
+        if (wantBtn) wantBtn.style.display = wantable('unmarked') ? 'inline-block' : 'none';
+        if (unwantBtn) unwantBtn.style.display = wantable('marked') ? 'inline-block' : 'none';
     } else {
         bar.style.display = 'none';
     }
@@ -1084,6 +1120,35 @@ async function bulkMarkIssues(status) {
 /**
  * Bulk clear manual status (mark as wanted) for selected issues
  */
+/**
+ * Mark/unmark the selected missing issues Wanted (Not monitored series).
+ */
+async function bulkSetWanted(wanted) {
+    if (!seriesData || !seriesData.id) return;
+    const state = wanted ? 'unmarked' : 'marked';
+    const issueNumbers = Array.from(selectedIssues).filter(num => {
+        const row = document.querySelector(`tr[data-issue-number="${CSS.escape(String(num))}"]`);
+        return row && row.dataset.wantable === state;
+    });
+    if (issueNumbers.length === 0) return;
+
+    try {
+        const resp = await fetch(`/api/series/${seriesData.id}/wanted-marks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ issue_numbers: issueNumbers, wanted: wanted })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            window.location.reload();
+        } else {
+            CLU.toast(data.error || 'Failed to update wanted marks', 'danger');
+        }
+    } catch (e) {
+        CLU.toast('Error: ' + e.message, 'danger');
+    }
+}
+
 async function bulkClearManualStatus() {
     if (!seriesData || !seriesData.id) {
         console.error('No series data available');

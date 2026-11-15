@@ -336,13 +336,14 @@
                            any other missing issue is just missing. #}
                         {% set is_missing = mapped_path and not status.get('found') and not has_manual and not is_upcoming %}
                         {% set wanting_lists = list_wants.get(issue.number|string) if list_wants else none %}
-                        {% set is_wanted = is_missing and (series_monitored or wanting_lists) %}
+                        {% set marked_wanted = is_missing and wanted_marks and issue.number|string in wanted_marks %}
+                        {% set is_wanted = is_missing and (series_monitored or wanting_lists or marked_wanted) %}
                         {# Year used to narrow GetComics/Usenet searches — the issue's own
                            publication year, never the series start year (a wrong year now
                            actively filters results). #}
                         {% set issue_year = (issue.store_date|string)[:4] if issue.store_date
                         else ((issue.cover_date|string)[:4] if issue.cover_date else '') %}
-                        <tr data-issue-number="{{ issue.number }}" data-issue-year="{{ issue_year }}"
+                        <tr data-issue-number="{{ issue.number }}" data-issue-year="{{ issue_year }}"{% if not series_monitored and is_missing %} data-wantable="{{ 'marked' if marked_wanted else 'unmarked' }}"{% endif %}
                             class="{% if mapped_path %}{% if status.get('found') or has_manual == 'owned' %}table-success{% elif has_manual == 'skipped' %}table-warning{% elif is_upcoming %}table-info{% elif is_wanted %}table-danger{% endif %}{% endif %}">
                             {% if mapped_path %}
                             <td class="ps-3">
@@ -451,6 +452,12 @@
                                         <span class="visually-hidden">Toggle Dropdown</span>
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end shadow">
+                                        {% if not series_monitored and is_missing %}
+                                        <li><a class="dropdown-item" href="#"
+                                                onclick="setIssueWanted('{{ issue.number }}', {{ 'false' if marked_wanted else 'true' }}); return false;">
+                                                <i class="bi bi-{{ 'dash-circle' if marked_wanted else 'plus-circle' }} me-2"></i>{{ 'Unmark as Wanted' if marked_wanted else 'Mark as Wanted' }}
+                                            </a></li>
+                                        {% endif %}
                                         <li><a class="dropdown-item" href="#"
                                                 onclick="markIssue('{{ issue.number }}', 'owned'); return false;">
                                                 <i class="bi bi-bookmark-check me-2"></i>Mark as Owned
@@ -539,6 +546,13 @@
             </button>
             <button class="btn btn-sm btn-secondary" onclick="bulkMarkIssues('skipped')">
                 <i class="bi bi-skip-forward-circle me-1"></i>Mark as Skipped
+            </button>
+            <button class="btn btn-sm btn-warning" id="bulkWantBtn" onclick="bulkSetWanted(true)" style="display: none;"
+                title="Search for these issues even though the series is not monitored">
+                <i class="bi bi-plus-circle me-1"></i>Want selected
+            </button>
+            <button class="btn btn-sm btn-outline-light" id="bulkUnwantBtn" onclick="bulkSetWanted(false)" style="display: none;">
+                <i class="bi bi-dash-circle me-1"></i>Unmark Wanted
             </button>
             <button class="btn btn-sm btn-warning" id="bulkMarkWantedBtn" onclick="bulkClearManualStatus()" style="display: none;">
                 <i class="bi bi-arrow-counterclockwise me-1"></i>Mark as Wanted
