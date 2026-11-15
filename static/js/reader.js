@@ -25,7 +25,7 @@ let pageEdgeColors = new Map();   // Cache of extracted edge colors per page ind
 // --- Reading-position bookkeeping -------------------------------------------
 // `highestPageViewed` is EVIDENCE OF READING: the furthest page the user
 // actually paged to. It must never be advanced by a programmatic jump (resume,
-// page-selector), or merely resuming a bookmark near the end would look like
+// scrubber), or merely resuming a bookmark near the end would look like
 // "finished" and destroy that bookmark. `suppressProgressOnNextChange` is set
 // by readerSlideTo() for exactly that reason. The progress bar reads
 // activeIndex instead, so display and evidence stay separate concerns.
@@ -193,8 +193,8 @@ function encodeFilePath(path) {
 /**
  * Is the key going to a control that owns its own keyboard handling?
  *
- * The reader's own page selector is a <select>: swallowing Space there would
- * stop it opening, and swallowing W/A/S/D would break its typeahead. The reader
+ * The reader's page scrubber is a range input: swallowing the arrows there would
+ * stop it stepping (each arrow there is a jump), and other fields own theirs. The reader
  * binds on `document`, so this is the only thing keeping those keys off it.
  *
  * @param {EventTarget} target
@@ -735,7 +735,7 @@ function initializeComicReader(pageCount, startPage = 0) {
     if (readerMode === 'scroll') {
         readerSpread = false;
         initializeScrollReader(pageCount, startPage);
-        initializePageSelector(pageCount, startPage);
+        initializePageScrubber(pageCount, startPage);
         initializeZoomControls();
         return;
     }
@@ -818,14 +818,10 @@ function initializeComicReader(pageCount, startPage = 0) {
                     ? `Pages ${currentIndex + 1}-${lastSeen + 1} of ${pageCount}`
                     : `Page ${currentIndex + 1} of ${pageCount}`;
 
-                // Update page selector dropdown
-                const pageSelector = document.getElementById('pageSelector');
-                if (pageSelector) {
-                    pageSelector.value = currentIndex;
-                }
+                syncPageScrubber(currentIndex);
 
                 // Track highest page viewed for read progress. A programmatic
-                // jump (resume / page-selector) is not evidence of reading, so
+                // jump (resume / scrubber) is not evidence of reading, so
                 // it must not advance the high-water mark.
                 if (suppressProgressOnNextChange) {
                     suppressProgressOnNextChange = false;
@@ -929,8 +925,8 @@ function initializeComicReader(pageCount, startPage = 0) {
         }
     });
 
-    // Initialize page selector dropdown
-    initializePageSelector(pageCount, startPage);
+    // Initialize the page scrubber
+    initializePageScrubber(pageCount, startPage);
 
     // Initialize zoom controls
     initializeZoomControls();
@@ -1000,40 +996,89 @@ function initReaderLoupe() {
     ['touchend', 'touchcancel'].forEach(n => window.addEventListener(n, close, { capture: true, passive: true }));
 }
 
+const SCRUB_PREVIEW_MS = 120;
+
 /**
- * Initialize page selector dropdown
+ * Set up the page scrubber for this comic. Dragging previews a page above the
+ * thumb; the reader jumps only on release, so a drag across 200 pages loads a
+ * handful of previews rather than 200 pages.
  * @param {number} pageCount - Total number of pages
  * @param {number} startPage - Initial page (0-indexed)
  */
-function initializePageSelector(pageCount, startPage) {
-    const pageSelector = document.getElementById('pageSelector');
-    if (!pageSelector) return;
+function initializePageScrubber(pageCount, startPage) {
+    const scrubber = document.getElementById('pageScrubber');
+    if (!scrubber) return;
+    scrubber.max = Math.max(1, pageCount);
+    syncPageScrubber(startPage);
+    // Runs on every (re)build; the listeners must not pile up.
+    if (scrubber.dataset.bound) return;
+    scrubber.dataset.bound = '1';
 
-    // Clear existing options
-    pageSelector.innerHTML = '';
-
-    // Populate dropdown with page options
-    for (let i = 0; i < pageCount; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = `Page ${i + 1} of ${pageCount}`;
-        if (i === startPage) {
-            option.selected = true;
+    let lastPreviewAt = 0;
+    let previewTimer = null;
+    scrubber.addEventListener('input', () => {
+        const page = parseInt(scrubber.value, 10) - 1;
+        setScrubFill(scrubber);
+        clearTimeout(previewTimer);
+        const wait = SCRUB_PREVIEW_MS - (Date.now() - lastPreviewAt);
+        if (wait <= 0) {
+            lastPreviewAt = Date.now();
+            showScrubTip(scrubber, page);
+        } else {
+            previewTimer = setTimeout(() => {
+                lastPreviewAt = Date.now();
+                showScrubTip(scrubber, parseInt(scrubber.value, 10) - 1);
+            }, wait);
         }
-        pageSelector.appendChild(option);
+    });
+    scrubber.addEventListener('change', () => {
+        clearTimeout(previewTimer);
+        hideScrubTip();
+        const page = parseInt(scrubber.value, 10) - 1;
+        if (!readerHasView() || isNaN(page)) return;
+        // A jump is navigation, not reading (readerSlideTo keeps it out of progress).
+        if (scrollState) scrollToReaderPage(page);
+        else readerSlideTo(wantsSpread() ? spreadStart(page) : page);
+    });
+}
+
+/** Move the scrubber to a page (0-indexed) and say where it is. */
+function syncPageScrubber(index) {
+    const scrubber = document.getElementById('pageScrubber');
+    if (!scrubber) return;
+    const total = parseInt(scrubber.max, 10) || 1;
+    scrubber.value = index + 1;
+    scrubber.setAttribute('aria-valuetext', `Page ${index + 1} of ${total}`);
+    setScrubFill(scrubber);
+}
+
+/** The filled part of the track, as a percent for the CSS gradient. */
+function setScrubFill(scrubber) {
+    const total = parseInt(scrubber.max, 10) || 1;
+    const pct = total > 1 ? (parseInt(scrubber.value, 10) - 1) / (total - 1) * 100 : 100;
+    scrubber.style.setProperty('--p', `${pct}%`);
+}
+
+/** Preview of a page above the thumb while dragging. */
+function showScrubTip(scrubber, page) {
+    const tip = scrubber.parentElement.querySelector('.reader-scrub-tip');
+    if (!tip || isNaN(page)) return;
+    let img = tip.querySelector('img');
+    let label = tip.querySelector('span');
+    if (!img) {
+        img = document.createElement('img');
+        img.alt = '';
+        label = document.createElement('span');
+        tip.append(img, label);
     }
+    img.src = readerPageUrl(page);
+    label.textContent = page + 1;
+    tip.style.left = scrubber.style.getPropertyValue('--p') || '0%';
+    tip.hidden = false;
+}
 
-    // Add change event listener
-    // `onchange`, not addEventListener: this runs on every (re)build, and
-    // listeners would pile up.
-    pageSelector.onchange = function() {
-        const selectedPage = parseInt(this.value, 10);
-        if (readerHasView() && !isNaN(selectedPage)) {
-            // Jumping is navigation, not reading -- don't let it count as
-            // progress, or a peek at the last page marks the issue finished.
-            readerSlideTo(selectedPage);
-        }
-    };
+function hideScrubTip() {
+    document.querySelectorAll('.reader-scrub-tip').forEach(t => { t.hidden = true; });
 }
 
 /**
@@ -2238,8 +2283,7 @@ function applyScrollIndexUi(index) {
     const total = s ? s.pageCount : currentComicPageCount;
     const pageInfoEl = document.getElementById('comicReaderPageInfo');
     if (pageInfoEl) pageInfoEl.textContent = `Page ${index + 1} of ${total}`;
-    const pageSelector = document.getElementById('pageSelector');
-    if (pageSelector) pageSelector.value = index;
+    syncPageScrubber(index);
     updateReadingProgress(index);
     const cached = pageEdgeColors.get(index);
     if (cached) applyReaderBackgroundColor(cached.r, cached.g, cached.b);

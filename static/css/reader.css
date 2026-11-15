@@ -248,24 +248,105 @@
     border-color: rgba(255, 255, 255, 0.7);
 }
 
-.comic-reader-footer .page-selector {
-    min-width: 150px;
-    max-width: 250px;
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: white;
+/* Page scrubber. The only theme colour in the reader chrome is the filled part. */
+.reader-scrub {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    max-width: 34rem;
+    display: flex;
+    align-items: center;
 }
 
-.comic-reader-footer .page-selector:focus {
-    background-color: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.5);
-    color: white;
-    box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.1);
+.reader-scrub-range {
+    --p: 0%;
+    flex: 1;
+    min-width: 0;
+    height: 2.75rem;
+    margin: 0;
+    background: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
 }
 
-.comic-reader-footer .page-selector option {
-    background-color: #212529;
-    color: white;
+.reader-scrub-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--clu-select) var(--p), rgba(255, 255, 255, 0.45) var(--p));
+}
+
+.reader-scrub-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(18, 18, 18, 0.35);
+}
+
+.reader-scrub-range::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.45);
+}
+
+.reader-scrub-range::-moz-range-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--clu-select);
+}
+
+.reader-scrub-range::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 50%;
+    background: #fff;
+}
+
+.reader-scrub-range:focus-visible {
+    outline: 0;
+}
+
+.reader-scrub-range:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 3px #121212, 0 0 0 5px #fff;
+}
+
+.reader-scrub-range:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 3px #121212, 0 0 0 5px #fff;
+}
+
+.reader-scrub-tip {
+    position: absolute;
+    bottom: calc(100% - 0.25rem);
+    width: 4.5rem;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.3rem;
+    color: #fff;
+    background: #1c1c1e;
+    border-radius: 0.4rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+}
+
+.reader-scrub-tip[hidden] {
+    display: none;
+}
+
+.reader-scrub-tip img {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: 0.2rem;
+    background: #2a2a2c;
 }
 
 .comic-reader-swiper {
@@ -482,19 +563,6 @@
 .comic-reader-container.reader-light-bg .btn-outline-light:hover {
     background-color: rgba(0, 0, 0, 0.1);
     color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .page-selector {
-    background-color: rgba(0, 0, 0, 0.08);
-    border-color: rgba(0, 0, 0, 0.3);
-    color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .page-selector:focus {
-    background-color: rgba(0, 0, 0, 0.12);
-    border-color: rgba(0, 0, 0, 0.5);
-    color: #212529;
-    box-shadow: 0 0 0 0.25rem rgba(0, 0, 0, 0.1);
 }
 
 .comic-reader-container.reader-light-bg .zoom-btn {

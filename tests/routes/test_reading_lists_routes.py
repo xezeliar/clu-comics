@@ -854,7 +854,7 @@ class TestReaderViewOnlyGating:
 
         # Controls reader.js expects, plus the toast container its error path
         # needs (the fork used alert(), which CLAUDE.md forbids).
-        assert 'id="pageSelector"' in html
+        assert 'id="pageScrubber"' in html
         assert 'id="zoomInBtn"' in html
         assert 'id="resumeReadingOverlay"' in html
         assert 'class="toast-container' in html

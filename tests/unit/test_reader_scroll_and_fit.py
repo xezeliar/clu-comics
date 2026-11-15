@@ -84,7 +84,7 @@ class TestControlsAreBuiltInJs:
         zoom = function_body(js, "initializeZoomControls")
         assert "zoomInBtn.onclick" in zoom and "zoomOutBtn.onclick" in zoom
         assert "zoomInBtn.addEventListener" not in zoom
-        assert "pageSelector.onchange" in function_body(js, "initializePageSelector")
+        assert "dataset.bound" in function_body(js, "initializePageScrubber")
 
     def test_no_native_dialogs(self, js):
         assert not re.search(r"(?<![.\w])(alert|confirm|prompt)\(", js)

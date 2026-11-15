@@ -75,9 +75,10 @@
                 <button aria-label="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre" class="btn btn-sm btn-outline-light zoom-btn" id="zoomInBtn" title="Zoom In (Arrow Up). Pan with Shift+Arrows, WASD or scroll wheel; 0 to re-centre">
                     <i class="bi bi-zoom-in text-light"></i>
                 </button>
-                <select class="form-select form-select-sm page-selector" id="pageSelector">
-                    <option value="0">Page 1</option>
-                </select>
+                <div class="reader-scrub">
+                    <input type="range" class="reader-scrub-range" id="pageScrubber" min="1" max="1" step="1" value="1" aria-label="Page">
+                    <div class="reader-scrub-tip" hidden></div>
+                </div>
             </div>
         </div>
     </div>
