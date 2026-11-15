@@ -1515,21 +1515,124 @@ function doRemoveEntry(entryId) {
 // Add Issue to List (from detail view)
 // ==========================================
 let addIssueModal = null;
-let selectedAddFilePath = null;
+// Pick order: each entry is a search-result row; the array order is the add order.
+let addQueue = [];
+let addResults = [];
+let addAnchor = -1;
+let addPosition = 'end';
+
+function addCoverUrl(path) {
+    return `/api/thumbnail?path=${encodeURIComponent(path)}`;
+}
+
+function addSelectable() {
+    return addResults.filter(f => f.type !== 'directory' && !f.in_list);
+}
 
 function openAddIssueModal() {
-    selectedAddFilePath = null;
+    addQueue = [];
+    addResults = [];
+    addAnchor = -1;
+    addPosition = 'end';
     document.getElementById('addIssueSearchInput').value = '';
     document.getElementById('addIssueResults').innerHTML = '';
-    document.getElementById('confirmAddIssueBtn').disabled = true;
+    renderAddQueue();
+    syncAddPosition();
 
     if (!addIssueModal) {
         addIssueModal = new bootstrap.Modal(document.getElementById('addIssueModal'));
     }
     addIssueModal.show();
-
-    // Focus the search input
     setTimeout(() => document.getElementById('addIssueSearchInput').focus(), 300);
+}
+
+function toggleAddFile(file, shift) {
+    const sel = addSelectable();
+    const idx = sel.findIndex(f => f.path === file.path);
+    if (shift && addAnchor >= 0 && idx >= 0) {
+        const [lo, hi] = [Math.min(addAnchor, idx), Math.max(addAnchor, idx)];
+        sel.slice(lo, hi + 1).forEach(f => {
+            if (!addQueue.some(q => q.path === f.path)) addQueue.push(f);
+        });
+    } else {
+        const at = addQueue.findIndex(q => q.path === file.path);
+        if (at >= 0) addQueue.splice(at, 1); else addQueue.push(file);
+        addAnchor = idx;
+    }
+    renderAddResults();
+    renderAddQueue();
+}
+
+function renderAddResults() {
+    const grid = document.getElementById('addIssueResults');
+    const frag = document.createDocumentFragment();
+    addResults.filter(f => f.type !== 'directory').forEach(file => {
+        const pos = addQueue.findIndex(q => q.path === file.path);
+        const on = pos >= 0;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'add-issue-card' + (file.in_list ? ' off' : on ? ' on' : '');
+        btn.disabled = !!file.in_list;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute('aria-label', file.name + (file.in_list ? ', already in list' : on ? ', queued as ' + (pos + 1) : ''));
+        btn.innerHTML = `<span class="add-issue-cover" style="background-image:url('${CLU.escapeHtml(addCoverUrl(file.path))}')">`
+            + (on ? `<span class="add-issue-badge">${pos + 1}</span>` : '')
+            + (file.in_list ? '<span class="add-issue-in">In list</span>' : '')
+            + `</span><span class="add-issue-name" title="${CLU.escapeHtml(file.name)}">${CLU.escapeHtml(file.name)}</span>`;
+        btn.addEventListener('click', e => toggleAddFile(file, e.shiftKey));
+        frag.appendChild(btn);
+    });
+    grid.replaceChildren(frag);
+    document.getElementById('addIssueCount').textContent =
+        `${grid.children.length} results, ${addQueue.length} selected`;
+}
+
+function moveAddQueued(i, d) {
+    const j = i + d;
+    if (j < 0 || j >= addQueue.length) return;
+    [addQueue[i], addQueue[j]] = [addQueue[j], addQueue[i]];
+    renderAddResults();
+    renderAddQueue();
+}
+
+function renderAddQueue() {
+    const box = document.getElementById('addIssueQueue');
+    const n = addQueue.length;
+    box.replaceChildren();
+    if (!n) {
+        box.innerHTML = '<div class="list-group-item add-issue-empty text-body-secondary small">Click covers to queue them. The number is the add order; Shift-click picks a range.</div>';
+    }
+    addQueue.forEach((file, i) => {
+        const row = document.createElement('div');
+        row.className = 'list-group-item';
+        row.innerHTML = `<span class="fw-semibold text-end">${i + 1}</span>
+            <span class="add-issue-qthumb" style="background-image:url('${CLU.escapeHtml(addCoverUrl(file.path))}')"></span>
+            <span class="text-truncate small" title="${CLU.escapeHtml(file.name)}">${CLU.escapeHtml(file.name)}</span>
+            <span class="d-flex">
+                <button type="button" class="btn btn-sm btn-link" data-act="up" aria-label="Move up"${i === 0 ? ' disabled' : ''}><i class="bi bi-arrow-up" aria-hidden="true"></i></button>
+                <button type="button" class="btn btn-sm btn-link" data-act="down" aria-label="Move down"${i === n - 1 ? ' disabled' : ''}><i class="bi bi-arrow-down" aria-hidden="true"></i></button>
+                <button type="button" class="btn btn-sm btn-link" data-act="rm" aria-label="Remove"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+            </span>`;
+        row.querySelector('[data-act=up]').onclick = () => moveAddQueued(i, -1);
+        row.querySelector('[data-act=down]').onclick = () => moveAddQueued(i, 1);
+        row.querySelector('[data-act=rm]').onclick = () => { addQueue.splice(i, 1); renderAddResults(); renderAddQueue(); };
+        box.appendChild(row);
+    });
+    const btn = document.getElementById('confirmAddIssueBtn');
+    btn.disabled = !n;
+    btn.textContent = n ? `Add ${n} issue${n === 1 ? '' : 's'}` : 'Add issues';
+    const cnt = document.getElementById('addIssueCount');
+    if (cnt && addResults.length) {
+        cnt.textContent = `${addResults.filter(f => f.type !== 'directory').length} results, ${n} selected`;
+    }
+}
+
+function syncAddPosition() {
+    document.querySelectorAll('.add-issue-pos').forEach(b => {
+        const on = b.dataset.pos === addPosition;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
 }
 
 function searchFilesForAdd() {
@@ -1539,34 +1642,16 @@ function searchFilesForAdd() {
     const resultsDiv = document.getElementById('addIssueResults');
     resultsDiv.innerHTML = '<div class="text-center p-3"><div class="spinner-border text-primary" role="status"></div></div>';
 
-    fetch(`/api/reading-lists/search-file?q=${encodeURIComponent(query)}`)
+    fetch(`/api/reading-lists/search-file?q=${encodeURIComponent(query)}&list_id=${encodeURIComponent(LIST_ID)}`)
         .then(r => r.json())
         .then(results => {
-            resultsDiv.innerHTML = '';
-            if (results.length === 0) {
+            addResults = results.filter(f => f.type !== 'directory');
+            addAnchor = -1;
+            if (!addResults.length) {
                 resultsDiv.replaceChildren(fileSearchNoMatches('addIssueSearchInput', resultsDiv));
                 return;
             }
-            results.forEach(file => {
-                const item = document.createElement('div');
-                item.className = 'list-group-item list-group-item-action search-result-item';
-                item.innerHTML = `
-                    <div class="d-flex flex-column w-100">
-                        <div class="d-flex w-100 justify-content-between">
-                            <h6 class="mb-1 text-truncate">${CLU.escapeHtml(file.name)}</h6>
-                            <small class="text-muted">${CLU.escapeHtml(file.path.split('/').slice(-2, -1)[0] || '')}</small>
-                        </div>
-                        <small class="text-info-emphasis text-break font-monospace">${CLU.escapeHtml(file.path)}</small>
-                    </div>
-                `;
-                item.onclick = () => {
-                    selectedAddFilePath = file.path;
-                    resultsDiv.querySelectorAll('.search-result-item').forEach(el => el.classList.remove('active'));
-                    item.classList.add('active');
-                    document.getElementById('confirmAddIssueBtn').disabled = false;
-                };
-                resultsDiv.appendChild(item);
-            });
+            renderAddResults();
         })
         .catch(err => {
             console.error('Error searching:', err);
@@ -1574,34 +1659,52 @@ function searchFilesForAdd() {
         });
 }
 
-// Enter key in add issue search
 document.addEventListener('DOMContentLoaded', () => {
     const addInput = document.getElementById('addIssueSearchInput');
-    if (addInput) {
-        addInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') searchFilesForAdd();
+    if (!addInput) return;
+    addInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') searchFilesForAdd();
+    });
+    document.getElementById('addIssueSelectAll').addEventListener('click', () => {
+        addSelectable().forEach(f => {
+            if (!addQueue.some(q => q.path === f.path)) addQueue.push(f);
         });
-    }
+        renderAddResults();
+        renderAddQueue();
+    });
+    document.getElementById('addIssueClear').addEventListener('click', () => {
+        addQueue = [];
+        renderAddResults();
+        renderAddQueue();
+    });
+    document.querySelectorAll('.add-issue-pos').forEach(b => b.addEventListener('click', () => {
+        addPosition = b.dataset.pos;
+        syncAddPosition();
+    }));
 });
 
 function confirmAddIssue() {
-    if (!selectedAddFilePath) return;
+    if (!addQueue.length) return;
+    const btn = document.getElementById('confirmAddIssueBtn');
+    btn.disabled = true;
 
-    fetch(`/api/reading-lists/${LIST_ID}/add-entry`, {
+    fetch(`/api/reading-lists/${LIST_ID}/add-entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: selectedAddFilePath })
+        body: JSON.stringify({ file_paths: addQueue.map(f => f.path), position: addPosition })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
             location.reload();
         } else {
+            btn.disabled = false;
             CLU.toast(data.message || 'Something went wrong', 'error');
         }
     })
     .catch(err => {
-        console.error('Error adding issue:', err);
+        console.error('Error adding issues:', err);
+        btn.disabled = false;
         CLU.toast('An error occurred', 'error');
     });
 }

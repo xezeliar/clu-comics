@@ -1106,3 +1106,46 @@ class TestReadingListIssueCards:
         import pathlib
         js = pathlib.Path("static/js/reading_list.js").read_text()
         assert "classList.toggle('bi-book-fill', isRead)" in js
+
+
+class TestAddEntries:
+
+    @patch("routes.reading_lists.add_reading_list_entries", return_value=2)
+    @patch("routes.reading_lists.reading_list_paths_in_list", return_value={"/d/b.cbz"})
+    @patch("routes.reading_lists.get_file_metadata_for_reading_list", return_value=None)
+    def test_adds_in_order_skipping_existing_and_dupes(self, mock_meta, mock_in, mock_add, client):
+        resp = client.post("/api/reading-lists/1/add-entries", json={
+            "file_paths": ["/d/c.cbz", "/d/b.cbz", "/d/a.cbz", "/d/c.cbz"], "position": "top"})
+        data = resp.get_json()
+        assert data == {"success": True, "added": 2, "skipped": 1}
+        entries = mock_add.call_args[0][1]
+        assert [e["matched_file_path"] for e in entries] == ["/d/c.cbz", "/d/a.cbz"]
+        assert mock_add.call_args[1]["position"] == "top"
+
+    def test_requires_paths(self, client):
+        assert client.post("/api/reading-lists/1/add-entries", json={}).status_code == 400
+        assert client.post("/api/reading-lists/1/add-entries",
+                           json={"file_paths": ["  "]}).status_code == 400
+
+    def test_bad_position_and_cap(self, client):
+        assert client.post("/api/reading-lists/1/add-entries",
+                           json={"file_paths": ["/a"], "position": "mid"}).status_code == 400
+        too_many = [f"/d/{i}.cbz" for i in range(201)]
+        assert client.post("/api/reading-lists/1/add-entries",
+                           json={"file_paths": too_many}).status_code == 400
+
+    @patch("routes.reading_lists.add_reading_list_entries", return_value=None)
+    @patch("routes.reading_lists.reading_list_paths_in_list", return_value=set())
+    @patch("routes.reading_lists.get_file_metadata_for_reading_list", return_value=None)
+    def test_db_failure(self, mock_meta, mock_in, mock_add, client):
+        resp = client.post("/api/reading-lists/1/add-entries", json={"file_paths": ["/d/a.cbz"]})
+        assert resp.status_code == 500 and resp.get_json()["success"] is False
+
+    @patch("routes.reading_lists.reading_list_paths_in_list", return_value={"/d/a.cbz"})
+    @patch("routes.reading_lists.search_file_index_all_words", return_value=[])
+    @patch("routes.reading_lists.search_file_index", return_value=[
+        {"path": "/d/a.cbz", "name": "a.cbz", "type": "file"},
+        {"path": "/d/b.cbz", "name": "b.cbz", "type": "file"}])
+    def test_search_file_flags_in_list(self, mock_s, mock_w, mock_in, client):
+        rows = client.get("/api/reading-lists/search-file?q=a&list_id=3").get_json()
+        assert {r["path"]: r["in_list"] for r in rows} == {"/d/a.cbz": True, "/d/b.cbz": False}

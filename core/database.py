@@ -12471,9 +12471,42 @@ def add_reading_list_entry(list_id, data):
         return None
 
 
-def add_reading_list_entries(list_id, entries):
+def reading_list_paths_in_list(list_id, paths):
+    """Return the subset of ``paths`` already matched or mapped in the list."""
+    paths = list(paths)
+    if not paths:
+        return set()
+    found = set()
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return found
+            c = conn.cursor()
+            for i in range(0, len(paths), 400):
+                chunk = paths[i:i + 400]
+                marks = ",".join("?" * len(chunk))
+                c.execute(
+                    f"SELECT matched_file_path, manual_override_path "
+                    f"FROM reading_list_entries WHERE reading_list_id = ? "
+                    f"AND (matched_file_path IN ({marks}) "
+                    f"OR manual_override_path IN ({marks}))",
+                    [list_id, *chunk, *chunk],
+                )
+                for row in c.fetchall():
+                    found.update(p for p in row if p)
+        return found & set(paths)
+    except Exception as e:
+        app_logger.error(f"Error reading list paths for list {list_id}: {str(e)}")
+        return found
+
+
+def add_reading_list_entries(list_id, entries, position="end"):
     """
-    Append many entries to a reading list in one transaction, in order.
+    Add many entries to a reading list in one transaction, in order.
+
+    ``position="top"`` places them before every existing entry, keeping their
+    own order, by giving them sort_orders below the current minimum (no
+    existing row is rewritten).
 
     An import used to open a connection per issue. Five imports running at
     once against a held write lock then each burned a 30s busy timeout per
@@ -12495,7 +12528,15 @@ def add_reading_list_entries(list_id, entries):
             if not conn:
                 return None
             c = conn.cursor()
-            first = _next_reading_list_sort_order(c, list_id)
+            if position == "top":
+                c.execute(
+                    "SELECT COALESCE(MIN(sort_order), 1) FROM reading_list_entries "
+                    "WHERE reading_list_id = ?",
+                    (list_id,),
+                )
+                first = c.fetchone()[0] - len(entries)
+            else:
+                first = _next_reading_list_sort_order(c, list_id)
             c.executemany(
                 _READING_LIST_ENTRY_INSERT,
                 [

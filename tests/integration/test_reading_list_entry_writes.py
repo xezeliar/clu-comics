@@ -132,3 +132,31 @@ class TestReadingListWritersReleaseTheLock:
             assert _can_write_now(db_path)
         finally:
             gc.enable()
+
+
+class TestAddEntriesPositionAndPaths:
+    def test_top_puts_batch_before_existing_in_order(self, db_connection):
+        from core.database import (
+            add_reading_list_entries, add_reading_list_entry, create_reading_list,
+        )
+        lid = create_reading_list("L")
+        add_reading_list_entry(lid, {"series": "S", "issue_number": "1"})
+        add_reading_list_entries(
+            lid, [{"series": "S", "issue_number": "8"}, {"series": "S", "issue_number": "9"}],
+            position="top")
+        assert [n for n, _ in _entries(db_connection, lid)] == ["8", "9", "1"]
+
+    def test_paths_in_list(self, db_connection):
+        from core.database import (
+            add_reading_list_entry, create_reading_list, reading_list_paths_in_list,
+        )
+        lid = create_reading_list("L")
+        add_reading_list_entry(lid, {"series": "S", "matched_file_path": "/d/a.cbz"})
+        add_reading_list_entry(lid, {"series": "S"})
+        db_connection.execute(
+            "UPDATE reading_list_entries SET manual_override_path = '/d/b.cbz' "
+            "WHERE reading_list_id = ? AND matched_file_path IS NULL", (lid,))
+        db_connection.commit()
+        assert reading_list_paths_in_list(lid, ["/d/a.cbz", "/d/b.cbz", "/d/c.cbz"]) == {
+            "/d/a.cbz", "/d/b.cbz"}
+        assert reading_list_paths_in_list(lid, []) == set()

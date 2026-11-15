@@ -13,6 +13,7 @@ from core.database import (
     create_reading_list,
     add_reading_list_entry,
     add_reading_list_entries,
+    reading_list_paths_in_list,
     get_reading_lists,
     get_reading_lists_page,
     get_reading_list_matching_ids,
@@ -711,7 +712,14 @@ def search_file():
             request.args.get('volume') or None, request.args.get('year') or None,
             request.args.get('issue_year') or None,
         )
-    return jsonify(results[:20])
+    results = results[:20]
+    list_id = request.args.get('list_id', type=int)
+    if list_id:
+        in_list = reading_list_paths_in_list(
+            list_id, [r['path'] for r in results if r.get('type') != 'directory'])
+        for r in results:
+            r['in_list'] = r.get('path') in in_list
+    return jsonify(results)
 
 
 def _rank_map_candidates(results, series, number, volume, year, issue_year=None):
@@ -849,19 +857,13 @@ def create_list():
         return jsonify({'success': False, 'message': 'Failed to create reading list'})
 
 
-@reading_lists_bp.route('/api/reading-lists/<int:list_id>/add-entry', methods=['POST'])
-def add_entry(list_id):
-    """Add an issue to a reading list from a file path, auto-filling metadata from file_index."""
-    data = request.json
-    file_path = data.get('file_path', '').strip() if data else ''
+MAX_BULK_ADD = 200
 
-    if not file_path:
-        return jsonify({'success': False, 'message': 'file_path is required'})
 
-    # Look up metadata from file_index
+def _entry_from_file(file_path):
+    """Entry dict for a library file, auto-filled from file_index metadata."""
     meta = get_file_metadata_for_reading_list(file_path)
-
-    entry_data = {
+    entry = {
         'series': meta.get('ci_series') if meta else None,
         'issue_number': meta.get('ci_number') if meta else None,
         'volume': meta.get('ci_volume') if meta else None,
@@ -871,11 +873,57 @@ def add_entry(list_id):
         'issue_year': year_of(meta.get('ci_year')) if meta else None,
         'matched_file_path': file_path,
     }
-
     # Fallback: extract from filename if no metadata
-    if not entry_data['series']:
-        basename = os.path.splitext(os.path.basename(file_path))[0]
-        entry_data['series'] = basename
+    if not entry['series']:
+        entry['series'] = os.path.splitext(os.path.basename(file_path))[0]
+    return entry
+
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/add-entries', methods=['POST'])
+def add_entries(list_id):
+    """Add several issues in the given order, at the end or the top, in one
+    transaction. Files already in the list are skipped, not duplicated."""
+    data = request.get_json(silent=True) or {}
+    raw = data.get('file_paths')
+    position = data.get('position', 'end')
+    if not isinstance(raw, list) or not raw:
+        return jsonify({'success': False, 'message': 'file_paths is required'}), 400
+    if position not in ('end', 'top'):
+        return jsonify({'success': False, 'message': 'position must be end or top'}), 400
+    if len(raw) > MAX_BULK_ADD:
+        return jsonify({'success': False,
+                        'message': f'At most {MAX_BULK_ADD} issues at a time'}), 400
+
+    paths = []
+    for p in raw:
+        p = p.strip() if isinstance(p, str) else ''
+        if p and p not in paths:
+            paths.append(p)
+    if not paths:
+        return jsonify({'success': False, 'message': 'file_paths is required'}), 400
+
+    existing = reading_list_paths_in_list(list_id, paths)
+    fresh = [p for p in paths if p not in existing]
+    added = 0
+    if fresh:
+        added = add_reading_list_entries(
+            list_id, [_entry_from_file(p) for p in fresh], position=position)
+        if added is None:
+            return jsonify({'success': False, 'message': 'Failed to add entries'}), 500
+    return jsonify({'success': True, 'added': added,
+                    'skipped': len(paths) - len(fresh)})
+
+
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/add-entry', methods=['POST'])
+def add_entry(list_id):
+    """Add an issue to a reading list from a file path, auto-filling metadata from file_index."""
+    data = request.json
+    file_path = data.get('file_path', '').strip() if data else ''
+
+    if not file_path:
+        return jsonify({'success': False, 'message': 'file_path is required'})
+
+    entry_data = _entry_from_file(file_path)
 
     entry_id = add_reading_list_entry(list_id, entry_data)
     if entry_id:
