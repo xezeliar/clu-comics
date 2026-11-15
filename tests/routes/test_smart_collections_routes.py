@@ -15,6 +15,12 @@ def _seed(conn, name, **ci):
     conn.commit()
 
 
+@pytest.fixture(autouse=True)
+def _library_root_is_data(monkeypatch):
+    """The browse queries only count rows under a library root; these rows live under /data."""
+    monkeypatch.setattr("helpers.library.get_library_roots", lambda: ["/data"])
+
+
 @pytest.fixture
 def library(db_connection):
     from core.database import _backfill_file_metadata_tags
