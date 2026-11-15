@@ -11,12 +11,8 @@ import re
 import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-READER_TEMPLATES = [
-    "collection.html",
-    "metadata_browser.html",
-    "reading_list_view.html",
-    "source_wall.html",
-]
+# The reader markup lives in one partial; every host page includes it.
+READER_TEMPLATES = ["partials/reader_modal.html"]
 
 
 def read(*parts):

@@ -28,14 +28,8 @@ STATIC_JS = os.path.join(REPO_ROOT, "static", "js")
 STATIC_CSS = os.path.join(REPO_ROOT, "static", "css")
 TEMPLATE_DIR = os.path.join(REPO_ROOT, "templates")
 
-# Every page that hosts the comic reader modal. The markup is duplicated across
-# all four, so anything documented in one has to be documented in all of them.
-READER_TEMPLATES = [
-    "collection.html",
-    "metadata_browser.html",
-    "reading_list_view.html",
-    "source_wall.html",
-]
+# The reader markup lives in one partial; every host page includes it.
+READER_TEMPLATES = ["partials/reader_modal.html"]
 
 
 def read(path):
