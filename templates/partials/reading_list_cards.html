@@ -13,6 +13,8 @@ and Delete. #}
 {%- set _own = list.owned_count or 0 -%}
 {%- set _read = list.read_count or 0 -%}
 {%- set _src = source_label(list.source) if source_label is defined else '' -%}
+{#- The list's first tag, as a sticker on the cover; the rest are on its page. -#}
+{%- set _tag = list.tags[0] if list.tags else '' -%}
 <div class="reading-list-card rl-card" data-list-id="{{ list.id }}">
     {% if _can_manage %}
     <div class="card-select-checkbox">
@@ -35,6 +37,10 @@ and Delete. #}
             <b>{{ list.name }}</b>
             <small>{{ _tot }} issue{{ '' if _tot == 1 else 's' }}</small>
         </div>
+        {% endif %}
+        {% if _tag %}
+        <button type="button" class="rl-tagpill" data-tag="{{ _tag }}" aria-pressed="{{ 'true' if _tag in (active_tags or []) else 'false' }}"
+            title="Filter by {{ _tag }}"><i class="bi bi-tag" aria-hidden="true"></i><span>{{ _tag }}</span></button>
         {% endif %}
     </div>
     {# Outside the _can_manage gate on purpose: bookmarking a list is
