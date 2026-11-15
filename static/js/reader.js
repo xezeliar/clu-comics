@@ -214,6 +214,8 @@ function _isFormControlTarget(target) {
 function handleComicReaderKeydown(e) {
     if (!readerHasView()) return;
     if (_isFormControlTarget(e.target)) return;
+    // Space on a focused toolbar button presses it; it must not also turn the page.
+    if (e.target.closest && e.target.closest('button')) return;
 
     // Spacebar to advance
     if (e.code === 'Space') {
@@ -257,6 +259,7 @@ function loadReaderPrefs() {
             if (READER_MODES.includes(data.mode)) readerMode = data.mode;
             if (READER_FITS.includes(data.fit)) readerFit = data.fit;
             if (READER_TURNS.includes(data.turn)) readerTurn = data.turn;
+            updateReaderViewControls();
         })
         .catch(() => { /* keep whatever we had */ });
 }
@@ -421,11 +424,14 @@ function isMobileOrTablet() {
  * Toggle the reader chrome (header/footer) visibility. Works at every size:
  * the chrome overlays the page, so hiding it never resizes the swiper.
  */
-function toggleReaderChrome() {
+function toggleReaderChrome(hide = !readerChromeHidden) {
     const container = document.querySelector('.comic-reader-container');
     if (!container) return;
-    readerChromeHidden = !readerChromeHidden;
-    container.classList.toggle('reader-chrome-hidden', readerChromeHidden);
+    readerChromeHidden = hide;
+    container.classList.toggle('reader-chrome-hidden', hide);
+    // Hidden pills are still in the tab order unless they are inert.
+    container.querySelectorAll('.reader-top, .reader-capsule').forEach(el => { el.inert = hide; });
+    if (hide) setReaderViewPanel(false, { restoreFocus: false });
 }
 
 /** Helper: get the items array for sibling detection */
@@ -608,6 +614,23 @@ function readerSlideTo(index) {
 }
 
 /**
+ * "Saga #12" when the issue is tagged, else the file name; the story title,
+ * when there is one, on the line under it.
+ */
+function setReaderTitle(info) {
+    const titleEl = document.getElementById('comicReaderTitle');
+    const subtitleEl = document.getElementById('comicReaderSubtitle');
+    if (info.series) {
+        const number = info.number ? String(info.number).replace(/^0+(?=\d)/, '') : '';
+        titleEl.textContent = number ? `${info.series} #${number}` : info.series;
+    }
+    if (subtitleEl) {
+        subtitleEl.textContent = info.title || '';
+        subtitleEl.hidden = !info.title;
+    }
+}
+
+/**
  * Open comic reader for a specific file
  * @param {string} filePath - Path to the comic file
  */
@@ -641,7 +664,7 @@ function openComicReader(filePath) {
 
     const modal = document.getElementById('comicReaderModal');
     const titleEl = document.getElementById('comicReaderTitle');
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
+    const subtitleEl = document.getElementById('comicReaderSubtitle');
 
     // Hide overlays if visible from previous session
     hideResumeReadingOverlay();
@@ -660,19 +683,16 @@ function openComicReader(filePath) {
 
     // Immersive mode: hide chrome by default on mobile/tablet
     if (isMobileOrTablet()) {
-        const container = document.querySelector('.comic-reader-container');
-        if (container) {
-            container.classList.add('reader-chrome-hidden');
-            readerChromeHidden = true;
-        }
+        toggleReaderChrome(true);
     }
 
-    // Set title
+    // Title: the file name until the info call says what the issue is.
     const fileName = filePath.split(/[/\\]/).pop();
-    titleEl.textContent = fileName;
-
-    // Show loading
-    pageInfoEl.textContent = 'Loading...';
+    titleEl.textContent = fileName.replace(/\.(cbz|cbr|zip)$/i, '');
+    subtitleEl.textContent = '';
+    subtitleEl.hidden = true;
+    const progressLine = document.getElementById('readerProgressLine');
+    if (progressLine) progressLine.textContent = '';
 
     // Encode the path properly for URL
     const encodedPath = encodeFilePath(filePath);
@@ -690,6 +710,7 @@ function openComicReader(filePath) {
         .then(([comicData, positionData]) => {
             if (comicData.success) {
                 currentComicPageCount = comicData.page_count;
+                setReaderTitle(comicData);
 
                 // Get accumulated time if available
                 if (positionData && positionData.time_spent) {
@@ -741,8 +762,6 @@ function initializeComicReader(pageCount, startPage = 0) {
     }
 
     const wrapper = document.getElementById('comicReaderWrapper');
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
-
     // Clear existing slides
     wrapper.innerHTML = '';
 
@@ -814,9 +833,6 @@ function initializeComicReader(pageCount, startPage = 0) {
                 lastPageChangeAt = Date.now();
                 // In a spread the right-hand page is on screen too.
                 const lastSeen = readerSpread ? Math.min(currentIndex + 1, pageCount - 1) : currentIndex;
-                pageInfoEl.textContent = readerSpread && lastSeen > currentIndex
-                    ? `Pages ${currentIndex + 1}-${lastSeen + 1} of ${pageCount}`
-                    : `Page ${currentIndex + 1} of ${pageCount}`;
 
                 syncPageScrubber(currentIndex);
 
@@ -908,7 +924,6 @@ function initializeComicReader(pageCount, startPage = 0) {
             },
             init: function () {
                 const initialPage = this.activeIndex;
-                pageInfoEl.textContent = `Page ${initialPage + 1} of ${pageCount}`;
                 // max(): a mode switch rebuilds mid-comic, and must not lower
                 // the evidence of how far the user has actually read.
                 if (!rebuildingReaderView) {
@@ -1319,7 +1334,7 @@ function attachReaderSwipes(modal) {
         const resume = document.getElementById('resumeReadingOverlay');
         const blocked = e.touches.length !== 1 || !readerHasView() ||
             (resume && resume.style.display === 'flex') ||
-            e.target.closest('button, select, a, input, .comic-reader-header, .comic-reader-footer');
+            e.target.closest('button, select, a, input, .reader-top, .reader-capsule');
         overscrollTouch = blocked ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY, edges: readerEdges() };
     }, { passive: true });
     modal.addEventListener('touchmove', e => {
@@ -1579,18 +1594,6 @@ function ensurePanHintElement() {
 }
 
 /**
- * Check if an RGB color is perceptually light
- * @param {number} r - Red (0-255)
- * @param {number} g - Green (0-255)
- * @param {number} b - Blue (0-255)
- * @returns {boolean} True if the color is light
- */
-function isLightColor(r, g, b) {
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-    return luminance > 140;
-}
-
-/**
  * Handle keyboard events for zoom (arrow keys)
  * @param {KeyboardEvent} event
  */
@@ -1764,7 +1767,7 @@ function initializeMousewheelHandler() {
 }
 
 /**
- * Update reading progress bar display
+ * Update the page count and pace in the capsule, and the hidden-state line.
  */
 function updateReadingProgress(pageIndex) {
     if (currentComicPageCount === 0) return;
@@ -1776,22 +1779,17 @@ function updateReadingProgress(pageIndex) {
     if (currentIndex === undefined) {
         currentIndex = readerHasView() ? getReaderCurrentIndex() : highestPageViewed;
     }
-    const progress = ((currentIndex + 1) / currentComicPageCount) * 100;
-    const progressBar = document.querySelector('.comic-reader-progress-fill');
-    const progressText = document.querySelector('.comic-reader-progress-text');
-    if (progressBar) progressBar.style.width = `${progress}%`;
-    if (progressText) progressText.textContent = `${Math.round(progress)}%`;
     updateReaderPaceLine(currentIndex);
 }
 
-// "Page 12 of 24 · about 6 min left" in the footer. The estimate is pages left
+// "12 / 24 · about 6 min left" in the capsule (the pace is dropped on a phone). The estimate is pages left
 // times the median time per page turn this session (30s before three turns).
 let paceGaps = [];
 let paceLast = null;   // {index, at}
 let paceFor = 0;       // page count the history belongs to
 function updateReaderPaceLine(index) {
     const text = document.getElementById('readerProgressLine');
-    const fill = document.querySelector('.comic-reader-footer-line > i');
+    const fill = document.querySelector('.reader-hidden-line > i');
     if (!text) return;
     const total = currentComicPageCount;
     if (paceFor !== total) { paceGaps = []; paceLast = null; paceFor = total; }
@@ -1802,9 +1800,11 @@ function updateReaderPaceLine(index) {
     }
     if (!paceLast || index !== paceLast.index) paceLast = { index: index, at: now };
     const left = total - (index + 1);
-    let label = `Page ${index + 1} of ${total}`;
+    // In a spread the right-hand page is on screen too.
+    const shown = readerSpread && index + 1 < total ? `${index + 1}\u2013${index + 2}` : `${index + 1}`;
+    let pace;
     if (left <= 0) {
-        label += ' \u00b7 last page';
+        pace = 'last page';
     } else {
         let per = 30000;
         if (paceGaps.length >= 3) {
@@ -1812,9 +1812,13 @@ function updateReaderPaceLine(index) {
             per = sorted[Math.floor(sorted.length / 2)];
         }
         const mins = Math.round(left * per / 60000);
-        label += mins < 1 ? ' \u00b7 under a minute left' : ` \u00b7 about ${mins} min left`;
+        pace = mins < 1 ? 'under a minute left' : `about ${mins} min left`;
     }
-    text.textContent = label;
+    text.replaceChildren(`${shown} / ${total}`);
+    const paceEl = document.createElement('span');
+    paceEl.className = 'pace';
+    paceEl.textContent = ` \u00b7 ${pace}`;
+    text.append(paceEl);
     if (fill) fill.style.width = `${((index + 1) / total) * 100}%`;
 }
 
@@ -1872,47 +1876,25 @@ function extractEdgeColor(img) {
  * @param {number} b - Blue component (0-255)
  */
 function applyReaderBackgroundColor(r, g, b) {
+    // The pills are their own dark surface, so only the backdrop takes the colour.
     const overlay = document.querySelector('.comic-reader-overlay');
-    const header = document.querySelector('.comic-reader-header');
-    const footer = document.querySelector('.comic-reader-footer');
     const slides = document.querySelectorAll('.comic-reader-swiper .swiper-slide');
-
     if (overlay) overlay.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-    if (header) header.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
-    if (footer) footer.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
     slides.forEach(slide => {
         slide.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
     });
-
-    // Toggle button styling based on background brightness
-    const light = isLightColor(r, g, b);
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.toggle('reader-light-bg', light);
-    }
 }
 
 /**
- * Reset reader chrome background colors to CSS defaults
+ * Reset the backdrop colour to the CSS default
  */
 function resetReaderBackgroundColor() {
     const overlay = document.querySelector('.comic-reader-overlay');
-    const header = document.querySelector('.comic-reader-header');
-    const footer = document.querySelector('.comic-reader-footer');
     const slides = document.querySelectorAll('.comic-reader-swiper .swiper-slide');
-
     if (overlay) overlay.style.backgroundColor = '';
-    if (header) header.style.backgroundColor = '';
-    if (footer) footer.style.backgroundColor = '';
     slides.forEach(slide => {
         slide.style.backgroundColor = '';
     });
-
-    // Reset button styling to default (light buttons on dark background)
-    const container = document.querySelector('.comic-reader-container');
-    if (container) {
-        container.classList.remove('reader-light-bg');
-    }
 }
 
 /**
@@ -2281,8 +2263,6 @@ function scrollPageIndexAtLine(s) {
 function applyScrollIndexUi(index) {
     const s = scrollState;
     const total = s ? s.pageCount : currentComicPageCount;
-    const pageInfoEl = document.getElementById('comicReaderPageInfo');
-    if (pageInfoEl) pageInfoEl.textContent = `Page ${index + 1} of ${total}`;
     syncPageScrubber(index);
     updateReadingProgress(index);
     const cached = pageEdgeColors.get(index);
@@ -2691,13 +2671,14 @@ function updateBookmarkButtonState(hasSavedPosition) {
         if (hasSavedPosition) {
             icon.classList.remove('bi-bookmark');
             icon.classList.add('bi-bookmark-fill');
-            bookmarkBtn.title = 'Position Saved';
+            bookmarkBtn.title = 'Position saved';
         } else {
             icon.classList.remove('bi-bookmark-fill');
             icon.classList.add('bi-bookmark');
-            bookmarkBtn.title = 'Save Position';
+            bookmarkBtn.title = 'Save position';
         }
     }
+    bookmarkBtn.setAttribute('aria-pressed', hasSavedPosition ? 'true' : 'false');
 }
 
 /**
@@ -2721,16 +2702,6 @@ function saveReadingPosition() {
             const bookmarked = !data.cleared;
             savedReadingPosition = bookmarked ? currentPage : null;
             updateBookmarkButtonState(bookmarked);
-            // Brief visual feedback
-            const bookmarkBtn = document.getElementById('comicReaderBookmark');
-            if (bookmarkBtn) {
-                bookmarkBtn.classList.add('btn-success');
-                bookmarkBtn.classList.remove('btn-outline-light');
-                setTimeout(() => {
-                    bookmarkBtn.classList.remove('btn-success');
-                    bookmarkBtn.classList.add('btn-outline-light');
-                }, 1000);
-            }
         }).catch(err => console.error('Failed to save reading position:', err));
 }
 

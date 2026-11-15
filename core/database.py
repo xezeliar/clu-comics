@@ -6007,6 +6007,30 @@ def get_file_index_entry_by_path(path):
         return None
 
 
+def get_reader_display_fields(path):
+    """Series, issue number and story title for the reader's title pill.
+
+    Each is None when untagged: ComicInfo stores a blank tag as '', and a blank
+    is not a title.
+    """
+    fields = {"series": None, "number": None, "title": None}
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return fields
+            row = conn.execute(
+                "SELECT ci_series, ci_number, ci_title FROM file_index WHERE path = ?",
+                (path,),
+            ).fetchone()
+    except Exception as e:
+        app_logger.error(f"Failed to read reader title for {path}: {e}")
+        return fields
+    if row:
+        for key, value in zip(("series", "number", "title"), row):
+            fields[key] = (value or "").strip() or None
+    return fields
+
+
 #########################
 #   Unified Schedules   #
 #########################

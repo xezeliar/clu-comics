@@ -127,6 +127,7 @@ from core.notifications import (
 import requests
 from packaging import version as pkg_version
 from core.database import (
+    get_reader_display_fields,
     init_db,
     get_db_connection,
     log_recent_file,
@@ -6062,6 +6063,7 @@ def read_comic_info(comic_path):
                 "success": True,
                 "page_count": len(image_files),
                 "filename": os.path.basename(comic_path),
+                **get_reader_display_fields(comic_path),
             }
         )
 

@@ -39,55 +39,104 @@
     flex-direction: column;
 }
 
+/* Floating chrome: two transparent rows of dark pills over the page. The pills
+   are their own surface, always dark with white ink, so they read on any page
+   edge colour; only the backdrop takes that colour (applyReaderBackgroundColor). */
 .comic-reader-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 1rem 2rem;
-    background-color: rgba(0, 0, 0, 0.8);
-    color: white;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    color: #fff;
     z-index: 3;
-    flex-shrink: 0;
-    transition: background-color 0.5s ease;
+    pointer-events: none;
+}
+
+.comic-reader-header > *,
+.comic-reader-footer > * {
+    pointer-events: auto;
+}
+
+.reader-pill,
+.reader-capsule {
+    background: rgba(18, 18, 18, 0.86);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.reader-title-pill {
+    min-width: 0;
+    max-width: min(60%, 28rem);
+    padding: 0.45rem 0.95rem;
+    border-radius: 1.25rem;
 }
 
 .comic-reader-title {
-    font-size: 1.1rem;
+    font-size: 0.875rem;
     font-weight: 500;
-}
-
-.comic-reader-progress {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.comic-reader-progress-bar {
-    width: 100px;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 2px;
+    line-height: 1.3;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.comic-reader-progress-fill {
-    height: 100%;
-    background: #4CAF50;
-    width: 0%;
-    transition: width 0.3s ease;
+.reader-subtitle {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: rgba(255, 255, 255, 0.66);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.comic-reader-progress-text {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
-    min-width: 35px;
+.reader-subtitle[hidden] {
+    display: none;
 }
 
 .comic-reader-controls {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.4rem;
     position: relative;
+}
+
+.reader-round {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.reader-round.reader-pill:hover {
+    background: rgba(48, 48, 48, 0.9);
+}
+
+.reader-round[aria-pressed="true"],
+.reader-round[aria-expanded="true"] {
+    background: rgba(70, 70, 70, 0.95);
+}
+
+.reader-round:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+    .reader-round {
+        width: 44px;
+        height: 44px;
+    }
 }
 
 /* View panel: a dark surface of its own, so its ink stays white on any page edge colour. */
@@ -173,11 +222,6 @@
     }
 }
 
-.comic-reader-page-info {
-    font-size: 0.9rem;
-    opacity: 0.8;
-}
-
 #comicReaderClose {
     cursor: pointer;
 }
@@ -185,67 +229,74 @@
 .comic-reader-footer {
     display: flex;
     justify-content: center;
-    align-items: center;
-    padding: 0.75rem 2rem;
-    background-color: rgba(0, 0, 0, 0.8);
-    color: white;
+    padding: 0 0.75rem 0.9rem;
     z-index: 3;
-    transition: background-color 0.5s ease;
-    flex-wrap: wrap;
+    pointer-events: none;
 }
 
-.comic-reader-footer-progress {
-    flex: 0 0 100%;
-    text-align: center;
-    font-size: 0.8125rem;
-    margin-bottom: 0.5rem;
-}
-
-.comic-reader-footer-line {
-    height: 3px;
-    background: rgba(255, 255, 255, 0.2);
-    margin-bottom: 0.375rem;
-}
-
-.comic-reader-footer-line > i {
-    display: block;
-    height: 100%;
-    width: 0;
-    background: var(--clu-select, #fff);
-    transition: width 0.2s ease;
-}
-
-.comic-reader-footer-controls {
+.reader-capsule {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.25rem;
+    width: min(100%, 34rem);
+    padding: 0 0.9rem 0 0.4rem;
+    border-radius: 1.5rem;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
-.comic-reader-footer .zoom-btn {
-    min-width: 40px;
-    height: 32px;
-    padding: 0.25rem 0.5rem;
-    border-color: rgba(255, 255, 255, 0.3);
+/* Zoom is for a mouse; a finger pinches. */
+.reader-capsule .zoom-btn {
+    display: none;
+    background: none;
 }
 
-/* Fingers need 44px; the 32px desktop size is too small to hit reliably. */
-@media (pointer: coarse) {
-    .comic-reader-footer .zoom-btn {
-        min-width: 44px;
-        height: 44px;
+.reader-capsule .zoom-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+@media (pointer: fine) {
+    .reader-capsule .zoom-btn {
+        display: inline-flex;
     }
 }
 
-.comic-reader-footer .zoom-btn:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.5);
+.reader-count {
+    flex-shrink: 0;
+    padding-left: 0.5rem;
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.85);
 }
 
-/* The layout toggle that is switched on. Bootstrap's own .active fills
-   outline-light solid white, which swallows the (light) icon. */
-.comic-reader-footer .zoom-btn.active {
-    background-color: rgba(255, 255, 255, 0.25);
-    border-color: rgba(255, 255, 255, 0.7);
+.reader-count .pace {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* While the chrome is hidden, a 2px line along the bottom says how far in you are. */
+.reader-hidden-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.reader-hidden-line > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--clu-select);
+    transition: width 0.2s ease;
+}
+
+.comic-reader-container.reader-chrome-hidden .reader-hidden-line {
+    opacity: 1;
 }
 
 /* Page scrubber. The only theme colour in the reader chrome is the filled part. */
@@ -443,7 +494,7 @@
     top: 0;
     left: 0;
     right: 0;
-    transition: transform 0.3s ease, opacity 0.3s ease, background-color 0.5s ease;
+    transition: transform 0.25s ease, opacity 0.25s ease;
 }
 
 .comic-reader-footer {
@@ -451,54 +502,23 @@
     bottom: 0;
     left: 0;
     right: 0;
-    transition: transform 0.3s ease, opacity 0.3s ease, background-color 0.5s ease;
+    transition: transform 0.25s ease, opacity 0.25s ease;
 }
 
 .comic-reader-container.reader-chrome-hidden .comic-reader-header {
-    transform: translateY(-100%);
+    transform: translateY(-1rem);
     opacity: 0;
     pointer-events: none;
 }
 
 .comic-reader-container.reader-chrome-hidden .comic-reader-footer {
-    transform: translateY(100%);
+    transform: translateY(1rem);
     opacity: 0;
     pointer-events: none;
 }
 
 /* Mobile responsive styles for comic reader */
 @media (max-width: 768px) {
-    .comic-reader-header {
-        padding: 0.5rem 1rem;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
-
-    .comic-reader-title {
-        font-size: 0.9rem;
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .comic-reader-progress {
-        display: none;
-    }
-
-    .comic-reader-controls {
-        gap: 0.5rem;
-    }
-
-    .comic-reader-page-info {
-        font-size: 0.8rem;
-    }
-
-    .comic-reader-footer {
-        padding: 0.5rem 1rem;
-    }
-
     .comic-reader-swiper .swiper-button-next,
     .comic-reader-swiper .swiper-button-prev {
         width: 36px;
@@ -520,17 +540,9 @@
 
 /* Extra small devices */
 @media (max-width: 480px) {
-    .comic-reader-header {
-        padding: 0.4rem 0.75rem;
-    }
-
-    .comic-reader-title {
-        font-size: 0.8rem;
-        max-width: 60%;
-    }
-
-    .comic-reader-page-info {
-        font-size: 0.75rem;
+    /* A phone shows the count; the pace estimate would crowd the scrubber. */
+    .reader-count .pace {
+        display: none;
     }
 
     /* Hide navigation arrows on very small screens - use swipe */
@@ -540,51 +552,14 @@
     }
 }
 
-/* Light background overrides — toggled via JS when page edge color is light */
-.comic-reader-container.reader-light-bg .comic-reader-header,
-.comic-reader-container.reader-light-bg .comic-reader-footer {
-    color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .comic-reader-title,
-.comic-reader-container.reader-light-bg .comic-reader-page-info {
-    color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .comic-reader-progress-text {
-    color: rgba(0, 0, 0, 0.6);
-}
-
-.comic-reader-container.reader-light-bg .btn-outline-light {
-    color: #212529;
-    border-color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .btn-outline-light:hover {
-    background-color: rgba(0, 0, 0, 0.1);
-    color: #212529;
-}
-
-.comic-reader-container.reader-light-bg .zoom-btn {
-    border-color: rgba(0, 0, 0, 0.3);
-}
-
-.comic-reader-container.reader-light-bg .zoom-btn:hover {
-    background-color: rgba(0, 0, 0, 0.1);
-    border-color: rgba(0, 0, 0, 0.5);
-}
-
-.comic-reader-container.reader-light-bg .text-light {
-    color: #212529 !important;
-}
-
 /* Pan hint -- injected by reader.js the first few times a page is zoomed in,
    because zoom always centres and the pan keys are not otherwise discoverable.
    Built in JS rather than markup: the reader modal is duplicated across four
    templates, and this keeps those copies from drifting. */
 .reader-pan-hint {
     position: absolute;
-    bottom: 80px;
+    /* 1rem above the capsule (2.75rem high, 0.9rem off the bottom). */
+    bottom: calc(4.65rem + env(safe-area-inset-bottom, 0px));
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -751,13 +726,11 @@
 
 /* Home-screen web app (status bar is black-translucent): the page runs under
    the status bar and the home indicator, so the bars grow by the safe-area
-   inset. A transparent border is used rather than padding because the
-   breakpoints above each reset `padding`; the bar's background still paints
-   under it, so the status bar sits over a solid bar, not over the comic. */
+   inset, so no pill sits under the notch or the home indicator. */
 .comic-reader-header {
     border-top: env(safe-area-inset-top, 0px) solid transparent;
-    padding-left: max(1rem, env(safe-area-inset-left, 0px));
-    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
 }
 
 .comic-reader-footer {
@@ -776,4 +749,17 @@
     background-color: #000;
     background-repeat: no-repeat;
     pointer-events: none;
+}
+
+/* Reduced motion: the chrome fades, nothing slides or scales. */
+@media (prefers-reduced-motion: reduce) {
+    .comic-reader-header,
+    .comic-reader-footer {
+        transition: opacity 0.25s ease;
+    }
+
+    .comic-reader-container.reader-chrome-hidden .comic-reader-header,
+    .comic-reader-container.reader-chrome-hidden .comic-reader-footer {
+        transform: none;
+    }
 }
