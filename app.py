@@ -936,6 +936,7 @@ def process_incoming_wanted_issues():
     moved_count = 0
     affected_series = set()  # Track series that had files moved
     moved_issues = []  # Human-readable list for the notification digest
+    moved_paths = []  # Final library path of each, for the digest's cover
     moved_series_names = set()  # Scopes the reading-list gap pass below
     for match in matches:
         issue = match["issue"]
@@ -1111,6 +1112,7 @@ def process_incoming_wanted_issues():
                 app_logger.error(
                     f"Failed to add {final_path} to file index: {e}"
                 )
+            moved_paths.append(final_path)
 
         except Exception as e:
             app_logger.error(f"Failed to move/rename {filename}: {e}")
@@ -1155,6 +1157,9 @@ def process_incoming_wanted_issues():
             EVENT_WANTED_ADDED,
             f"{moved_count} wanted {plural} added",
             format_digest("Added to your library:", moved_issues),
+            # One cover only when one comic is the subject: beside a list it
+            # would read as the first issue's message.
+            cover_path=moved_paths[0] if moved_count == 1 and moved_paths else None,
         )
         from core.activity import record_event
         record_event(

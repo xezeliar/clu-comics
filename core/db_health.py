@@ -175,12 +175,12 @@ def note_db_error(exc, context=""):
 def _notify_corruption(message, context):
     """Fire the push notification. Imported lazily and fully swallowed."""
     try:
-        from core.notifications import notify_async, EVENT_DB_CORRUPT
+        from core.notifications import notify_async, EVENT_DB_CORRUPT, esc
 
         notify_async(
             EVENT_DB_CORRUPT,
             "Database corruption detected",
-            f"{message}\n\nDetected in: {context or 'unknown'}\n\n"
+            f"{esc(message)}<br/><br/>Detected in: {esc(context or 'unknown')}<br/><br/>"
             "Open Config → Database to salvage the file or restore a backup.",
         )
     except Exception:

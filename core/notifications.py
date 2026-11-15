@@ -21,7 +21,11 @@ break the thing it is reporting on:
 * Settings are read per call, so config changes take effect without a restart.
 """
 
+import html
+import os
+import tempfile
 import threading
+from urllib.parse import urlparse
 
 from core.app_logging import app_logger
 
@@ -37,12 +41,14 @@ EVENT_DB_CORRUPT = "db_corrupt"
 EVENT_DEFS = {
     EVENT_DOWNLOAD_COMPLETE: {
         "label": "Download completed",
+        "icon": "✅",
         "description": "A download finishes successfully.",
         "notify_type": "success",
         "default": True,
     },
     EVENT_DOWNLOAD_FAILED: {
         "label": "Download failed",
+        "icon": "❌",
         "description": "A download fails after every mirror and every automatic "
                        "retry has been tried. Cancelled downloads are never "
                        "reported.",
@@ -51,6 +57,7 @@ EVENT_DEFS = {
     },
     EVENT_WANTED_ADDED: {
         "label": "Wanted issues added",
+        "icon": "📚",
         "description": "Missing issues from your wanted list are matched and "
                        "moved into the library. Sent as one digest per sweep.",
         "notify_type": "success",
@@ -58,6 +65,7 @@ EVENT_DEFS = {
     },
     EVENT_DB_CORRUPT: {
         "label": "Database corruption detected",
+        "icon": "⚠️",
         "description": "An integrity check fails, or an operation hits "
                        "“database disk image is malformed”. Sent once "
                        "per episode, not once per failing query — a corrupt "
@@ -75,6 +83,26 @@ PREF_EVENTS = "notify_events"
 # A digest naming every issue in a large catch-up sweep is unreadable on a phone
 # lock screen, so the body enumerates this many and then summarises the rest.
 MAX_DIGEST_LINES = 20
+
+TEST_ICON = "\U0001F514"  # bell
+
+# Bodies are HTML: Apprise converts HTML to Markdown (Discord, ntfy) and to plain
+# text (SMS), but 2.2 has no Markdown-to-text converter, so a Markdown body
+# would reach text-only services with its asterisks showing.
+BODY_FORMAT = "html"
+
+
+def esc(value):
+    """Escape a value for an HTML notification body."""
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def source_line(provider=None, page_url=None):
+    """``Source: <provider>``, linked to the post page when there is one."""
+    if page_url:
+        label = provider or urlparse(page_url).hostname or page_url
+        return f'Source: <a href="{esc(page_url)}">{esc(label)}</a>'
+    return f"Source: {esc(provider)}" if provider else None
 
 
 def parse_urls(raw):
@@ -147,7 +175,37 @@ def is_event_enabled(event, settings=None):
     return bool(settings.get("events", {}).get(event))
 
 
-def _send(urls, title, body, notify_type):
+def _cover_image(cover_path):
+    """A JPEG of ``cover_path``'s first page, as ``(path, is_temp)``.
+
+    Uses the library's cached thumbnail when it is fresh. Otherwise renders one
+    to a temp file rather than the cache: a just-downloaded file usually sits in
+    WATCH and is about to move, and a cache entry keyed on that path would be an
+    orphan. ``(None, False)`` on any failure - the message goes without it.
+    """
+    try:
+        if not cover_path or not os.path.isfile(cover_path):
+            return None, False
+        from core import thumbnail_cache as tc
+
+        if not tc.can_thumbnail(cover_path):
+            return None, False
+        cached = tc.thumbnail_cache_path(cover_path)
+        if os.path.isfile(cached) and not tc.is_thumbnail_stale(cover_path, cached):
+            return cached, False
+        img = tc._first_page(cover_path)
+        if img is None:
+            return None, False
+        fd, tmp = tempfile.mkstemp(prefix="clu-cover-", suffix=".jpg")
+        with os.fdopen(fd, "wb") as fh:
+            img.convert("RGB").save(fh, "JPEG", quality=85)
+        return tmp, True
+    except Exception as e:
+        app_logger.warning(f"No cover for notification ({cover_path}): {e}")
+        return None, False
+
+
+def _send(urls, title, body, notify_type, attach=None):
     """Deliver one message to ``urls``. Returns ``(ok, error_message)``."""
     try:
         import apprise
@@ -171,7 +229,11 @@ def _send(urls, title, body, notify_type):
         if not len(client):
             return False, "No valid Apprise URLs configured"
 
-        ok = client.notify(title=title, body=body, notify_type=notify_type)
+        kwargs = {"title": title, "body": body, "notify_type": notify_type,
+                  "body_format": BODY_FORMAT}
+        if attach:
+            kwargs["attach"] = attach
+        ok = client.notify(**kwargs)
         if not ok:
             # notify() returns False when a service refused the message; the
             # detail is on apprise's own logger.
@@ -196,7 +258,7 @@ def _redact(url):
         return "<unparseable url>"
 
 
-def notify(event, title, body):
+def notify(event, title, body, cover_path=None):
     """Send ``event`` synchronously. Returns True only if it was delivered.
 
     Returns False (without raising) when notifications are off, the event is
@@ -211,9 +273,19 @@ def notify(event, title, body):
         if not is_event_enabled(event, settings):
             return False
 
-        ok, error = _send(
-            settings["urls"], title, body, EVENT_DEFS[event]["notify_type"]
-        )
+        defn = EVENT_DEFS[event]
+        attach, is_temp = _cover_image(cover_path)
+        try:
+            ok, error = _send(
+                settings["urls"], f"{defn['icon']} {title}", body,
+                defn["notify_type"], attach=attach,
+            )
+        finally:
+            if is_temp:
+                try:
+                    os.remove(attach)
+                except OSError:
+                    pass
         if ok:
             app_logger.info(f"Notification sent ({event}): {title}")
         else:
@@ -224,7 +296,7 @@ def notify(event, title, body):
         return False
 
 
-def notify_async(event, title, body):
+def notify_async(event, title, body, cover_path=None):
     """Fire :func:`notify` on a daemon thread and return immediately.
 
     Use this from every hook site. The callers are a download worker and two
@@ -238,7 +310,7 @@ def notify_async(event, title, body):
             return
         threading.Thread(
             target=notify,
-            args=(event, title, body),
+            args=(event, title, body, cover_path),
             daemon=True,
         ).start()
     except Exception as e:
@@ -260,9 +332,9 @@ def notify_download_terminal(status, filename, error=None, source=None):
     here would kill the poller and strand every tracked job.
     """
     try:
-        lines = [filename or "Unknown file"]
+        lines = [f"<b>{esc(filename or 'Unknown file')}</b>"]
         if source:
-            lines.append(f"Source: {source}")
+            lines.append(source_line(source))
 
         if status in ("complete", "complete_no_move"):
             if status == "complete_no_move":
@@ -271,15 +343,15 @@ def notify_download_terminal(status, filename, error=None, source=None):
                     "file - it has not been imported."
                 )
             notify_async(
-                EVENT_DOWNLOAD_COMPLETE, "Download complete", "\n".join(lines)
+                EVENT_DOWNLOAD_COMPLETE, "Download complete", "<br/>".join(lines)
             )
             from core.activity import record_event
             record_event("download", f"Downloaded {filename or 'a file'}", detail=source)
         elif status == "failed":
             if error:
-                lines.append(f"Error: {error}")
+                lines.append(f"Error: {esc(error)}")
             notify_async(
-                EVENT_DOWNLOAD_FAILED, "Download failed", "\n".join(lines)
+                EVENT_DOWNLOAD_FAILED, "Download failed", "<br/>".join(lines)
             )
             from core.activity import record_event
             record_event(
@@ -301,7 +373,7 @@ def send_test(urls):
         return False, "No notification URLs provided"
     return _send(
         urls,
-        "Comic Library Utilities",
+        f"{TEST_ICON} Comic Library Utilities",
         "Test notification - your CLU notifications are working.",
         "info",
     )
@@ -309,10 +381,11 @@ def send_test(urls):
 
 def format_digest(header, lines):
     """Build a digest body, truncating a long list to a readable length."""
-    lines = [str(line) for line in (lines or [])]
+    lines = [esc(line) for line in (lines or [])]
     shown = lines[:MAX_DIGEST_LINES]
-    body = "\n".join(shown)
+    body = "<br/>".join(shown)
     remaining = len(lines) - len(shown)
     if remaining > 0:
-        body += f"\n...and {remaining} more"
-    return f"{header}\n\n{body}" if body else header
+        body += f"<br/>...and {remaining} more"
+    header = esc(header)
+    return f"{header}<br/><br/>{body}" if body else header
