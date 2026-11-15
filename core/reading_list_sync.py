@@ -279,13 +279,27 @@ def _metron_year_hints(issue, series_info):
     }
 
 
-def metron_issue_to_entry(issue, loader):
+# Metron's ReadingListItem.issue_type display values -> our stored role.
+METRON_ISSUE_TYPE_ROLES = {
+    "prologue": "prologue",
+    "core issue": "core",
+    "tie-in": "tie_in",
+    "epilogue": "epilogue",
+}
+
+
+def metron_role(issue_type):
+    """Our role for a Metron issue_type, or None (blank, unknown)."""
+    return METRON_ISSUE_TYPE_ROLES.get(str(issue_type or "").strip().lower())
+
+
+def metron_issue_to_entry(issue, loader, issue_type=None):
     """Build one reading-list entry from a Metron issue dict.
 
     Used by the Metron importers *and* by this module's sync, so a field added
     to one is added to both. ``issue`` is a ``BaseIssue`` dict as the arc
     endpoint returns it; ``process_metron_import`` unwraps ``item['issue']``
-    before calling.
+    before calling, and passes the item's ``issue_type`` (arcs have none).
     """
     series_info = issue.get('series', {}) or {}
     series_name = series_info.get('name', '')
@@ -308,6 +322,7 @@ def metron_issue_to_entry(issue, loader):
         'issue_year': hints['issue_year'],
         'metron_id': issue.get('id'),
         'matched_file_path': matched_path,
+        'role': metron_role(issue_type),
     }
 
 
@@ -515,7 +530,8 @@ def build_entries(result, rename_pattern, progress_cb=None):
         items = fetch_reading_list_items(result.payload["api"], result.ident)
         items.sort(key=lambda x: x.get('order', 0))
         issues = [(item.get('issue') or {}) for item in items]
-        return _metron_entries(issues, loader, progress_cb)
+        return _metron_entries(issues, loader, progress_cb,
+                               [item.get('issue_type') for item in items])
 
     if kind == METRON_ARC:
         # The probe already listed them; arc issues arrive as BaseIssue dicts.
@@ -539,13 +555,14 @@ def build_entries(result, rename_pattern, progress_cb=None):
     return []  # pragma: no cover - guarded by probe()
 
 
-def _metron_entries(issues, loader, progress_cb):
+def _metron_entries(issues, loader, progress_cb, issue_types=None):
     """Match a Metron issue list to the library, ids first."""
     loader.prefetch_metron_ids([(i or {}).get('id') for i in issues])
     total = len(issues)
     entries = []
     for i, issue in enumerate(issues):
-        entry = metron_issue_to_entry(issue, loader)
+        entry = metron_issue_to_entry(
+            issue, loader, issue_types[i] if issue_types else None)
         entries.append(entry)
         _report(progress_cb, i + 1, total,
                 f"{entry['series']} #{entry['issue_number']}")

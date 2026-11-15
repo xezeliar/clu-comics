@@ -1763,6 +1763,14 @@ function confirmAddIssue() {
 let sortableInstance = null;
 let reorderMode = false;
 let rlIssueFilter = '';
+// The Role filter (prologue / core / tie_in / epilogue). It narrows the grid,
+// Up next and the reader's next issue alike, so Read walks the core story only.
+let rlRoleFilter = '';
+const RL_ROLE_LABELS = { prologue: 'Prologue', core: 'Core', tie_in: 'Tie-In', epilogue: 'Epilogue' };
+
+function rlRoleKeeps(li) {
+    return reorderMode || !rlRoleFilter || li.dataset.role === rlRoleFilter;
+}
 const RL_VIEW_KEY = 'cluReadingListView';
 
 function rlItems() {
@@ -1792,6 +1800,7 @@ function applyIssueFilters() {
         const own = !!rlItemPath(li);
         const keep = (!f || (f === 'own' && own) || (f === 'miss' && !own)
                       || (f === 'unread' && own && !rlIsRead(li)))
+            && rlRoleKeeps(li)
             && (!q || `${li.dataset.series} #${li.dataset.issue}`.toLowerCase().includes(q));
         li.hidden = !keep;
         if (keep) shown++;
@@ -1802,7 +1811,7 @@ function applyIssueFilters() {
     const empty = document.getElementById('rlIssuesEmpty');
     if (!empty) return;
     if (shown) { empty.replaceChildren(); return; }
-    if (f === 'miss' && !q) {
+    if (f === 'miss' && !q && !rlRoleFilter) {
         empty.replaceChildren(CLU.emptyState({
             icon: 'bi-check2-circle', title: 'Nothing is missing',
             message: 'Every issue in this list is in your library.', compact: true
@@ -1810,15 +1819,79 @@ function applyIssueFilters() {
         return;
     }
     empty.replaceChildren(CLU.noMatches({
-        noun: 'issues', query: q, filtered: !!f, compact: true,
+        noun: 'issues', query: q, filtered: !!f || !!rlRoleFilter, compact: true,
         onClear: () => {
             if (box) box.value = '';
             const group = document.getElementById('rlIssueShow');
             if (group) CLU.setFilterValue(group, '');
             rlIssueFilter = '';
-            applyIssueFilters();
+            setRoleFilter('');
         }
     }));
+}
+
+function setRoleFilter(value) {
+    rlRoleFilter = value;
+    const group = document.getElementById('rlRoleShow');
+    if (group && CLU.filterValue && CLU.filterValue(group) !== value) CLU.setFilterValue(group, value);
+    buildReadingListEntries();
+    refreshReadState();
+}
+
+// The Role row shows only the roles the list uses, with their counts, and
+// disappears when it uses none. A role that empties while picked stays shown.
+function refreshRoleCounts() {
+    const row = document.getElementById('rlRoleRow');
+    const group = document.getElementById('rlRoleShow');
+    if (!row || !group) return;
+    const items = rlItems();
+    let used = 0;
+    group.querySelectorAll('[data-value]').forEach(btn => {
+        const role = btn.dataset.value;
+        const n = role ? items.filter(li => li.dataset.role === role).length : items.length;
+        const count = btn.querySelector('.clu-filter-count');
+        if (count) count.textContent = CLU.formatCount(n);
+        if (role) {
+            btn.hidden = !n && role !== rlRoleFilter;
+            if (n) used++;
+        }
+    });
+    row.hidden = !used && !rlRoleFilter;
+}
+
+// Set by hand: the server flags it as the user's, so a sync keeps it.
+function setEntryRole(li, role) {
+    if (!li) return;
+    fetch(`/api/reading-lists/${LIST_ID}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry_ids: [parseInt(li.dataset.entryId, 10)], role })
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) throw new Error(data.message || 'Failed');
+            li.dataset.role = role || '';
+            const label = RL_ROLE_LABELS[role];
+            const name = `${li.dataset.series} #${li.dataset.issue}`;
+            const pill = li.querySelector('button.rl-role');
+            if (pill) {
+                pill.dataset.r = role || 'none';
+                pill.textContent = label || 'Set role';
+                pill.setAttribute('aria-label', `Role of ${name}: ${label || 'none'}. Change`);
+            }
+            li.querySelectorAll('[data-set-role]').forEach(b => {
+                b.setAttribute('aria-checked', (b.dataset.setRole || null) === role ? 'true' : 'false');
+            });
+            const src = li.querySelector('.rl-role-src');
+            if (src) src.textContent = 'Role in this list';
+            refreshRoleCounts();
+            buildReadingListEntries();
+            refreshReadState();
+        })
+        .catch(err => {
+            console.error('Error setting role:', err);
+            CLU.toast('Could not set the role', 'error');
+        });
 }
 
 function setIssueView(view) {
@@ -1858,7 +1931,7 @@ function refreshReadState() {
         const isRead = rlIsRead(li);
         if (path) owned++;
         if (isRead) read++;
-        if (path && !isRead && !next) next = li;
+        if (path && !isRead && !next && rlRoleKeeps(li)) next = li;
         // The sticker's book is always there, as on Library: open, then filled
         // (and the sticker green, in collection.css) once read.
         const icon = li.querySelector('.read-icon');
@@ -1960,7 +2033,7 @@ function toggleReorderMode() {
     list.classList.toggle('reorder-mode', reorderMode);
     if (bar) bar.hidden = !reorderMode;
     setIssueView(reorderMode ? 'list' : storedIssueView());
-    document.querySelectorAll('#rlViewToggle .btn, #rlIssueShow .btn, #rlIssueSearch')
+    document.querySelectorAll('#rlViewToggle .btn, #rlIssueShow .btn, #rlRoleShow .btn, #rlIssueSearch')
         .forEach(el => { el.disabled = reorderMode; });
     if (sortableInstance) sortableInstance.option('disabled', !reorderMode);
     const btn = document.getElementById('reorderToggleBtn');
@@ -2000,6 +2073,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const search = document.getElementById('rlIssueSearch');
     if (search && CLU.bindSearch) CLU.bindSearch(search, applyIssueFilters, { delay: 0 });
+    const roles = document.getElementById('rlRoleShow');
+    if (roles && CLU.filterBar) CLU.filterBar(roles, { onChange: value => setRoleFilter(value || '') });
+    refreshRoleCounts();
+    list.addEventListener('click', e => {
+        const pick = e.target.closest('[data-set-role]');
+        if (pick) setEntryRole(pick.closest('.rl-it'), pick.dataset.setRole || null);
+    });
 
     list.addEventListener('click', e => {
         const mv = e.target.closest('[data-move]');
@@ -2112,7 +2192,7 @@ function submitReadDate() {
 }
 
 function buildReadingListEntries() {
-    readingListEntries = rlItems().filter(li => rlItemPath(li)).map(li => {
+    readingListEntries = rlItems().filter(li => rlItemPath(li) && rlRoleKeeps(li)).map(li => {
         const cover = li.querySelector('.book-cover[data-file-path]');
         const series = li.dataset.series || '';
         const issue = li.dataset.issue || '';

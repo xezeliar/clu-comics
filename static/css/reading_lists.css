@@ -365,6 +365,45 @@ body.reading-list-select-mode .rl-card { cursor: pointer; }
 .rl-it.miss .rl-ct { color: var(--bs-secondary-color); font-weight: 400; }
 .rl-cm { font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; margin: 0; }
 
+/* An issue's role in the event. Core is tinted so the main story stands out
+   down the page; the others are outlined; an unmarked issue shows a dashed
+   "Set role" to a Clerk and nothing to a Reader. */
+.rl-rolew { margin-top: .3rem; }
+.rl-role {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    font: inherit;
+    font-size: .6875rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: .25rem .5rem;
+    margin-top: .3rem;
+    border-radius: 1rem;
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    white-space: nowrap;
+}
+.rl-rolew .rl-role { margin-top: 0; }
+.rl-role[data-r="core"] {
+    background: color-mix(in srgb, var(--clu-select, var(--bs-primary)) 18%, var(--bs-body-bg));
+    border-color: color-mix(in srgb, var(--clu-select, var(--bs-primary)) 55%, var(--bs-border-color));
+    color: var(--bs-emphasis-color);
+}
+.rl-role[data-r="none"] { border-style: dashed; color: var(--bs-secondary-color); font-weight: 400; }
+button.rl-role { cursor: pointer; }
+button.rl-role:hover { border-color: var(--bs-secondary-color); }
+button.rl-role:focus-visible { outline: 2px solid var(--clu-select, var(--bs-primary)); outline-offset: 2px; }
+/* Unmarked pills stay quiet until the card is hovered or the pill focused. */
+@media (hover: hover) {
+    .rl-it:not(:hover) button.rl-role[data-r="none"]:not(:focus-visible):not([aria-expanded="true"]) { opacity: .55; }
+}
+.rl-rows .rl-rolew, .rl-rows .rl-ifoot > div > .rl-role { display: inline-block; margin: 0 0 0 .5rem; }
+.rl-rows .rl-ifoot > div:first-child { display: flex; flex-wrap: wrap; align-items: center; column-gap: .25rem; }
+.rl-rows .rl-ifoot > div:first-child > p { flex: 0 1 auto; }
+.rl-role-menu .dropdown-item[aria-checked="true"]::after { content: "\2713"; float: right; margin-left: 1rem; color: var(--clu-select, var(--bs-primary)); }
+
 /* Issue list view: numbered rows for long arcs. The same items, restyled. */
 .reading-list-items.rl-rows {
     list-style: none;
@@ -447,4 +486,9 @@ body.reading-list-select-mode .rl-card { cursor: pointer; }
     .rl-box .btn, .rl-menu > .btn, .rl-rows .btn-sm, .rl-trk { min-height: 2.75rem; min-width: 2.75rem; }
     .rl-rows .rl-it { gap: .5rem; }
     .rl-rows .rl-num { width: 1.3rem; }
+    .rl-role-menu .dropdown-item { min-height: 2.75rem; display: flex; align-items: center; }
+}
+/* A 44px target without a 44px pill. */
+@media (pointer: coarse) {
+    button.rl-role::before { content: ""; position: absolute; inset: -.6rem -.25rem; }
 }
