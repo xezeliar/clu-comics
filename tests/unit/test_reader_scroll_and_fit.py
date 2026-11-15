@@ -106,7 +106,7 @@ class TestScrollMode:
         assert "SCROLL_READING_LINE" in function_body(js, "scrollPageIndexAtLine")
         body = function_body(js, "syncScrollIndex")
         assert "highestPageViewed" in body
-        assert "scheduleAutoSave()" in body
+        assert "NextIssueOverlay" not in body  # the last page no longer pops a prompt
         assert "checkAndShowNextIssueOverlay()" in body
 
     def test_a_jump_is_not_counted_as_reading(self, js):
