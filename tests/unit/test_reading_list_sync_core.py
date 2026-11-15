@@ -370,6 +370,23 @@ class TestApply:
         mock_stamp.assert_called_once_with(9, "tok")
 
     @patch("core.database.update_reading_list_source_version")
+    @patch("core.database.update_reading_list_description")
+    @patch("core.database.sync_reading_list_entries", return_value={"added": 0, "removed": 0})
+    @patch("models.cbl.CBLLoader.match_file", return_value=None)
+    @patch("models.cbl.CBLLoader.prefetch_metron_ids")
+    @patch("models.metron.fetch_reading_list_items", return_value=[])
+    def test_hand_written_description_survives_sync(
+            self, _items, _prefetch, _match, _sync, mock_desc, _stamp):
+        from core.reading_list_sync import apply
+        result = self._probe_result(
+            kind=METRON_LIST, ident=42, changed=True, token="tok",
+            payload={"api": MagicMock(), "detail": {"desc": "<p>from metron</p>"}})
+        apply({"id": 9, "name": "x", "description_edited": 1}, result, "{series_name} {issue_number}")
+        mock_desc.assert_not_called()
+        apply({"id": 9, "name": "x", "description_edited": 0}, result, "{series_name} {issue_number}")
+        mock_desc.assert_called_once()
+
+    @patch("core.database.update_reading_list_source_version")
     @patch("core.database.sync_reading_list_entries", return_value=None)
     @patch("models.cbl.CBLLoader.match_file", return_value=None)
     @patch("models.cbl.CBLLoader.prefetch_metron_ids")

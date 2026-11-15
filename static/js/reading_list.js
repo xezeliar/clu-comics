@@ -1049,6 +1049,50 @@ const TAG_ICONS = {
 let currentListIdForTags = null;
 let selectedTagsSet = new Set();
 let allExistingTags = [];
+let descriptionModal = null;
+
+// The stored description is sanitized HTML; the editor shows it as text.
+function descriptionToText(html) {
+    const withBreaks = (html || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n');
+    return (new DOMParser().parseFromString(withBreaks, 'text/html').body.textContent || '').trim();
+}
+
+function openDescriptionModal() {
+    const cur = document.getElementById('rlDesc');
+    document.getElementById('descriptionInput').value = cur ? descriptionToText(cur.innerHTML) : '';
+    if (!descriptionModal) {
+        descriptionModal = new bootstrap.Modal(document.getElementById('descriptionModal'));
+    }
+    descriptionModal.show();
+    setTimeout(() => document.getElementById('descriptionInput').focus(), 300);
+}
+
+function saveDescription() {
+    const btn = document.getElementById('saveDescriptionBtn');
+    btn.disabled = true;
+    fetch(`/api/reading-lists/${LIST_ID}/description`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: document.getElementById('descriptionInput').value })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            btn.disabled = false;
+            CLU.toast(data.message || 'Something went wrong', 'error');
+        }
+    })
+    .catch(err => {
+        console.error('Error saving description:', err);
+        btn.disabled = false;
+        CLU.toast('An error occurred', 'error');
+    });
+}
+
 let tagsModal = null;
 
 function openTagsModal(listId, currentTags = []) {

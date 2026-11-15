@@ -1149,3 +1149,30 @@ class TestAddEntries:
     def test_search_file_flags_in_list(self, mock_s, mock_w, mock_in, client):
         rows = client.get("/api/reading-lists/search-file?q=a&list_id=3").get_json()
         assert {r["path"]: r["in_list"] for r in rows} == {"/d/a.cbz": True, "/d/b.cbz": False}
+
+
+class TestUpdateDescription:
+
+    @patch("routes.reading_lists.update_reading_list_description", return_value=True)
+    def test_text_is_escaped_into_paragraphs_and_marked_edited(self, mock_update, client):
+        resp = client.post("/api/reading-lists/1/description",
+                           json={"description": "Line <b>one</b>\nline two\n\nSecond"})
+        assert resp.get_json()["success"] is True
+        mock_update.assert_called_once_with(
+            1, "<p>Line &lt;b&gt;one&lt;/b&gt;<br>line two</p><p>Second</p>", edited=True)
+
+    @patch("routes.reading_lists.update_reading_list_description", return_value=True)
+    def test_empty_clears_and_hands_back_to_sync(self, mock_update, client):
+        client.post("/api/reading-lists/1/description", json={"description": "  "})
+        mock_update.assert_called_once_with(1, None, edited=False)
+
+    def test_too_long_or_not_text(self, client):
+        assert client.post("/api/reading-lists/1/description",
+                           json={"description": "x" * 5001}).status_code == 400
+        assert client.post("/api/reading-lists/1/description",
+                           json={"description": 5}).status_code == 400
+
+    @patch("routes.reading_lists.update_reading_list_description", return_value=False)
+    def test_db_failure(self, mock_update, client):
+        resp = client.post("/api/reading-lists/1/description", json={"description": "x"})
+        assert resp.status_code == 500

@@ -971,6 +971,11 @@ def _init_db_locked():
             # explicit request. Default OFF keeps every existing list syncing.
             app_logger.info("Migrating reading_lists table: adding exclude_auto_sync column")
             c.execute("ALTER TABLE reading_lists ADD COLUMN exclude_auto_sync INTEGER DEFAULT 0")
+        if "description_edited" not in columns:
+            # 1 once a user has written the description by hand: the sync
+            # refreshes a provider's description, and must not undo that.
+            app_logger.info("Migrating reading_lists table: adding description_edited column")
+            c.execute("ALTER TABLE reading_lists ADD COLUMN description_edited INTEGER DEFAULT 0")
 
         # Create reading_list_entries table
         c.execute("""
@@ -13213,13 +13218,15 @@ def update_reading_list_thumbnail(list_id, thumbnail_path):
         return False
 
 
-def update_reading_list_description(list_id, description):
+def update_reading_list_description(list_id, description, edited=None):
     """
     Update the description of a reading list.
 
     Args:
         list_id: ID of the reading list
         description: New description text (or None to clear)
+        edited: True when a user wrote it (the sync then leaves it alone),
+            False to hand it back to the sync; None keeps the flag as is
 
     Returns:
         True if successful, False otherwise
@@ -13228,9 +13235,17 @@ def update_reading_list_description(list_id, description):
         with db_conn() as conn:
             if not conn:
                 return False
-            conn.cursor().execute(
-                "UPDATE reading_lists SET description = ? WHERE id = ?", (description, list_id)
-            )
+            if edited is None:
+                conn.cursor().execute(
+                    "UPDATE reading_lists SET description = ? WHERE id = ?",
+                    (description, list_id),
+                )
+            else:
+                conn.cursor().execute(
+                    "UPDATE reading_lists SET description = ?, description_edited = ? "
+                    "WHERE id = ?",
+                    (description, 1 if edited else 0, list_id),
+                )
             conn.commit()
         return True
     except Exception as e:

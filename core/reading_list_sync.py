@@ -582,7 +582,7 @@ def apply(row, result, rename_pattern, progress_cb=None):
 
     detail = result.payload.get("detail") or {}
     description = detail.get('desc') or detail.get('description')
-    if description:
+    if description and not row.get("description_edited"):
         update_reading_list_description(row["id"], _sanitize_html(description))
 
     update_reading_list_source_version(row["id"], result.token)
