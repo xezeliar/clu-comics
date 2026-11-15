@@ -4266,7 +4266,12 @@ document.addEventListener('DOMContentLoaded', () => {
  * @param {string} comicPath - Path to the comic file
  * @param {boolean} isRead - Whether the comic is already marked as read
  */
+// Paths for a bulk Set Read Date; null while the modal is for a single comic.
+let bulkReadDatePaths = null;
+
 function openSetReadDateModal(comicPath, isRead) {
+    bulkReadDatePaths = null;
+    document.getElementById('readDateLabel').textContent = 'Select the date you read this comic:';
     document.getElementById('readDateComicPath').value = comicPath;
     document.getElementById('setReadDateModalTitle').textContent =
         isRead ? 'Update Read Date' : 'Set Read Date';
@@ -4295,6 +4300,11 @@ function submitReadDate() {
     const timeStr = now.toTimeString().split(' ')[0];
     const readAt = `${dateValue}T${timeStr}`;
 
+    if (bulkReadDatePaths) {
+        submitBulkReadDate(bulkReadDatePaths, readAt);
+        return;
+    }
+
     fetch('/api/mark-comic-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4315,6 +4325,61 @@ function submitReadDate() {
         .catch(err => {
             CLU.showError('Error saving read date: ' + err.message);
         });
+}
+
+/**
+ * Bulk action: open the Set Read Date dialog for every selected comic.
+ */
+function bulkSetReadDate() {
+    if (selectedFiles.size === 0) {
+        CLU.showError('Select at least one comic first');
+        return;
+    }
+    const paths = Array.from(selectedFiles);
+    openSetReadDateModal(paths[0], false);
+    bulkReadDatePaths = paths;
+    const n = paths.length;
+    document.getElementById('setReadDateModalTitle').textContent =
+        `Set Read Date (${n} comic${n === 1 ? '' : 's'})`;
+    document.getElementById('readDateLabel').textContent =
+        `Select the date you read these ${n} comic${n === 1 ? '' : 's'}:`;
+}
+
+/**
+ * Mark each path read at readAt, one request at a time through the same
+ * endpoint the single dialog uses (it reads ComicInfo and scrobbles to Metron,
+ * which should not be hit in parallel).
+ */
+async function submitBulkReadDate(paths, readAt) {
+    const modalEl = document.getElementById('setReadDateModal');
+    const buttons = modalEl.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+    let done = 0;
+    const failed = [];
+    for (const path of paths) {
+        try {
+            const resp = await fetch('/api/mark-comic-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: path, read_at: readAt })
+            });
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'failed');
+            readIssuesSet.add(path);
+            updateReadIcon(path, true);
+            done++;
+        } catch (e) {
+            failed.push(path);
+        }
+    }
+    buttons.forEach(b => b.disabled = false);
+    bootstrap.Modal.getInstance(modalEl).hide();
+    bulkReadDatePaths = null;
+    if (failed.length) {
+        CLU.showError(`Saved ${done} of ${paths.length}; ${failed.length} failed`);
+    } else {
+        CLU.showSuccess(`Read date saved for ${done} comic${done === 1 ? '' : 's'}`);
+    }
 }
 
 /**
