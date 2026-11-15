@@ -284,6 +284,8 @@
                         <li><button type="button" class="dropdown-item"
                             onclick="const li = this.closest('.rl-it'); openSetReadDateModal(li.querySelector('[data-file-path]').dataset.filePath, rlIsRead(li))">
                             <i class="bi bi-calendar-check me-2" aria-hidden="true"></i><span class="set-read-date-text">Set read date</span></button></li>
+                        <li><button type="button" class="dropdown-item" onclick="openIssueSeriesPage(this.closest('.rl-it').querySelector('[data-file-path]').dataset.filePath)">
+                            <i class="bi bi-collection me-2" aria-hidden="true"></i>Go to series page</button></li>
                         {% endif %}
                         {% if _can_manage %}
                         <li><button type="button" class="dropdown-item"

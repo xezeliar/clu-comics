@@ -936,6 +936,18 @@ function toggleHighlight(entryId, highlight) {
         .catch(() => CLU.toast('An error occurred', 'error'));
 }
 
+// The issue's folder is its series folder; the server resolves that to the page.
+function openIssueSeriesPage(filePath) {
+    const folder = filePath.substring(0, filePath.lastIndexOf('/'));
+    fetch('/api/series/for-folder?path=' + encodeURIComponent(folder))
+        .then(r => r.json())
+        .then(d => {
+            if (d.success && d.url) window.location.href = d.url;
+            else CLU.toast(d.error || 'No series page for this issue', 'warning');
+        })
+        .catch(() => CLU.toast('Could not open the series page', 'error'));
+}
+
 function setAsThumbnail(filePath) {
     fetch(`/api/reading-lists/${LIST_ID}/thumbnail`, {
         method: 'POST',
