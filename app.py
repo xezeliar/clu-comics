@@ -1292,6 +1292,7 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             update_last_getcomics_run,
             get_manual_status_for_series,
             get_wanted_queue_stamps,
+            get_wanted_marks,
         )
         # One cooldown serves both work-item sources; two would be two knobs
         # that mean the same thing.
@@ -1442,10 +1443,15 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
             # Skip series the user isn't monitoring (NULL on legacy rows => on).
             # A scoped run is an explicit request for this one series, so the
             # toggle -- which only governs the unattended sweep -- doesn't apply.
+            # An unmonitored series is still searched for the issues marked
+            # Wanted by hand (and only those).
+            wanted_marks = None
             if (only_series_id is None and only_issues is None
                     and series.get("monitored") == 0):
-                run.count(download_runs.COUNT_UNMONITORED)
-                continue
+                wanted_marks = get_wanted_marks(series_id)
+                if not wanted_marks:
+                    run.count(download_runs.COUNT_UNMONITORED)
+                    continue
 
             if not mapped_path or not os.path.exists(mapped_path):
                 run.count(download_runs.COUNT_NO_FOLDER)
@@ -1495,6 +1501,8 @@ def scheduled_getcomics_download(dry_run=False, only_series_id=None, op_id=None,
 
                 # Picked on the Wanted page: only those issues, no skip count.
                 if only_issues is not None and (series_id, issue_num) not in only_issues:
+                    continue
+                if wanted_marks is not None and issue_num not in wanted_marks:
                     continue
 
                 # Skip if already found in collection
@@ -3248,6 +3256,7 @@ def refresh_wanted_cache_background():
             save_wanted_issues_for_series,
             clear_wanted_cache_all,
             get_manual_status_for_series,
+            get_wanted_marks,
         )
 
         app_logger.info("Starting wanted issues cache refresh...")
@@ -3266,9 +3275,13 @@ def refresh_wanted_cache_background():
             series_volume = series.get("volume")
             mapped_path = series.get("mapped_path")
 
-            # Skip series the user isn't monitoring (NULL on legacy rows => on).
+            # A series the user isn't monitoring (NULL on legacy rows => on)
+            # contributes only the issues marked Wanted by hand.
+            marks = None
             if series.get("monitored") == 0:
-                continue
+                marks = get_wanted_marks(series_id)
+                if not marks:
+                    continue
 
             if not mapped_path or not os.path.exists(mapped_path):
                 continue
@@ -3311,6 +3324,8 @@ def refresh_wanted_cache_background():
                 status = issue_status.get(issue_num, {})
                 has_manual = issue_num in manual_status
 
+                if marks is not None and issue_num not in marks:
+                    continue
                 if not status.get("found") and not has_manual:
                     wanted_list.append(issue)
 

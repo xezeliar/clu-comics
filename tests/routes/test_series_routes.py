@@ -2518,3 +2518,25 @@ class TestPullListRedesign:
         assert "Nothing needs attention" not in html
         assert "No series match" in html
 
+
+
+class TestWantedMarks:
+
+    @patch("helpers.collection.rebuild_wanted_for_series")
+    @patch("core.database.set_wanted_marks", return_value=True)
+    @patch("core.database.get_series_monitored", return_value=False)
+    def test_mark_wanted_rebuilds_cache(self, _mon, mock_set, mock_rebuild, client):
+        resp = client.post("/api/series/100/wanted-marks",
+                           json={"issue_numbers": ["1", "2"], "wanted": True})
+        assert resp.status_code == 200
+        mock_set.assert_called_once_with(100, ["1", "2"], True)
+        mock_rebuild.assert_called_once_with(100)
+
+    @patch("core.database.get_series_monitored", return_value=True)
+    def test_refused_on_monitored_series(self, _mon, client):
+        resp = client.post("/api/series/100/wanted-marks", json={"issue_numbers": ["1"]})
+        assert resp.status_code == 400
+
+    def test_requires_issues(self, client):
+        resp = client.post("/api/series/100/wanted-marks", json={"issue_numbers": []})
+        assert resp.status_code == 400

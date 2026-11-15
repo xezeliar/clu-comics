@@ -1415,6 +1415,7 @@ def rebuild_wanted_for_series(series_id):
         invalidate_collection_status_for_series,
         get_manual_status_for_series,
         save_wanted_issues_for_series,
+        get_wanted_marks,
     )
     from models.issue import IssueObj, SeriesObj
 
@@ -1439,11 +1440,15 @@ def rebuild_wanted_for_series(series_id):
 
         # Unmonitored series carry no wanted rows — the nightly rebuild clears
         # the cache and then skips them, so mirror that end state here.
+        # ...except for the issues the user marked Wanted by hand.
+        marks = None
         if series.get("monitored") == 0:
-            save_wanted_issues_for_series(
-                series_id, series.get("name", ""), series.get("volume"), []
-            )
-            return 0
+            marks = get_wanted_marks(series_id)
+            if not marks:
+                save_wanted_issues_for_series(
+                    series_id, series.get("name", ""), series.get("volume"), []
+                )
+                return 0
 
         issue_objs = [IssueObj(i) for i in issues]
         series_obj = SeriesObj(series)
@@ -1456,6 +1461,8 @@ def rebuild_wanted_for_series(series_id):
             if status.get(issue_num, {}).get("found"):
                 continue
             if issue_num in manual_status:
+                continue
+            if marks is not None and issue_num not in marks:
                 continue
             wanted_list.append(issue)
 

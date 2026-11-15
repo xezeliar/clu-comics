@@ -1398,7 +1398,11 @@ def series_view(slug):
         # are the only missing issues that are actually searched for, so the
         # page labels just these "Wanted" (see templates/series.html).
         list_wants = {}
+        wanted_marks = set()
         if mapped_path and not series_monitored:
+            from core.database import get_wanted_marks
+
+            wanted_marks = get_wanted_marks(series_id)
             from core.wanted_reading_lists import tracked_list_wants
 
             series_name_for_lists = (
@@ -1442,6 +1446,7 @@ def series_view(slug):
             default_library=default_library,
             series_subscription=series_subscription,
             series_monitored=series_monitored,
+            wanted_marks=wanted_marks,
             list_wants=list_wants,
             has_series_json=has_series_json,
             char_map=load_char_map(),
@@ -2086,6 +2091,30 @@ def delete_issue_manual_status(series_id, issue_number):
         return jsonify({"success": True})
     else:
         return jsonify({"error": "Failed to clear manual status"}), 500
+
+
+@series_bp.route("/api/series/<int:series_id>/wanted-marks", methods=["POST"])
+def set_wanted_marks_route(series_id):
+    """Mark (or unmark) issues Wanted on a Not monitored series.
+
+    Body: ``{"issue_numbers": ["1", ...], "wanted": true|false}``. A monitored
+    series already wants every missing issue, so marking there is refused.
+    """
+    from core.database import get_series_monitored, set_wanted_marks
+    from helpers.collection import rebuild_wanted_for_series
+
+    data = request.get_json(silent=True) or {}
+    numbers = [str(n) for n in (data.get("issue_numbers") or []) if str(n).strip()]
+    if not numbers:
+        return jsonify({"error": "No issues given"}), 400
+    if get_series_monitored(series_id):
+        return jsonify({"error": "This series is monitored: missing issues are already wanted"}), 400
+
+    wanted = data.get("wanted", True) is not False
+    if not set_wanted_marks(series_id, numbers, wanted):
+        return jsonify({"error": "Failed to update wanted marks"}), 500
+    rebuild_wanted_for_series(series_id)
+    return jsonify({"success": True, "count": len(numbers), "wanted": wanted})
 
 
 @series_bp.route("/api/series/<int:series_id>/bulk-manual-status", methods=["POST"])

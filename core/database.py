@@ -1507,6 +1507,17 @@ def _init_db_locked():
             "CREATE INDEX IF NOT EXISTS idx_issue_manual_status_series ON issue_manual_status(series_id)"
         )
 
+        # Per-issue "Mark as Wanted" for a Not monitored series.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS issue_wanted_marks (
+                series_id INTEGER NOT NULL,
+                issue_number TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (series_id, issue_number),
+                FOREIGN KEY (series_id) REFERENCES series(id) ON DELETE CASCADE
+            )
+        """)
+
         # Create libraries table (multiple library roots support)
         c.execute("""
             CREATE TABLE IF NOT EXISTS libraries (
@@ -15638,6 +15649,51 @@ def ensure_manual_status_table():
     finally:
         if conn:
             conn.close()
+
+
+def get_wanted_marks(series_id):
+    """Issue numbers the user marked Wanted on a series (a set of strings).
+
+    Only meaningful for a Not monitored series: a monitored one already wants
+    every missing issue. Returns an empty set when none (or on error).
+    """
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return set()
+            rows = conn.execute(
+                "SELECT issue_number FROM issue_wanted_marks WHERE series_id = ?",
+                (series_id,),
+            ).fetchall()
+            return {r["issue_number"] for r in rows}
+    except Exception as e:
+        app_logger.error(f"Failed to read wanted marks for series {series_id}: {e}")
+        return set()
+
+
+def set_wanted_marks(series_id, issue_numbers, wanted=True):
+    """Mark (or unmark) issues Wanted. Returns True on success."""
+    nums = [str(n) for n in issue_numbers]
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            if wanted:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO issue_wanted_marks (series_id, issue_number)"
+                    " VALUES (?, ?)",
+                    [(series_id, n) for n in nums],
+                )
+            else:
+                conn.executemany(
+                    "DELETE FROM issue_wanted_marks WHERE series_id = ? AND issue_number = ?",
+                    [(series_id, n) for n in nums],
+                )
+            conn.commit()
+            return True
+    except Exception as e:
+        app_logger.error(f"Failed to set wanted marks for series {series_id}: {e}")
+        return False
 
 
 def get_manual_status_for_series(series_id):
