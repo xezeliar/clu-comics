@@ -1861,15 +1861,32 @@ function refreshRoleCounts() {
 
 // Set by hand: the server flags it as the user's, so a sync keeps it.
 function setEntryRole(li, role) {
-    if (!li) return;
-    fetch(`/api/reading-lists/${LIST_ID}/roles`, {
+    return li ? setEntriesRole([li], role) : Promise.resolve(false);
+}
+
+function setEntriesRole(lis, role) {
+    return fetch(`/api/reading-lists/${LIST_ID}/roles`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry_ids: [parseInt(li.dataset.entryId, 10)], role })
+        body: JSON.stringify({ entry_ids: lis.map(li => parseInt(li.dataset.entryId, 10)), role })
     })
         .then(r => r.json())
         .then(data => {
             if (!data.success) throw new Error(data.message || 'Failed');
+            lis.forEach(li => showEntryRole(li, role));
+            refreshRoleCounts();
+            buildReadingListEntries();
+            refreshReadState();
+            return true;
+        })
+        .catch(err => {
+            console.error('Error setting role:', err);
+            CLU.toast('Could not set the role', 'error');
+            return false;
+        });
+}
+
+function showEntryRole(li, role) {
             li.dataset.role = role || '';
             const label = RL_ROLE_LABELS[role];
             const name = `${li.dataset.series} #${li.dataset.issue}`;
@@ -1884,14 +1901,47 @@ function setEntryRole(li, role) {
             });
             const src = li.querySelector('.rl-role-src');
             if (src) src.textContent = 'Role in this list';
-            refreshRoleCounts();
-            buildReadingListEntries();
-            refreshReadState();
-        })
-        .catch(err => {
-            console.error('Error setting role:', err);
-            CLU.toast('Could not set the role', 'error');
-        });
+}
+
+// Select issues: tick issues (or press their cards), then Set role.
+let rlSelecting = false;
+
+function rlPicked() {
+    return rlItems().filter(li => li.querySelector('.rl-pick')?.checked);
+}
+
+function updateIssueSelect() {
+    const n = rlPicked().length;
+    const count = document.getElementById('rlSelectCount');
+    if (count) count.textContent = `${n} issue${n === 1 ? '' : 's'} selected`;
+    const btn = document.getElementById('rlSelectRoleBtn');
+    if (btn) btn.disabled = !n;
+    rlItems().forEach(li => li.classList.toggle('picked', !!li.querySelector('.rl-pick')?.checked));
+}
+
+function toggleIssueSelect() {
+    rlSelecting = !rlSelecting;
+    if (rlSelecting && reorderMode) toggleReorderMode();
+    document.body.classList.toggle('rl-issue-select', rlSelecting);
+    const bar = document.getElementById('rlSelectBar');
+    if (bar) bar.hidden = !rlSelecting;
+    document.querySelectorAll('.rl-pick').forEach(cb => { cb.checked = false; });
+    const btn = document.getElementById('rlSelectToggleBtn');
+    if (btn) btn.innerHTML = `<i class="bi bi-check2-square me-2" aria-hidden="true"></i>${rlSelecting ? 'Stop selecting' : 'Select issues'}`;
+    updateIssueSelect();
+}
+
+function selectShownIssues() {
+    rlItems().forEach(li => {
+        const cb = li.querySelector('.rl-pick');
+        if (cb && !li.hidden) cb.checked = true;
+    });
+    updateIssueSelect();
+}
+
+function clearIssueSelection() {
+    document.querySelectorAll('.rl-pick').forEach(cb => { cb.checked = false; });
+    updateIssueSelect();
 }
 
 function setIssueView(view) {
@@ -2026,6 +2076,7 @@ function saveOrder() {
 // Reorder switches to the list view; Done (or Reorder again) leaves it and
 // puts the view the user had back.
 function toggleReorderMode() {
+    if (!reorderMode && rlSelecting) toggleIssueSelect();
     reorderMode = !reorderMode;
     const list = document.getElementById('rlItems');
     const bar = document.getElementById('rlReorderBar');
@@ -2080,6 +2131,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const pick = e.target.closest('[data-set-role]');
         if (pick) setEntryRole(pick.closest('.rl-it'), pick.dataset.setRole || null);
     });
+    // While selecting, pressing a card ticks it instead of opening the reader
+    // or a menu. Capture runs before the cover's own onclick.
+    list.addEventListener('click', e => {
+        if (!rlSelecting) return;
+        const li = e.target.closest('.rl-it');
+        const cb = li && li.querySelector('.rl-pick');
+        if (!cb) return;
+        if (e.target !== cb) {
+            e.preventDefault();
+            e.stopPropagation();
+            cb.checked = !cb.checked;
+        }
+        updateIssueSelect();
+    }, true);
+    document.querySelectorAll('[data-bulk-role]').forEach(btn => btn.addEventListener('click', () => {
+        const lis = rlPicked();
+        if (!lis.length) return;
+        const role = btn.dataset.bulkRole || null;
+        setEntriesRole(lis, role).then(ok => {
+            if (!ok) return;
+            clearIssueSelection();
+            CLU.toast(`${role ? RL_ROLE_LABELS[role] : 'No role'} set on ${lis.length} issue${lis.length === 1 ? '' : 's'}`, 'success');
+        });
+    }));
 
     list.addEventListener('click', e => {
         const mv = e.target.closest('[data-move]');

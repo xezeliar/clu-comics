@@ -877,6 +877,8 @@ class TestReaderViewOnlyGating:
         assert html.count('data-set-role="tie_in"') == 3
         assert "Set by Metron" in html
         assert ">Set role</button>" in html
+        assert 'id="rlSelectBar"' in html
+        assert html.count('class="form-check-input rl-pick"') == 3
 
     def test_reader_sees_roles_but_cannot_change_them(self, client):
         list_id = self._roles_list()
@@ -885,6 +887,7 @@ class TestReaderViewOnlyGating:
 
         assert '<span class="rl-role" data-r="core">Core</span>' in html
         assert "data-set-role" not in html
+        assert "rlSelectBar" not in html and "rl-pick" not in html
         assert "Set role" not in html
 
     def test_detail_view_uses_the_shared_reader(self, client):

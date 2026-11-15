@@ -402,6 +402,17 @@ button.rl-role:focus-visible { outline: 2px solid var(--clu-select, var(--bs-pri
 .rl-rows .rl-rolew, .rl-rows .rl-ifoot > div > .rl-role { display: inline-block; margin: 0 0 0 .5rem; }
 .rl-rows .rl-ifoot > div:first-child { display: flex; flex-wrap: wrap; align-items: center; column-gap: .25rem; }
 .rl-rows .rl-ifoot > div:first-child > p { flex: 0 1 auto; }
+/* Select issues: a tick in the cover's corner, the whole card presses it. */
+.rl-art { position: relative; }
+.rl-pick { display: none; position: absolute; top: .4rem; left: .4rem; z-index: 3; width: 1.35rem; height: 1.35rem; margin: 0; cursor: pointer; }
+body.rl-issue-select .rl-pick { display: block; }
+body.rl-issue-select .rl-it { cursor: pointer; }
+body.rl-issue-select .rl-ig .rl-slot { padding-top: 2.1rem; }
+body.rl-issue-select .rl-it.picked .rl-art > :not(.rl-pick) { outline: 3px solid var(--clu-select, var(--bs-primary)); outline-offset: 2px; }
+.rl-rows .rl-pick { position: static; }
+body.rl-issue-select .rl-rows .rl-art { width: auto; display: flex; align-items: center; gap: .5rem; }
+/* Room for the bar under the last row. */
+body.rl-issue-select #rlItems { margin-bottom: 5rem; }
 .rl-role-menu .dropdown-item[aria-checked="true"]::after { content: "\2713"; float: right; margin-left: 1rem; color: var(--clu-select, var(--bs-primary)); }
 
 /* Issue list view: numbered rows for long arcs. The same items, restyled. */

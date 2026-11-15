@@ -51,6 +51,9 @@
             <li><button class="dropdown-item" id="reorderToggleBtn" onclick="toggleReorderMode()">
                 <i class="bi bi-arrows-move me-2" aria-hidden="true"></i>Reorder
             </button></li>
+            <li><button class="dropdown-item" id="rlSelectToggleBtn" onclick="toggleIssueSelect()">
+                <i class="bi bi-check2-square me-2" aria-hidden="true"></i>Select issues
+            </button></li>
             {# `syncable` is decided by core.reading_list_sync.parse_source, so
                the four source schemes are spelled out in exactly one place. #}
             {% if syncable %}
@@ -205,6 +208,9 @@
             <span class="rl-grip" aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
             <span class="rl-num">{{ loop.index }}</span>
             <div class="rl-art">
+                {% if _can_manage %}
+                <input type="checkbox" class="form-check-input rl-pick" aria-label="Select {{ _name }}">
+                {% endif %}
                 {% if file_path %}
                 {# Clicking the cover opens the reader, through the reorder guard. #}
                 <div class="book-cover" role="button" tabindex="0" data-file-path="{{ file_path }}"
@@ -318,6 +324,33 @@
 </div>
 
 {% if _can_manage %}
+{# Select issues: set a role on many at once. #}
+<div id="rlSelectBar" class="reading-list-bulk-action-bar" hidden>
+    <div class="container-lg d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-white fw-bold" id="rlSelectCount" aria-live="polite">0 issues selected</span>
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="selectShownIssues()">
+                <i class="bi bi-check-all me-1" aria-hidden="true"></i>Select shown</button>
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="clearIssueSelection()">
+                <i class="bi bi-x-lg me-1" aria-hidden="true"></i>Clear</button>
+        </div>
+        <div class="d-flex gap-2">
+            <div class="dropup">
+                <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="rlSelectRoleBtn"
+                    data-bs-toggle="dropdown" aria-expanded="false" disabled>Set role</button>
+                <ul class="dropdown-menu dropdown-menu-end shadow">
+                    {% for r in _role_order %}
+                    <li><button type="button" class="dropdown-item" data-bulk-role="{{ r }}">{{ _role_labels[r] }}</button></li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button type="button" class="dropdown-item" data-bulk-role="">None</button></li>
+                </ul>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="toggleIssueSelect()">Done</button>
+        </div>
+    </div>
+</div>
+
 <!-- Description Modal -->
 <div class="modal fade" id="descriptionModal" tabindex="-1" aria-labelledby="descriptionModalTitle" aria-hidden="true">
     <div class="modal-dialog">

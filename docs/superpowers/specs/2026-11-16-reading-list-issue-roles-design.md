@@ -39,8 +39,9 @@ filter, 3 badges + per-role progress. **Option 2 picked.**
   issue shows a dashed "Set role". Reader: the pill as text, or nothing.
 
 ## Builder's calls
-- Select mode for many issues at once is not built: the list page has no
-  per-issue select mode yet. The endpoint already takes many ids.
+- Select issues (More menu, Clerk): a tick on each cover, the whole card
+  toggles it, a bottom bar with Select shown, Clear, Set role (one request for
+  all ticked) and Done. It and Reorder exclude each other.
 - The sync's sort-order step for added entries used `UPDATE ... ORDER BY ...
   LIMIT`, which needs a SQLite compile option most builds lack, so a sync that
   added an issue failed there. It now updates by the inserted row id.
