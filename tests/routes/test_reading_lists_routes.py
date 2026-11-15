@@ -563,6 +563,39 @@ class TestSetHighlight:
         assert resp.get_json()["success"] is False
 
 
+class TestSetRoles:
+
+    @patch("routes.reading_lists.set_entry_roles", return_value=2)
+    def test_sets_role_for_many(self, mock_set, client):
+        resp = client.post("/api/reading-lists/1/roles",
+                           json={"entry_ids": [5, 6], "role": "tie_in"})
+        assert resp.get_json() == {"success": True, "updated": 2}
+        mock_set.assert_called_once_with(1, [5, 6], "tie_in")
+
+    @patch("routes.reading_lists.set_entry_roles", return_value=1)
+    def test_null_clears(self, mock_set, client):
+        resp = client.post("/api/reading-lists/1/roles",
+                           json={"entry_ids": [5], "role": None})
+        assert resp.get_json()["success"] is True
+        mock_set.assert_called_once_with(1, [5], None)
+
+    @pytest.mark.parametrize("body", [
+        {"entry_ids": [], "role": "core"},
+        {"entry_ids": ["5"], "role": "core"},
+        {"entry_ids": [5], "role": "villain"},
+        {},
+    ])
+    def test_rejects_bad_input(self, client, body):
+        resp = client.post("/api/reading-lists/1/roles", json=body)
+        assert resp.status_code == 400
+
+    @patch("routes.reading_lists.set_entry_roles", return_value=None)
+    def test_db_failure(self, mock_set, client):
+        resp = client.post("/api/reading-lists/1/roles",
+                           json={"entry_ids": [5], "role": "core"})
+        assert resp.status_code == 500
+
+
 class TestUpdateName:
 
     @patch("routes.reading_lists.update_reading_list_name", return_value=True)
@@ -820,6 +853,42 @@ class TestReaderViewOnlyGating:
         assert client.get(f"/api/reading-lists/{list_id}/export").status_code == 200
         assert 'id="addIssueModal"' not in html
         assert 'id="mapFileModal"' not in html
+
+    def _roles_list(self):
+        from core.database import (
+            add_reading_list_entries, create_reading_list, get_user_by_username,
+        )
+        clerk_id = get_user_by_username("clerk")["id"]
+        list_id = create_reading_list("Bad Seeds", user_id=clerk_id)
+        add_reading_list_entries(list_id, [
+            {"series": "Batman", "issue_number": "1", "role": "core"},
+            {"series": "Batman", "issue_number": "2", "role": "tie_in"},
+            {"series": "Batman", "issue_number": "3"},
+        ])
+        return list_id
+
+    def test_clerk_sees_role_menus_and_role_filter(self, client):
+        list_id = self._roles_list()
+        self._login(client, "clerk", "clerkpass")
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+
+        assert 'id="rlRoleShow"' in html
+        assert 'id="rlRoleRow" hidden' not in html
+        assert html.count('data-set-role="tie_in"') == 3
+        assert "Set by Metron" in html
+        assert ">Set role</button>" in html
+        assert 'id="rlSelectBar"' in html
+        assert html.count('class="form-check-input rl-pick"') == 3
+
+    def test_reader_sees_roles_but_cannot_change_them(self, client):
+        list_id = self._roles_list()
+        self._login(client, "reader", "readerpass")
+        html = client.get(f"/reading-lists/{list_id}").get_data(as_text=True)
+
+        assert '<span class="rl-role" data-r="core">Core</span>' in html
+        assert "data-set-role" not in html
+        assert "rlSelectBar" not in html and "rl-pick" not in html
+        assert "Set role" not in html
 
     def test_detail_view_uses_the_shared_reader(self, client):
         """This page used to ship its own forked copy of the comic reader, so

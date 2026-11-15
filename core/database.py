@@ -1057,6 +1057,14 @@ def _init_db_locked():
             # comic); this bounds the damage when that never happens.
             app_logger.info("Migrating reading_list_entries table: adding last_queued_at column")
             c.execute("ALTER TABLE reading_list_entries ADD COLUMN last_queued_at TIMESTAMP")
+        if "role" not in rle_columns:
+            # The issue's part in the event (prologue / core / tie_in /
+            # epilogue), shown only on the list page and never written to
+            # ComicInfo. role_manual = 1 means the user set it, and a sync
+            # must leave it alone; Metron's issue_type fills it otherwise.
+            app_logger.info("Migrating reading_list_entries table: adding role columns")
+            c.execute("ALTER TABLE reading_list_entries ADD COLUMN role TEXT")
+            c.execute("ALTER TABLE reading_list_entries ADD COLUMN role_manual INTEGER DEFAULT 0")
 
         # Create issues_read table (comic files marked as read)
         c.execute("""
@@ -12436,11 +12444,22 @@ def create_reading_list(name, source=None, source_hash=None, user_id=None):
         return None
 
 
+# An issue's part in a reading list's event. The list page shows it; nothing
+# else reads it, and it is never written to ComicInfo.
+ENTRY_ROLES = ("prologue", "core", "tie_in", "epilogue")
+
+
+def normalize_entry_role(role):
+    """A stored role, or None for blank / unknown values."""
+    role = (role or "").strip().lower()
+    return role if role in ENTRY_ROLES else None
+
+
 _READING_LIST_ENTRY_INSERT = """
     INSERT INTO reading_list_entries
     (reading_list_id, series, issue_number, volume, year, issue_year,
-     metron_id, cv_issue_id, cv_volume_id, matched_file_path, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     metron_id, cv_issue_id, cv_volume_id, matched_file_path, role, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -12456,6 +12475,7 @@ def _reading_list_entry_row(list_id, data, sort_order):
         data.get("cv_issue_id"),
         data.get("cv_volume_id"),
         data.get("matched_file_path"),
+        normalize_entry_role(data.get("role")),
         sort_order,
     )
 
@@ -13065,6 +13085,29 @@ def set_entry_highlight(list_id, entry_id, highlight):
         if not c.rowcount:
             return False, "Entry not found or not mapped to a file"
     return True, "Highlight updated"
+
+
+def set_entry_roles(list_id, entry_ids, role):
+    """Set the role of some of a list's entries, by hand.
+
+    ``role`` None clears it, and that is still a manual choice: a sync must
+    not put Metron's role back on an issue the user cleared. Returns the
+    number of entries changed, or None on error.
+    """
+    ids = [int(i) for i in entry_ids]
+    if not ids:
+        return 0
+    with db_conn() as conn:
+        if not conn:
+            return None
+        marks = ",".join("?" * len(ids))
+        c = conn.execute(
+            f"""UPDATE reading_list_entries SET role = ?, role_manual = 1
+            WHERE reading_list_id = ? AND id IN ({marks})""",
+            (normalize_entry_role(role), list_id, *ids),
+        )
+        conn.commit()
+        return c.rowcount
 
 
 def delete_reading_list(list_id):
@@ -17846,6 +17889,7 @@ def sync_reading_list_entries(list_id, new_entries, preserve_manual=True):
 
         added_count = 0
         removed_count = 0
+        added_ids = {}
 
         # Remove entries not in new set (unless manual override)
         for key in to_remove:
@@ -17861,8 +17905,8 @@ def sync_reading_list_entries(list_id, new_entries, preserve_manual=True):
             c.execute(
                 """INSERT INTO reading_list_entries
                 (reading_list_id, series, issue_number, volume, year, issue_year,
-                 metron_id, cv_issue_id, cv_volume_id, matched_file_path, sort_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                 metron_id, cv_issue_id, cv_volume_id, matched_file_path, role, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
                 (
                     list_id,
                     entry.get("series"),
@@ -17874,8 +17918,10 @@ def sync_reading_list_entries(list_id, new_entries, preserve_manual=True):
                     entry.get("cv_issue_id"),
                     entry.get("cv_volume_id"),
                     entry.get("matched_file_path"),
+                    normalize_entry_role(entry.get("role")),
                 ),
             )
+            added_ids[key] = c.lastrowid
             added_count += 1
 
         # A kept entry may predate the id columns: fill what the source now
@@ -17887,12 +17933,14 @@ def sync_reading_list_entries(list_id, new_entries, preserve_manual=True):
                 """UPDATE reading_list_entries
                 SET metron_id = COALESCE(metron_id, ?),
                     cv_issue_id = COALESCE(cv_issue_id, ?),
-                    cv_volume_id = COALESCE(cv_volume_id, ?)
+                    cv_volume_id = COALESCE(cv_volume_id, ?),
+                    role = CASE WHEN COALESCE(role_manual, 0) = 1 THEN role ELSE ? END
                 WHERE id = ?""",
                 (
                     new.get("metron_id"),
                     new.get("cv_issue_id"),
                     new.get("cv_volume_id"),
+                    normalize_entry_role(new.get("role")),
                     existing_by_key[key]["id"],
                 ),
             )
@@ -17904,21 +17952,12 @@ def sync_reading_list_entries(list_id, new_entries, preserve_manual=True):
                     "UPDATE reading_list_entries SET sort_order = ? WHERE id = ?",
                     (sort_idx, existing_by_key[key]["id"]),
                 )
-            elif key in to_add:
-                # Update newly added entries sort order
+            elif key in added_ids:
+                # By row id: UPDATE ... ORDER BY/LIMIT needs a SQLite compile
+                # option most builds lack, and failed the whole sync there.
                 c.execute(
-                    """UPDATE reading_list_entries SET sort_order = ?
-                    WHERE reading_list_id = ? AND series = ? AND issue_number = ?
-                    AND COALESCE(volume, '') = ? AND COALESCE(year, '') = ?
-                    ORDER BY id DESC LIMIT 1""",
-                    (
-                        sort_idx,
-                        list_id,
-                        new_by_key[key].get("series"),
-                        new_by_key[key].get("issue_number"),
-                        str(new_by_key[key].get("volume") or ""),
-                        str(new_by_key[key].get("year") or ""),
-                    ),
+                    "UPDATE reading_list_entries SET sort_order = ? WHERE id = ?",
+                    (sort_idx, added_ids[key]),
                 )
 
         # Handle entries with manual_override that were kept despite being removed from new CBL

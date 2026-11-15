@@ -15,6 +15,9 @@
    get a view-only page: they can read, bookmark (Want to Read) and export.
    In implicit-owner mode current_user is the owner, so everything shows. #}
 {% set _can_manage = (g.current_user.role if g.get('current_user') else 'owner') in ['clerk', 'owner'] %}
+{# An issue's part in the event: only on this page, never in ComicInfo. #}
+{% set _role_order = ['prologue', 'core', 'tie_in', 'epilogue'] %}
+{% set _role_labels = {'prologue': 'Prologue', 'core': 'Core', 'tie_in': 'Tie-In', 'epilogue': 'Epilogue'} %}
 {%- set _entries = reading_list.entries -%}
 {%- set _total = _entries|length -%}
 {%- set _owned = _entries|selectattr('matched_file_path')|list|length
@@ -47,6 +50,9 @@
             {% if _can_manage %}
             <li><button class="dropdown-item" id="reorderToggleBtn" onclick="toggleReorderMode()">
                 <i class="bi bi-arrows-move me-2" aria-hidden="true"></i>Reorder
+            </button></li>
+            <li><button class="dropdown-item" id="rlSelectToggleBtn" onclick="toggleIssueSelect()">
+                <i class="bi bi-check2-square me-2" aria-hidden="true"></i>Select issues
             </button></li>
             {# `syncable` is decided by core.reading_list_sync.parse_source, so
                the four source schemes are spelled out in exactly one place. #}
@@ -175,6 +181,16 @@
                 {'value': 'unread', 'label': 'Unread', 'count': _owned},
             ], label='Show', toggle_off=True) }}
         </div>
+        {# Only the roles the list uses; reading_list.js keeps the counts and
+           hides a role nobody has as roles change. #}
+        {% set _role_opts = [{'value': '', 'label': 'All', 'count': _total}] %}
+        {% for r in _role_order %}
+        {% set _ = _role_opts.append({'value': r, 'label': _role_labels[r],
+            'count': _entries | selectattr('role', 'equalto', r) | list | length}) %}
+        {% endfor %}
+        <div class="clu-toolbar-row" id="rlRoleRow"{% if not (_entries | selectattr('role') | list) %} hidden{% endif %}>
+            {{ filter_bar('rlRoleShow', _role_opts, label='Role', toggle_off=True) }}
+        </div>
     {% endcall %}
     {% endif %}
 
@@ -188,10 +204,13 @@
         {% set file_path = entry.manual_override_path or entry.matched_file_path %}
         {% set _name = entry.series ~ ' #' ~ entry.issue_number %}
         <li class="rl-it book-card{% if not file_path %} miss{% endif %}" data-entry-id="{{ entry.id }}"
-            data-series="{{ entry.series }}" data-issue="{{ entry.issue_number }}">
+            data-series="{{ entry.series }}" data-issue="{{ entry.issue_number }}" data-role="{{ entry.role or '' }}">
             <span class="rl-grip" aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
             <span class="rl-num">{{ loop.index }}</span>
             <div class="rl-art">
+                {% if _can_manage %}
+                <input type="checkbox" class="form-check-input rl-pick" aria-label="Select {{ _name }}">
+                {% endif %}
                 {% if file_path %}
                 {# Clicking the cover opens the reader, through the reorder guard. #}
                 <div class="book-cover" role="button" tabindex="0" data-file-path="{{ file_path }}"
@@ -219,6 +238,25 @@
                         {%- if entry.year %} · {{ entry.year }}{% endif -%}
                         {%- if entry.issue_year and entry.issue_year != entry.year %} · <span title="Issue published {{ entry.issue_year }}">{{ entry.issue_year }}</span>{% endif %}
                         <span class="rl-st"> · <span class="rl-st-text">{{ 'In library' if file_path else 'Missing' }}</span></span></p>
+                    {% set _rl = _role_labels.get(entry.role) %}
+                    {% if _can_manage %}
+                    <div class="dropdown rl-rolew">
+                        <button type="button" class="rl-role" data-r="{{ entry.role or 'none' }}" data-bs-toggle="dropdown"
+                            aria-expanded="false" aria-label="Role of {{ _name }}: {{ _rl or 'none' }}. Change">{{ _rl or 'Set role' }}</button>
+                        <ul class="dropdown-menu shadow rl-role-menu">
+                            <li><h6 class="dropdown-header rl-role-src">{{ 'Set by Metron' if entry.role and not entry.role_manual else 'Role in this list' }}</h6></li>
+                            {% for r in _role_order %}
+                            <li><button type="button" class="dropdown-item" role="menuitemradio" data-set-role="{{ r }}"
+                                aria-checked="{{ 'true' if entry.role == r else 'false' }}">{{ _role_labels[r] }}</button></li>
+                            {% endfor %}
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button type="button" class="dropdown-item" role="menuitemradio" data-set-role=""
+                                aria-checked="{{ 'false' if entry.role else 'true' }}">None</button></li>
+                        </ul>
+                    </div>
+                    {% elif _rl %}
+                    <span class="rl-role" data-r="{{ entry.role }}">{{ _rl }}</span>
+                    {% endif %}
                 </div>
                 {% if _can_manage and not file_path %}
                 <button type="button" class="btn btn-sm btn-outline-secondary rl-lmap"
@@ -286,6 +324,33 @@
 </div>
 
 {% if _can_manage %}
+{# Select issues: set a role on many at once. #}
+<div id="rlSelectBar" class="reading-list-bulk-action-bar" hidden>
+    <div class="container-lg d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-white fw-bold" id="rlSelectCount" aria-live="polite">0 issues selected</span>
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="selectShownIssues()">
+                <i class="bi bi-check-all me-1" aria-hidden="true"></i>Select shown</button>
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="clearIssueSelection()">
+                <i class="bi bi-x-lg me-1" aria-hidden="true"></i>Clear</button>
+        </div>
+        <div class="d-flex gap-2">
+            <div class="dropup">
+                <button type="button" class="btn btn-sm btn-primary dropdown-toggle" id="rlSelectRoleBtn"
+                    data-bs-toggle="dropdown" aria-expanded="false" disabled>Set role</button>
+                <ul class="dropdown-menu dropdown-menu-end shadow">
+                    {% for r in _role_order %}
+                    <li><button type="button" class="dropdown-item" data-bulk-role="{{ r }}">{{ _role_labels[r] }}</button></li>
+                    {% endfor %}
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button type="button" class="dropdown-item" data-bulk-role="">None</button></li>
+                </ul>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="toggleIssueSelect()">Done</button>
+        </div>
+    </div>
+</div>
+
 <!-- Description Modal -->
 <div class="modal fade" id="descriptionModal" tabindex="-1" aria-labelledby="descriptionModalTitle" aria-hidden="true">
     <div class="modal-dialog">

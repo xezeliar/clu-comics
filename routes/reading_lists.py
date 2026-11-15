@@ -31,6 +31,8 @@ from core.database import (
     search_file_index_all_words,
     update_reading_list_thumbnail,
     set_entry_highlight,
+    set_entry_roles,
+    ENTRY_ROLES,
     clear_thumbnail_if_matches_entry,
     update_reading_list_name,
     update_reading_list_description,
@@ -785,6 +787,24 @@ def set_highlight(list_id):
     return jsonify({'success': ok, 'message': message})
 
 
+@reading_lists_bp.route('/api/reading-lists/<int:list_id>/roles', methods=['POST'])
+def set_roles(list_id):
+    """Set the role (prologue / core / tie_in / epilogue, or null) of one or
+    more entries. A role set here is the user's, and a sync keeps it."""
+    data = request.get_json(silent=True) or {}
+    entry_ids = data.get('entry_ids')
+    role = data.get('role')
+    if (not isinstance(entry_ids, list) or not entry_ids
+            or not all(isinstance(i, int) and not isinstance(i, bool) for i in entry_ids)):
+        return jsonify({'success': False, 'message': 'entry_ids must be a list of ids'}), 400
+    if role is not None and role not in ENTRY_ROLES:
+        return jsonify({'success': False, 'message': 'Unknown role'}), 400
+    updated = set_entry_roles(list_id, entry_ids, role)
+    if updated is None:
+        return jsonify({'success': False, 'message': 'Failed to set role'}), 500
+    return jsonify({'success': True, 'updated': updated})
+
+
 @reading_lists_bp.route('/api/reading-lists/<int:list_id>/thumbnail', methods=['POST'])
 def set_thumbnail(list_id):
     """Set the thumbnail for a reading list."""
@@ -1533,7 +1553,7 @@ def process_metron_import(task_id, api, list_id, rename_pattern):
         new_entries = []
         for i, item in enumerate(items):
             issue = item.get('issue', {}) or {}
-            entry_data = metron_issue_to_entry(issue, loader)
+            entry_data = metron_issue_to_entry(issue, loader, item.get('issue_type'))
             new_entries.append(entry_data)
 
             import_tasks[task_id]['processed'] = i + 1
