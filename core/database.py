@@ -11540,6 +11540,7 @@ def get_on_the_stack_items(limit=10, user_id=None):
                 s.id as series_id,
                 s.name as series_name,
                 s.cover_image,
+                s.desc as series_desc,
                 s.status as series_status,
                 s.series_subscription,
                 cs.issue_number,
@@ -11608,6 +11609,7 @@ def get_on_the_stack_items(limit=10, user_id=None):
                 "cover_image": next_unread["issue_image"] or next_unread["cover_image"],
                 "last_read_at": last_read_at,
                 "series_status": next_unread["series_status"],
+                "description": next_unread["series_desc"],
             })
 
         # Sort by last_read_at descending (most recently read series first)

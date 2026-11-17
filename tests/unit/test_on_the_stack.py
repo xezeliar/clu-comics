@@ -95,6 +95,12 @@ class TestGetOnTheStackItems:
         assert ab_items[0]["issue_number"] == "4"
         assert "Absolute Batman 004.cbz" in ab_items[0]["file_path"]
 
+    def test_item_carries_series_description_for_the_hero(self, stack_db):
+        """The Home hero card shows the series blurb; the field must exist."""
+        from core.database import get_on_the_stack_items
+        items = get_on_the_stack_items(limit=10)
+        assert items and all("description" in i for i in items)
+
     def test_skips_series_without_reads(self, stack_db):
         """Series with no read issues -> not included."""
         from core.database import get_on_the_stack_items

@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadWantToRead();
         loadContinueReadingSwiper();
         loadNewThisWeekSwiper();
+        loadFeaturedHero();
         loadOnTheStackSwiper();
         loadRecentlyAddedSwiper();
     }
@@ -5080,6 +5081,95 @@ async function loadContinueReadingSwiper() {
 
     } catch (error) {
         console.error('Error loading continue reading items:', error);
+    }
+}
+
+/**
+ * Featured hero: the top next-up issue as a large cover with Read Now / Save.
+ * Stays hidden when nothing is on the stack.
+ */
+async function loadFeaturedHero() {
+    const hero = document.getElementById('featuredHero');
+    if (!hero) return;
+    try {
+        const response = await fetch('/api/on-the-stack?limit=1');
+        const data = await response.json();
+        const item = data.success && data.items && data.items[0];
+        if (!item) return;
+
+        const cover = `/api/thumbnail?path=${encodeURIComponent(item.file_path)}`;
+        const issue = item.issue_number ? ` #${item.issue_number}` : '';
+        const title = `${item.series_name || item.file_name}${issue}`;
+
+        hero.textContent = '';
+        const card = document.createElement('div');
+        card.className = 'featured-hero-card';
+        const bg = document.createElement('div');
+        bg.className = 'featured-hero-bg';
+        bg.style.backgroundImage = `url("${cover}")`;
+        const body = document.createElement('div');
+        body.className = 'featured-hero-body';
+
+        const label = document.createElement('span');
+        label.className = 'featured-hero-label';
+        label.textContent = item.reading_list_name ? `Up next \u00b7 ${item.reading_list_name}` : 'Up next';
+        const h = document.createElement('h2');
+        h.className = 'featured-hero-title';
+        h.textContent = title;
+        body.append(label, h);
+
+        if (item.description) {
+            const p = document.createElement('p');
+            p.className = 'featured-hero-desc';
+            p.textContent = item.description;
+            body.append(p);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'featured-hero-actions';
+        const read = document.createElement('button');
+        read.type = 'button';
+        read.className = 'btn btn-light rounded-pill';
+        read.textContent = 'Read Now';
+        read.onclick = () => openReaderForFile(item.file_path);
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.className = 'btn btn-outline-light rounded-pill';
+        save.innerHTML = '<i class="bi bi-plus-lg me-1" aria-hidden="true"></i><span>Save</span>';
+        const paintSave = (marked) => {
+            save.classList.toggle('marked', marked);
+            save.querySelector('i').className = (marked ? 'bi bi-check-lg' : 'bi bi-plus-lg') + ' me-1';
+            save.querySelector('span').textContent = marked ? 'Saved' : 'Save';
+        };
+        save.onclick = async () => {
+            const marked = save.classList.contains('marked');
+            paintSave(!marked);
+            try {
+                const r = await fetch('/api/favorites/to-read', {
+                    method: marked ? 'DELETE' : 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: item.file_path, type: 'file' })
+                });
+                const d = await r.json();
+                if (!d.success) throw new Error(d.error || 'Unknown error');
+                CLU.showSuccess(marked ? `${title} removed from To Read` : `${title} added to To Read`);
+            } catch (e) {
+                paintSave(marked);
+                CLU.showError('Failed to update To Read: ' + e.message);
+            }
+        };
+        actions.append(read, save);
+        body.append(actions);
+        card.append(bg, body);
+        hero.append(card);
+        hero.style.display = '';
+
+        fetch(`/api/favorites/to-read/check?path=${encodeURIComponent(item.file_path)}`)
+            .then(r => r.json())
+            .then(d => { if (d && d.is_to_read) paintSave(true); })
+            .catch(() => { });
+    } catch (error) {
+        console.error('Error loading featured hero:', error);
     }
 }
 

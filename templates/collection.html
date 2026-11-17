@@ -125,6 +125,10 @@
 
     <!-- Dashboard Sections -->
     <div id="dashboard-sections" class="mb-5">
+        {# Featured hero: next-up issue, filled by loadFeaturedHero(). It is a
+           .dashboard-section so every mode that hides the dashboard hides it. #}
+        <section class="dashboard-section featured-hero" id="featuredHero" style="display: none;"
+            aria-label="Featured"></section>
         {% for section in dashboard_sections %}
         {% if section.id == 'library' %}
         <!-- Library Section -->
