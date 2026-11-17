@@ -2129,7 +2129,10 @@ function renderGrid(items) {
         } else {
             gridItem.classList.add('file');
             gridItem.setAttribute('data-path', item.path);
-            metaEl.textContent = CLU.formatFileSize(item.size);
+            // Feeds that carry no byte size (On the Stack) supply their own
+            // line; formatFileSize(undefined) renders "NaN undefined".
+            metaEl.textContent = item.metaText !== undefined ? item.metaText
+                : CLU.formatFileSize(item.size);
 
             // Add selection checkbox overlay
             const selCheckbox = document.createElement('div');
@@ -5165,6 +5168,11 @@ async function loadOnTheStack(preservePage = false) {
             name: item.file_name,
             path: item.file_path,
             type: 'file',
+            hasThumbnail: true,
+            thumbnailUrl: `/api/thumbnail?path=${encodeURIComponent(item.file_path)}`,
+            metaText: item.series_name
+                ? `${item.series_name}${item.issue_number ? ' #' + item.issue_number : ''}`
+                : '',
             series_name: item.series_name,
             issue_number: item.issue_number,
         }));
