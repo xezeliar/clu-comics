@@ -32,6 +32,9 @@ owner, so everything shows exactly as before. #}
                 onclick="toggleSelectMode()" {% if not total_lists %}disabled{% endif %}>
                 <i class="bi bi-check2-square me-2" aria-hidden="true"></i>Select lists
             </button></li>
+            <li><button class="dropdown-item" onclick="openFolderModal()">
+                <i class="bi bi-folder-plus me-2" aria-hidden="true"></i>New folder
+            </button></li>
             <li><hr class="dropdown-divider"></li>
             {# Every way to bring a list in, in one place. #}
             <li><h6 class="dropdown-header">Import</h6></li>
@@ -94,7 +97,7 @@ owner, so everything shows exactly as before. #}
             <div class="clu-toolbar-end">
                 {#- A search or filter that fits on one page reads "Showing 12 of 222";
                     a paged result reads "Showing 1–60 of 150" (the matching total). -#}
-                {%- set _narrowed = grid_query or active_tags or active_show -%}
+                {%- set _narrowed = grid_query or active_tags or active_show or folders -%}
                 {{ result_count('rlCount', total_lists if (grid.total == 0 or (_narrowed and grid.total_pages == 1)) else grid.total,
                                 'reading lists', one='reading list',
                                 shown=grid.total if (grid.total == 0 or (_narrowed and grid.total_pages == 1)) else None,
@@ -122,9 +125,56 @@ owner, so everything shows exactly as before. #}
     {% endcall %}
     {% endif %}
 
+    <!-- Folders: breadcrumb and sub-folders of the folder on screen. A search or
+         filter spans every folder, so they are hidden then. -->
+    {% if total_lists and folder_id is not none and (folder_id or subfolders) %}
+    <nav aria-label="Folder path" class="mb-3">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{{ url_for('reading_lists.index') }}">All lists</a></li>
+            {% for f in folder_path %}
+            {% if loop.last %}<li class="breadcrumb-item active" aria-current="page">{{ f.name }}</li>
+            {% else %}<li class="breadcrumb-item"><a href="{{ url_for('reading_lists.index', folder=f.id) }}">{{ f.name }}</a></li>{% endif %}
+            {% endfor %}
+        </ol>
+    </nav>
+    {% if subfolders %}
+    <div class="row row-cols-2 row-cols-md-4 row-cols-xl-6 g-3 mb-4" id="rlFolders">
+        {% for f in subfolders %}
+        <div class="col">
+            <div class="card h-100 position-relative">
+                <a class="card-body d-flex align-items-center gap-2 text-decoration-none stretched-link"
+                    href="{{ url_for('reading_lists.index', folder=f.id) }}">
+                    <i class="bi bi-folder-fill fs-3 text-warning" aria-hidden="true"></i>
+                    <span class="min-w-0">
+                        <span class="d-block fw-semibold text-truncate">{{ f.name }}</span>
+                        <small class="text-body-secondary">{{ f.list_count }} list{{ '' if f.list_count == 1 else 's' }}{% if f.folder_count %} · {{ f.folder_count }} folder{{ '' if f.folder_count == 1 else 's' }}{% endif %}</small>
+                    </span>
+                </a>
+                {% if _can_manage %}
+                <div class="dropdown position-absolute top-0 end-0" style="z-index: 2;">
+                    <button type="button" class="btn btn-sm" data-bs-toggle="dropdown" aria-expanded="false"
+                        aria-label="Actions for {{ f.name }}"><i class="bi bi-three-dots-vertical" aria-hidden="true"></i></button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><button type="button" class="dropdown-item" onclick='openFolderModal({{ f.id }}, {{ f.name|tojson }})'>
+                            <i class="bi bi-pencil me-2" aria-hidden="true"></i>Rename</button></li>
+                        <li><button type="button" class="dropdown-item" onclick="openMoveModal('folder', {{ f.id }})">
+                            <i class="bi bi-folder-symlink me-2" aria-hidden="true"></i>Move…</button></li>
+                        <li><button type="button" class="dropdown-item text-danger" onclick="deleteFolder({{ f.id }})">
+                            <i class="bi bi-trash me-2" aria-hidden="true"></i>Delete folder (keeps lists)</button></li>
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+
     <!-- Reading Lists Grid -->
     {% if total_lists %}
-    <div class="reading-list-grid" data-total-lists="{{ total_lists }}">
+    <div class="reading-list-grid" data-total-lists="{{ total_lists }}"
+        data-folder="{{ folder_id if folder_id else '' }}" data-has-folders="{{ '1' if folders else '' }}">
         {% include "partials/reading_list_cards.html" %}
     </div>
     {{ pager_nav('rlPagination', 'Reading list pagination', attrs={
@@ -165,6 +215,9 @@ owner, so everything shows exactly as before. #}
             </button>
         </div>
         <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-light" onclick="openMoveModal('lists')">
+                <i class="bi bi-folder-symlink me-1"></i>Move to folder
+            </button>
             <button class="btn btn-sm btn-danger" onclick="bulkDeleteSelected()">
                 <i class="bi bi-trash me-1"></i>Delete Selected
             </button>
@@ -174,6 +227,47 @@ owner, so everything shows exactly as before. #}
         </div>
     </div>
 </div>
+
+<!-- Folder (create / rename) Modal -->
+<div class="modal fade" id="folderModal" tabindex="-1" aria-labelledby="folderModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form class="modal-content" onsubmit="saveFolder(event)">
+            <div class="modal-header">
+                <h5 class="modal-title" id="folderModalLabel">New folder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="folderName">Name</label>
+                <input type="text" class="form-control" id="folderName" required maxlength="120">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Move Modal (lists or a folder) -->
+<div class="modal fade" id="moveModal" tabindex="-1" aria-labelledby="moveModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="moveModalLabel">Move to folder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label" for="moveTarget">Destination</label>
+                <select class="form-select" id="moveTarget"></select>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyMove()">Move</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>window.RL_FOLDERS = {{ folders|tojson }};</script>
 
 <!-- Upload Modal -->
 <div class="modal fade" id="uploadCBLModal" tabindex="-1">

@@ -37,6 +37,13 @@ from core.database import (
     update_reading_list_name,
     update_reading_list_description,
     update_reading_list_tags,
+    get_reading_list_folders,
+    reading_list_folder_path,
+    create_reading_list_folder,
+    rename_reading_list_folder,
+    move_reading_list_folder,
+    delete_reading_list_folder,
+    move_reading_lists_to_folder,
     get_all_reading_list_tags,
     update_reading_list_source_version,
     get_reading_lists_with_source,
@@ -151,6 +158,18 @@ def _reading_list_grid_args():
     return query, tags, show, sort, page, per_page
 
 
+def _grid_folder(query, tags, show, folders):
+    """The folder the grid shows: ``?folder=<id>`` (0 / absent / unknown = top
+    level). None while a search or filter is on, which spans every folder."""
+    if query or tags or show:
+        return None
+    try:
+        folder = int(request.args.get('folder', 0))
+    except (TypeError, ValueError):
+        return 0
+    return folder if any(f['id'] == folder for f in folders) else 0
+
+
 @reading_lists_bp.route('/reading-lists')
 def index():
     """View all reading lists, one page at a time.
@@ -165,10 +184,17 @@ def index():
     all_tags = sorted(get_all_reading_list_tags(), key=lambda t: (t.lower(), t))
     # A tag no list carries any more would filter on something invisible.
     tags = [t for t in tags if t in all_tags]
+    folders = get_reading_list_folders()
+    folder = _grid_folder(query, tags, show, folders)
     result = get_reading_lists_page(tags=tags, sort=sort, page=page, per_page=per_page,
-                                    query=query, show=show)
+                                    query=query, show=show, folder=folder)
     return render_template(
         'reading_lists.html',
+        folder_id=folder,
+        in_folder=bool(folder),
+        folder_path=reading_list_folder_path(folders, folder),
+        folders=folders,
+        subfolders=[f for f in folders if f['parent_id'] == (folder or None)] if folder is not None else [],
         lists=result['lists'],
         grid=result,
         grid_query=query,
@@ -193,10 +219,11 @@ def grid_page():
     Rendered from the same partial as the full page so the two cannot drift.
     """
     query, tags, show, sort, page, per_page = _reading_list_grid_args()
+    folder = _grid_folder(query, tags, show, get_reading_list_folders())
     result = get_reading_lists_page(tags=tags, sort=sort, page=page, per_page=per_page,
-                                    query=query, show=show)
+                                    query=query, show=show, folder=folder)
     html = render_template('partials/reading_list_cards.html', lists=result['lists'],
-                           grid_query=query, grid_filtered=bool(tags or show),
+                           in_folder=bool(folder), grid_query=query, grid_filtered=bool(tags or show),
                            active_tags=tags, source_label=source_label)
     return jsonify({
         'success': True,
@@ -218,8 +245,10 @@ def grid_ids():
     """Every list id matching the search and tag filter, on every page:
     "Select All"."""
     query, tags, show, _sort, _page, _per_page = _reading_list_grid_args()
+    folder = _grid_folder(query, tags, show, get_reading_list_folders())
     return jsonify({'success': True,
-                    'ids': get_reading_list_matching_ids(tags, query=query, show=show)})
+                    'ids': get_reading_list_matching_ids(tags, query=query, show=show,
+                                                         folder=folder)})
 
 @reading_lists_bp.route('/reading-lists/<int:list_id>')
 def view_list(list_id):
@@ -876,6 +905,65 @@ def update_tags(list_id):
         return jsonify({'success': True, 'message': 'Tags updated'})
     else:
         return jsonify({'success': False, 'message': 'Failed to update tags'})
+
+
+def _folder_id_arg(data, key='parent_id'):
+    """(ok, id): a JSON folder id, or None for the top level (absent/null/0)."""
+    value = data.get(key)
+    if value in (None, 0):
+        return True, None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return True, value
+    return False, None
+
+
+@reading_lists_bp.route('/api/reading-lists/folders', methods=['POST'])
+def create_folder():
+    """Create a folder. Body: {"name": "...", "parent_id": 3 | null}."""
+    data = request.get_json(silent=True) or {}
+    ok, parent_id = _folder_id_arg(data)
+    folder_id = create_reading_list_folder(data.get('name'), parent_id) if ok else None
+    if folder_id is None:
+        return jsonify({'success': False, 'message': 'Could not create the folder'}), 400
+    return jsonify({'success': True, 'folder_id': folder_id})
+
+
+@reading_lists_bp.route('/api/reading-lists/folders/<int:folder_id>', methods=['PATCH'])
+def update_folder(folder_id):
+    """Rename and/or move a folder. Body: {"name": "...", "parent_id": 3 | null}."""
+    data = request.get_json(silent=True) or {}
+    if 'name' not in data and 'parent_id' not in data:
+        return jsonify({'success': False, 'message': 'Nothing to change'}), 400
+    if 'name' in data and not rename_reading_list_folder(folder_id, data['name']):
+        return jsonify({'success': False, 'message': 'Could not rename the folder'}), 400
+    if 'parent_id' in data:
+        ok, parent_id = _folder_id_arg(data)
+        if not ok or not move_reading_list_folder(folder_id, parent_id):
+            return jsonify({'success': False, 'message': 'Could not move the folder there'}), 400
+    return jsonify({'success': True})
+
+
+@reading_lists_bp.route('/api/reading-lists/folders/<int:folder_id>', methods=['DELETE'])
+def delete_folder(folder_id):
+    """Delete a folder; what it holds moves up to its parent."""
+    if not delete_reading_list_folder(folder_id):
+        return jsonify({'success': False, 'message': 'Folder not found'}), 404
+    return jsonify({'success': True})
+
+
+@reading_lists_bp.route('/api/reading-lists/move', methods=['POST'])
+def move_lists():
+    """Move lists into a folder. Body: {"ids": [1,2], "folder_id": 3 | null}."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids')
+    ok, folder_id = _folder_id_arg(data, 'folder_id')
+    if not ok or not isinstance(ids, list) or not ids or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in ids):
+        return jsonify({'success': False, 'message': 'No lists specified'}), 400
+    moved = move_reading_lists_to_folder(ids, folder_id)
+    if moved is None:
+        return jsonify({'success': False, 'message': 'Could not move the lists'}), 400
+    return jsonify({'success': True, 'moved': moved})
 
 
 @reading_lists_bp.route('/api/reading-lists/tags')
