@@ -73,3 +73,26 @@ def test_file_manager_panes_have_their_own_toolbar_and_body():
     assert "-list" in body and "-footer" in body
     css = read("static", "css", "files.css")
     assert ".fm-toolbar {" in css and ".fm-body {" in css
+
+
+def test_view_toggles_are_segmented_controls_with_a_non_fill_selection():
+    css = read("static", "css", "clu-page.css")
+    assert ".btn-group.clu-seg" in css
+    sel = css[css.index('.btn-group.clu-seg > .btn[aria-pressed="true"]'):]
+    sel = sel[:sel.index("}")]
+    assert "font-weight: 700" in sel and "var(--bs-link-color)" in sel
+    for template, needle in (("collection.html", 'aria-label="Layout"'),
+                             ("releases.html", 'aria-label="View mode"'),
+                             ("wanted.html", 'id="wantedView"')):
+        html = read("templates", template)
+        tag = html[html.rindex("<div", 0, html.index(needle)):html.index(needle)]
+        assert "clu-seg" in tag, template
+
+
+def test_filters_and_letters_are_pills_and_the_count_is_a_chip():
+    css = read("static", "css", "clu-page.css")
+    assert ".clu-letter-bar.btn-group > .btn" in css
+    assert ".clu-filter-options > .btn" in css
+    count = css[css.index("\n.clu-toolbar-count {"):]
+    count = count[:count.index("}")]
+    assert "border-radius: var(--bs-border-radius-pill)" in count

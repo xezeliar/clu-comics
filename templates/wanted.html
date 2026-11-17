@@ -99,7 +99,7 @@
             <div class="clu-toolbar-end">
                 {{ result_count('wantedCount', wanted_rows, 'wanted issues', one='wanted issue') }}
                 {% if missing or ignored %}
-                <div class="btn-group btn-group-sm" role="group" aria-label="Group missing issues" id="wantedView">
+                <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="Group missing issues" id="wantedView">
                     <button type="button" class="btn btn-outline-secondary" data-view="series" aria-pressed="true">By series</button>
                     <button type="button" class="btn btn-outline-secondary" data-view="issue" aria-pressed="false">By issue</button>
                 </div>

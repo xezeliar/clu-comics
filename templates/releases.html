@@ -58,7 +58,7 @@
             {{ search_input('releasesSearch', 'Search series', value=release_query) }}
             <div class="clu-toolbar-end">
                 {{ result_count('releases-count', releases|length, 'releases', one='release') }}
-                <div class="btn-group btn-group-sm" role="group" aria-label="View mode" id="view-toggle">
+                <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="View mode" id="view-toggle">
                     <button aria-label="Card view" type="button" class="btn btn-outline-secondary" data-view="cards" title="Card view"
                         aria-pressed="false">
                         <i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i>
