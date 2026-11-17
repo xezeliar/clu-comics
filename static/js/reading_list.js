@@ -98,6 +98,8 @@ function listFilterState() {
         tag: [...activeTagFilters],
         show: activeListShow(),
         sort: activeListSort() === DEFAULT_LIST_SORT ? '' : activeListSort(),
+        // Folder being browsed ('' = top level); the server ignores it while a filter is on.
+        folder: (document.querySelector('.reading-list-grid') || {dataset: {}}).dataset.folder || '',
     };
 }
 
@@ -107,6 +109,8 @@ function fetchMatchingListIds() {
     if (activeListQuery()) p.set('q', activeListQuery());
     activeTagFilters.forEach(t => p.append('tag', t));
     if (activeListShow()) p.set('show', activeListShow());
+    const folder = listFilterState().folder;
+    if (folder) p.set('folder', folder);
     return fetch(nav.dataset.idsEndpoint + '?' + p.toString(), { headers: { Accept: 'application/json' } })
         .then(r => {
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -128,7 +132,8 @@ function updateListCount(data, grid) {
     if (typeof data.all_total === 'number') grid.dataset.totalLists = String(data.all_total);
     const allLists = parseInt(grid.dataset.totalLists, 10) || 0;
     // Narrowed to one page (or to nothing): "Showing 12 of 222 reading lists".
-    const narrowed = activeListQuery() !== '' || activeTagFilters.size > 0 || activeListShow() !== '';
+    const narrowed = activeListQuery() !== '' || activeTagFilters.size > 0 || activeListShow() !== ''
+        || !!grid.dataset.hasFolders;
     if (total === 0 || (narrowed && (data.total_pages || 1) <= 1)) {
         CLU.setCount(el, { total: allLists, noun: 'reading lists', one: 'reading list', shown: total });
         return;
@@ -858,6 +863,100 @@ function applyBulkTags() {
         })
         .catch(() => CLU.toast('An error occurred', 'error'))
         .finally(() => { btn.disabled = false; });
+}
+
+// ==========================================
+// Folders
+// ==========================================
+let folderModalId = null;     // null = creating
+let moveTarget = null;        // {kind: 'lists' | 'folder', id}
+
+function postJson(url, method, body) {
+    return fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+        .then(r => r.json().then(d => ({ ok: r.ok, ...d })));
+}
+
+function currentFolderId() {
+    const f = document.querySelector('.reading-list-grid')?.dataset.folder;
+    return f ? parseInt(f, 10) : null;
+}
+
+function openFolderModal(id, name) {
+    folderModalId = id || null;
+    document.getElementById('folderModalLabel').textContent = id ? 'Rename folder' : 'New folder';
+    document.getElementById('folderName').value = name || '';
+    const modal = document.getElementById('folderModal');
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+    modal.addEventListener('shown.bs.modal', () => document.getElementById('folderName').focus(), { once: true });
+}
+
+function saveFolder(e) {
+    e.preventDefault();
+    const name = document.getElementById('folderName').value.trim();
+    if (!name) return;
+    const req = folderModalId
+        ? postJson('/api/reading-lists/folders/' + folderModalId, 'PATCH', { name })
+        : postJson('/api/reading-lists/folders', 'POST', { name, parent_id: currentFolderId() });
+    req.then(d => {
+        if (!d.success) { CLU.toast(d.message || 'Could not save the folder', 'error'); return; }
+        window.location.reload();
+    }).catch(() => CLU.toast('An error occurred', 'error'));
+}
+
+function deleteFolder(id) {
+    postJson('/api/reading-lists/folders/' + id, 'DELETE').then(d => {
+        if (!d.success) { CLU.toast(d.message || 'Could not delete the folder', 'error'); return; }
+        window.location.reload();
+    }).catch(() => CLU.toast('An error occurred', 'error'));
+}
+
+// Folder ids the move picker must not offer for a moved folder: itself and its subtree.
+function folderSubtree(id) {
+    const out = new Set([id]);
+    let grew = true;
+    while (grew) {
+        grew = false;
+        window.RL_FOLDERS.forEach(f => {
+            if (f.parent_id && out.has(f.parent_id) && !out.has(f.id)) { out.add(f.id); grew = true; }
+        });
+    }
+    return out;
+}
+
+function openMoveModal(kind, id) {
+    if (kind === 'lists' && selectedListIds.size === 0) {
+        CLU.toast('No lists selected', 'warning');
+        return;
+    }
+    moveTarget = { kind, id };
+    const banned = kind === 'folder' ? folderSubtree(id) : new Set();
+    const select = document.getElementById('moveTarget');
+    select.innerHTML = '';
+    const add = (value, label, depth) => {
+        const o = document.createElement('option');
+        o.value = value;
+        o.textContent = '\u00a0\u00a0'.repeat(depth) + label;
+        select.appendChild(o);
+    };
+    add('', 'Top level (no folder)', 0);
+    const walk = (parent, depth) => window.RL_FOLDERS
+        .filter(f => (f.parent_id || null) === parent && !banned.has(f.id))
+        .forEach(f => { add(String(f.id), f.name, depth); walk(f.id, depth + 1); });
+    walk(null, 1);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('moveModal')).show();
+}
+
+function applyMove() {
+    const target = document.getElementById('moveTarget').value;
+    const folderId = target ? parseInt(target, 10) : null;
+    const req = moveTarget.kind === 'folder'
+        ? postJson('/api/reading-lists/folders/' + moveTarget.id, 'PATCH', { parent_id: folderId })
+        : postJson('/api/reading-lists/move', 'POST',
+            { ids: Array.from(selectedListIds).map(id => parseInt(id, 10)), folder_id: folderId });
+    req.then(d => {
+        if (!d.success) { CLU.toast(d.message || 'Could not move', 'error'); return; }
+        window.location.reload();
+    }).catch(() => CLU.toast('An error occurred', 'error'));
 }
 
 function confirmDeleteAll() {

@@ -928,6 +928,16 @@ def _init_db_locked():
                 "Migrating reading_lists table: adding thumbnail_path column"
             )
             c.execute("ALTER TABLE reading_lists ADD COLUMN thumbnail_path TEXT")
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS reading_list_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                parent_id INTEGER REFERENCES reading_list_folders(id)
+            )
+        """)
+        if "folder_id" not in columns:
+            app_logger.info("Migrating reading_lists table: adding folder_id column")
+            c.execute("ALTER TABLE reading_lists ADD COLUMN folder_id INTEGER DEFAULT NULL")
         if "tags" not in columns:
             app_logger.info("Migrating reading_lists table: adding tags column")
             c.execute("ALTER TABLE reading_lists ADD COLUMN tags TEXT DEFAULT '[]'")
@@ -12746,12 +12756,18 @@ def _reading_list_tag_where(tags):
     return (" AND ".join(clauses) or "1"), params
 
 
-def _reading_list_where(tags, query=None, show=None):
+def _reading_list_where(tags, query=None, show=None, folder=None):
     """The tag filter plus the search box: the list's name contains ``query``
     (SQLite LIKE: case-insensitive for ASCII; % and _ are matched literally),
     plus the Show filter (a _READING_LIST_SHOWS key; anything else is All).
     Reads ``p``, so it goes after _READING_LIST_PROGRESS."""
     where, params = _reading_list_tag_where(tags)
+    if folder is not None:
+        # 0 is the top level; a folder holds only its own lists, not its sub-folders'.
+        if folder:
+            where, params = f"({where}) AND rl.folder_id = ?", params + [folder]
+        else:
+            where = f"({where}) AND rl.folder_id IS NULL"
     if show in _READING_LIST_SHOWS:
         where = f"({where}) AND {_READING_LIST_SHOWS[show]}"
     q = (query or "").strip()
@@ -12787,7 +12803,7 @@ def count_reading_lists_by_progress(viewer_id=None):
 
 
 def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_SORT,
-                           page=1, per_page=40, query=None, show=None):
+                           page=1, per_page=40, query=None, show=None, folder=None):
     """One page of the Reading Lists grid, filtered and sorted in SQL.
 
     Every list is visible to every user (so a reader can browse lists an
@@ -12803,7 +12819,7 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
     per_page = max(1, int(per_page or 40))
     page = max(1, int(page or 1))
     order = _READING_LIST_SORTS.get(sort) or _READING_LIST_SORTS[READING_LIST_DEFAULT_SORT]
-    where, params = _reading_list_where(tags, query, show)
+    where, params = _reading_list_where(tags, query, show, folder)
     empty = {"lists": [], "total": 0, "page": 1, "per_page": per_page, "total_pages": 1}
     try:
         uid = _resolve_user_id(viewer_id)
@@ -12857,13 +12873,14 @@ def get_reading_lists_page(viewer_id=None, tags=None, sort=READING_LIST_DEFAULT_
         return empty
 
 
-def get_reading_list_matching_ids(tags=None, query=None, show=None, viewer_id=None):
+def get_reading_list_matching_ids(tags=None, query=None, show=None, viewer_id=None,
+                                  folder=None):
     """Every reading-list id carrying all of ``tags`` (and matching the search
     ``query`` and the Show filter), on every page.
 
     Backs the grid's "Select All": a page holds only its own cards.
     """
-    where, params = _reading_list_where(tags, query, show)
+    where, params = _reading_list_where(tags, query, show, folder)
     try:
         uid = _resolve_user_id(viewer_id)
         with db_conn() as conn:
@@ -12876,6 +12893,146 @@ def get_reading_list_matching_ids(tags=None, query=None, show=None, viewer_id=No
     except Exception as e:
         app_logger.error(f"Error getting reading list ids: {e}")
         return []
+
+
+def get_reading_list_folders():
+    """Every reading-list folder as ``{id, name, parent_id, list_count, folder_count}``
+    (counts are direct children), ordered by name. The tree is small enough to
+    load whole: the page filters it by parent and the move picker indents it."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return []
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(
+                "SELECT f.id, f.name, f.parent_id,"
+                " (SELECT COUNT(*) FROM reading_lists rl WHERE rl.folder_id = f.id) AS list_count,"
+                " (SELECT COUNT(*) FROM reading_list_folders c WHERE c.parent_id = f.id) AS folder_count"
+                " FROM reading_list_folders f ORDER BY f.name COLLATE NOCASE")]
+    except Exception as e:
+        app_logger.error(f"Error getting reading list folders: {e}")
+        return []
+
+
+def reading_list_folder_path(folders, folder_id):
+    """Root-to-``folder_id`` chain of folders from ``get_reading_list_folders()``;
+    empty for the top level or an unknown id."""
+    by_id = {f["id"]: f for f in folders}
+    path, seen = [], set()
+    while folder_id in by_id and folder_id not in seen:
+        seen.add(folder_id)
+        path.append(by_id[folder_id])
+        folder_id = by_id[folder_id]["parent_id"]
+    return path[::-1]
+
+
+def create_reading_list_folder(name, parent_id=None):
+    """New folder under ``parent_id`` (None = top level). Returns its id, or None
+    when the name is blank, the parent does not exist or the write fails."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            if parent_id is not None and not conn.execute(
+                    "SELECT 1 FROM reading_list_folders WHERE id = ?", (parent_id,)).fetchone():
+                return None
+            cur = conn.execute(
+                "INSERT INTO reading_list_folders (name, parent_id) VALUES (?, ?)",
+                (name, parent_id))
+            conn.commit()
+            return cur.lastrowid
+    except Exception as e:
+        app_logger.error(f"Error creating reading list folder: {e}")
+        return None
+
+
+def rename_reading_list_folder(folder_id, name):
+    name = (name or "").strip()
+    if not name:
+        return False
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            cur = conn.execute("UPDATE reading_list_folders SET name = ? WHERE id = ?",
+                               (name, folder_id))
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as e:
+        app_logger.error(f"Error renaming reading list folder {folder_id}: {e}")
+        return False
+
+
+def move_reading_list_folder(folder_id, parent_id):
+    """Re-parent a folder (None = top level). Refuses a move into itself or one
+    of its own descendants, which would orphan the subtree from the root."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            conn.row_factory = sqlite3.Row
+            folders = [dict(r) for r in conn.execute(
+                "SELECT id, parent_id FROM reading_list_folders")]
+            ids = {f["id"] for f in folders}
+            if folder_id not in ids or (parent_id is not None and parent_id not in ids):
+                return False
+            if any(f["id"] == folder_id for f in reading_list_folder_path(folders, parent_id)):
+                return False
+            conn.execute("UPDATE reading_list_folders SET parent_id = ? WHERE id = ?",
+                         (parent_id, folder_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        app_logger.error(f"Error moving reading list folder {folder_id}: {e}")
+        return False
+
+
+def delete_reading_list_folder(folder_id):
+    """Delete a folder; its lists and sub-folders move up to its parent. Never
+    deletes a reading list."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            row = conn.execute("SELECT parent_id FROM reading_list_folders WHERE id = ?",
+                               (folder_id,)).fetchone()
+            if row is None:
+                return False
+            parent = row[0]
+            conn.execute("UPDATE reading_lists SET folder_id = ? WHERE folder_id = ?",
+                         (parent, folder_id))
+            conn.execute("UPDATE reading_list_folders SET parent_id = ? WHERE parent_id = ?",
+                         (parent, folder_id))
+            conn.execute("DELETE FROM reading_list_folders WHERE id = ?", (folder_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        app_logger.error(f"Error deleting reading list folder {folder_id}: {e}")
+        return False
+
+
+def move_reading_lists_to_folder(list_ids, folder_id):
+    """Put reading lists in a folder (None = top level). Returns how many moved,
+    or None when the folder does not exist or the write fails."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            if folder_id is not None and not conn.execute(
+                    "SELECT 1 FROM reading_list_folders WHERE id = ?", (folder_id,)).fetchone():
+                return None
+            moved = 0
+            for list_id in list_ids:
+                moved += conn.execute("UPDATE reading_lists SET folder_id = ? WHERE id = ?",
+                                      (folder_id, list_id)).rowcount
+            conn.commit()
+            return moved
+    except Exception as e:
+        app_logger.error(f"Error moving reading lists to folder: {e}")
+        return None
 
 
 def count_reading_lists():

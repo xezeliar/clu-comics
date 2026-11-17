@@ -6,7 +6,7 @@ A card: the list cover with up to two highlight covers fanned behind, the
 name, "12 read · 34 of 101 in library" and one bar (read / in library /
 missing). The title link covers the whole card; the menu holds Rename, Tags
 and Delete. #}
-{% from 'partials/empty_state.html' import no_matches %}
+{% from 'partials/empty_state.html' import no_matches, empty_state %}
 {% set _can_manage = (g.current_user.role if g.get('current_user') else 'owner') in ['clerk', 'owner'] %}
 {% for list in lists %}
 {%- set _tot = list.entry_count or 0 -%}
@@ -94,9 +94,13 @@ and Delete. #}
 </div>
 {% else %}
 <div class="reading-list-no-match" style="grid-column: 1 / -1;">
+    {% if in_folder and not grid_query and not grid_filtered %}
+    {{ empty_state('This folder has no lists', 'Select lists and use Move to folder to put some here.', 'bi-folder2-open') }}
+    {% else %}
     {#- A search alone reads "No reading lists match “x”" + Clear search; a tag
         or Show filter reads "...match these filters" + Clear filters. -#}
     {{ no_matches('reading lists', query=grid_query, filtered=grid_filtered or not grid_query,
                   clear_id='rlClearFilters') }}
+    {% endif %}
 </div>
 {% endfor %}
