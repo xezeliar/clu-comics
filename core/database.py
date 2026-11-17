@@ -920,6 +920,21 @@ def _init_db_locked():
             )
         """)
 
+        # Credits Metron holds for a series' issues, fetched on demand for the
+        # series page. An issue with no credits at Metron is stored as one row
+        # with kind '' so it is not asked for again.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS metron_issue_credits (
+                series_id INTEGER NOT NULL,
+                issue_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                PRIMARY KEY (issue_id, kind, name)
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_metron_issue_credits_series"
+                  " ON metron_issue_credits (series_id)")
+
         # Migrate reading_lists table: add thumbnail_path if not exists
         c.execute("PRAGMA table_info(reading_lists)")
         columns = [row[1] for row in c.fetchall()]
