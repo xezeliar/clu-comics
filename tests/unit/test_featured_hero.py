@@ -26,20 +26,22 @@ def _hero_js():
     return js[start:js.index("async function loadOnTheStackSwiper()", start)]
 
 
-def test_fills_up_to_five_slides_in_fallback_order_without_repeats():
+def test_five_slides_with_recent_additions_in_slots_two_and_four():
     body = _hero_js()
     assert "const HERO_MAX = 5;" in body
-    order = [body.index(u) for u in (
-        "/api/on-the-stack?limit=${HERO_MAX}",
-        "/api/continue-reading?limit=${HERO_MAX}",
-        "/list-recent-files?limit=${HERO_MAX}",
-    )]
-    assert order == sorted(order)
-    # The three sources are merged in that order, a comic once, capped at HERO_MAX.
-    adds = [body.index(m) for m in ("label: 'Up next'", "label: 'Continue reading'",
-                                    "label: 'New in your library'")]
-    assert adds == sorted(adds)
-    assert "seen.has(pick.path)" in body and "picks.length >= HERO_MAX" in body
+    assert "const HERO_ADDED_SLOTS = [1, 3];" in body   # the 2nd and 4th, zero-based
+    for url in ("/api/on-the-stack?limit=${HERO_MAX}",
+                "/api/continue-reading?limit=${HERO_MAX}",
+                "/list-recent-files?limit=${HERO_MAX}"):
+        assert url in body
+    # Reading is On the Stack first, then Continue Reading.
+    assert body.index("label: 'Up next'") < body.index("label: 'Continue reading'")
+    assert "label: 'Recently added'" in body
+    # Each slot draws from its own queue, tops up from the other, never repeats.
+    assert "HERO_ADDED_SLOTS.includes(slot) ? added : reading" in body
+    assert "take(wanted) || take(other)" in body
+    assert "seen.has(pick.path)" in body
+    assert "slot < HERO_MAX" in body
 
 
 def test_there_is_no_auto_advance():

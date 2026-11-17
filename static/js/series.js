@@ -230,32 +230,14 @@ function selectDirectory(path) {
                 document.getElementById('mapped-path-display').innerHTML =
                     `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${path}</span>`;
 
-                // Update the button text and add remove/refresh buttons if not present
-                const mappingCard = document.querySelector('#mapping .card-body');
-                const buttonsDiv = mappingCard.querySelector('.d-flex.gap-2');
-
-                // Check if remove button exists, if not add it
-                if (!buttonsDiv.querySelector('.btn-outline-danger')) {
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'btn btn-outline-danger';
-                    removeBtn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Remove';
-                    removeBtn.onclick = removeMappingConfirm;
-                    buttonsDiv.insertBefore(removeBtn, buttonsDiv.firstChild);
-                }
-
-                // Update map button text
-                const mapBtn = buttonsDiv.querySelector('.btn-outline-primary');
-                mapBtn.innerHTML = '<i class="bi bi-folder-symlink me-1"></i>Change Location';
-
-                // Check if refresh button exists, if not add it
-                if (!buttonsDiv.querySelector('#refresh-btn')) {
-                    const refreshBtn = document.createElement('button');
-                    refreshBtn.className = 'btn btn-outline-success';
-                    refreshBtn.id = 'refresh-btn';
-                    refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh';
-                    refreshBtn.onclick = refreshCollectionStatus;
-                    buttonsDiv.appendChild(refreshBtn);
-                }
+                // Now mapped: the button reads "Change", and the action and alias
+                // rows (rendered hidden while unmapped) appear.
+                const mapBtn = document.getElementById('mapLocationBtn');
+                if (mapBtn) mapBtn.innerHTML = '<i class="bi bi-folder-symlink me-1" aria-hidden="true"></i>Change Location';
+                ['mappingActions', 'aliasesRow'].forEach(id => {
+                    const row = document.getElementById(id);
+                    if (row) row.hidden = false;
+                });
 
                 // Close modal
                 modal.hide();
@@ -299,17 +281,13 @@ function removeMappingConfirm() {
                 document.getElementById('mapped-path-display').innerHTML =
                     '<span class="text-muted">Not mapped to local collection</span>';
 
-                // Remove the remove button
-                const mappingCard = document.querySelector('#mapping .card-body');
-                const buttonsDiv = mappingCard.querySelector('.d-flex.gap-2');
-                const removeBtn = buttonsDiv.querySelector('.btn-outline-danger');
-                if (removeBtn) {
-                    removeBtn.remove();
-                }
-
-                // Update map button text
-                const mapBtn = buttonsDiv.querySelector('.btn-outline-primary');
-                mapBtn.innerHTML = '<i class="bi bi-folder-symlink me-1"></i>Map Location';
+                // Unmapped again: the button reads "Map", and the rows go away.
+                const mapBtn = document.getElementById('mapLocationBtn');
+                if (mapBtn) mapBtn.innerHTML = '<i class="bi bi-folder-symlink me-1" aria-hidden="true"></i>Map Location';
+                ['mappingActions', 'aliasesRow'].forEach(id => {
+                    const row = document.getElementById(id);
+                    if (row) row.hidden = true;
+                });
             } else {
                 CLU.toast('Failed to remove mapping: ' + (data.error || 'Unknown error'), 'error');
             }

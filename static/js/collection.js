@@ -5087,10 +5087,9 @@ async function loadContinueReadingSwiper() {
 /**
  * Featured hero on Home: up to HERO_MAX issues as a swipeable carousel. Each
  * slide is a sharp cover beside its title, on a blurred copy of the same cover.
- * The slides are filled in this order, without repeating a comic:
- *   1. On the Stack (the next unread issue of what you read most recently),
- *   2. Continue Reading (comics you left mid-way),
- *   3. the newest comics added to the library.
+ * Slides 1, 3 and 5 are what you are reading (On the Stack first, then Continue
+ * Reading); slides 2 and 4 are the newest comics added to the library. A comic
+ * appears once, and a list that runs out is topped up from the other.
  * Stays hidden when none exists; a single comic is a plain card with no controls.
  *
  * There is deliberately NO auto-advance: a slide that changes while you are
@@ -5101,6 +5100,8 @@ async function loadContinueReadingSwiper() {
  * is only the fallback when no large cover can be made.
  */
 const HERO_MAX = 5;
+// Zero-based slots that show recent additions: the 2nd and the 4th.
+const HERO_ADDED_SLOTS = [1, 3];
 
 async function loadFeaturedHero() {
     const hero = document.getElementById('featuredHero');
@@ -5122,14 +5123,13 @@ async function loadFeaturedHero() {
         getJson(`/list-recent-files?limit=${HERO_MAX}`)
     ]);
 
-    const picks = [];
-    const seen = new Set();
-    const add = (pick) => {
-        if (!pick.path || seen.has(pick.path) || picks.length >= HERO_MAX) return;
-        seen.add(pick.path);
-        picks.push(pick);
-    };
-    ((stack && stack.success && stack.items) || []).forEach(i => add({
+    // Slots 2 and 4 are always recent additions, so the carousel mixes what you
+    // are reading with what is new; the other slots (1, 3, 5) are what you are
+    // reading, On the Stack first, then Continue Reading. A list that runs out is
+    // topped up from the other. A comic appears once.
+    const reading = [];
+    const added = [];
+    ((stack && stack.success && stack.items) || []).forEach(i => reading.push({
         path: i.file_path,
         title: i.series_name || stripExt(i.file_name),
         issue: i.issue_number,
@@ -5137,17 +5137,36 @@ async function loadFeaturedHero() {
         label: 'Up next',
         context: i.reading_list_name || ''
     }));
-    ((cont && cont.success && cont.items) || []).forEach(i => add({
+    ((cont && cont.success && cont.items) || []).forEach(i => reading.push({
         path: i.comic_path,
         title: stripExt(i.file_name),
         label: 'Continue reading',
         progress: i.progress_percent
     }));
-    ((recent && recent.success && recent.files) || []).forEach(i => add({
+    ((recent && recent.success && recent.files) || []).forEach(i => added.push({
         path: i.file_path,
         title: stripExt(i.file_name),
-        label: 'New in your library'
+        label: 'Recently added'
     }));
+
+    const picks = [];
+    const seen = new Set();
+    const take = (queue) => {
+        while (queue.length) {
+            const pick = queue.shift();
+            if (pick.path && !seen.has(pick.path)) {
+                seen.add(pick.path);
+                return pick;
+            }
+        }
+        return null;
+    };
+    for (let slot = 0; slot < HERO_MAX; slot++) {
+        const wanted = HERO_ADDED_SLOTS.includes(slot) ? added : reading;
+        const other = wanted === added ? reading : added;
+        const pick = take(wanted) || take(other);
+        if (pick) picks.push(pick);
+    }
     if (!picks.length) return;
 
     const el = (tag, cls, text) => {

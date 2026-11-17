@@ -14,12 +14,16 @@
 
 /* ---- File Manager ------------------------------------------------------ */
 
-/* Source reads blue, Destination green; the top edge is an inset shadow so the
-   pane box does not grow. The active-pane ring (box-shadow) wins when set. */
+/* Source reads blue, Destination green. The pane itself is a transparent column
+   now (files.css): the top edge and the active ring belong to its two rounded
+   parts, the toolbar and the list box, so every line follows a rounded corner.
+   They used to sit on .fm-pane, whose square box then showed as a second,
+   misaligned border around both. The inset shadow follows the radius. */
 .fm-pane[data-panel="source"]      { --fm-hue: var(--bs-primary); }
 .fm-pane[data-panel="destination"] { --fm-hue: var(--bs-success); }
-.fm-pane:not(.is-active) { box-shadow: inset 0 3px 0 var(--fm-hue); }
-.fm-pane.is-active { border-color: var(--fm-hue); box-shadow: inset 0 3px 0 var(--fm-hue), 0 0 0 1px var(--fm-hue); }
+.fm-toolbar { box-shadow: inset 0 3px 0 var(--fm-hue), 0 .375rem 1.5rem rgba(0, 0, 0, .08); }
+.fm-pane.is-active .fm-toolbar { border-color: var(--fm-hue); box-shadow: inset 0 3px 0 var(--fm-hue), 0 0 0 1px var(--fm-hue), 0 .375rem 1.5rem rgba(0, 0, 0, .08); }
+.fm-pane.is-active .fm-body { border-color: var(--fm-hue); box-shadow: 0 0 0 1px var(--fm-hue); }
 .fm-lbl { color: color-mix(in srgb, var(--fm-hue) 75%, var(--bs-emphasis-color)); }
 
 .fm-row.is-dir .fm-ty { color: var(--bs-warning); }

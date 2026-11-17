@@ -552,7 +552,9 @@ a.clu-stat:focus-visible .clu-stat-value {
 
 .clu-letter-bar > .btn {
     flex: 0 0 auto;
-    min-width: 2rem;
+    min-width: 2.25rem;
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
 }
 
 .clu-search {
@@ -587,9 +589,9 @@ a.clu-stat:focus-visible .clu-stat-value {
 .clu-toolbar {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    margin-bottom: 1.5rem;
-    padding: 0.75rem 1rem;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    padding: 0.5rem 0.75rem;
     background-color: var(--bs-tertiary-bg);
     /* Floats like the navbar above it: a hairline edge for dark themes, where a
        shadow has nothing to darken, and a soft shadow for light ones. */
@@ -602,7 +604,7 @@ a.clu-stat:focus-visible .clu-stat-value {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.375rem 0.5rem;
     min-width: 0;
 }
 
@@ -623,13 +625,42 @@ a.clu-stat:focus-visible .clu-stat-value {
     margin-left: auto;
 }
 
+/* Compact controls. The app-wide touch rule (.btn-sm { min-height: 44px }, below)
+   made every toolbar control a 44px block on an iPad and the toolbar tall. Inside
+   a toolbar they are 36px: still a comfortable touch target, and the bar stays a
+   bar. Everything outside a toolbar keeps the 44px rule. */
+.clu-toolbar .btn-sm,
+.clu-toolbar .btn-group-sm > .btn {
+    min-height: 2.25rem;
+    font-size: 0.8125rem;
+    padding-top: 0.125rem;
+    padding-bottom: 0.125rem;
+}
+
+.clu-toolbar .btn-sm:has(> i:only-child),
+.clu-toolbar .btn-group-sm > .btn:has(> i:only-child) {
+    min-width: 2.25rem;
+}
+
+.clu-toolbar .clu-search,
+.clu-toolbar .clu-select {
+    min-height: 2.25rem;
+}
+
+.clu-toolbar .clu-search > .form-control,
+.clu-toolbar .clu-search > .input-group-text,
+.clu-toolbar .clu-select > .form-select,
+.clu-toolbar .clu-select > .input-group-text {
+    min-height: 2.25rem;
+}
+
 /* The count is a quiet chip, not loose text, so it reads as part of the bar. */
 .clu-toolbar-count {
     color: var(--bs-secondary-color);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-    padding: 0.125rem 0.625rem;
+    padding: 0.0625rem 0.5rem;
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius-pill);
 }
@@ -639,7 +670,7 @@ a.clu-stat:focus-visible .clu-stat-value {
    same tint + bold + link-colour bar as the navbar's active item, so it never
    depends on a fill that is only ~2:1 against the bar on dark themes. */
 .btn-group.clu-seg {
-    padding: 0.1875rem;
+    padding: 0.125rem;
     gap: 0.125rem;
     background-color: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
@@ -700,7 +731,7 @@ a.clu-stat:focus-visible .clu-stat-value {
 }
 
 .clu-letter-bar.btn-group {
-    gap: 0.375rem;
+    gap: 0.25rem;
 }
 
 .clu-letter-bar.btn-group > .btn {
@@ -727,7 +758,7 @@ a.clu-stat:focus-visible .clu-stat-value {
 
 @media (max-width: 575.98px) {
     .clu-toolbar {
-        padding: 0.75rem;
+        padding: 0.5rem;
     }
 
     .clu-toolbar-row > .clu-search {
@@ -874,6 +905,27 @@ a.clu-stat:focus-visible .clu-stat-value {
     }
 
     body:has(#comicReaderModal[style*="display: flex"]) .clu-tabbar { display: none; }
+}
+
+/* ---- Cover shadow ----------------------------------------------------------
+   One soft shadow for every issue cover (grid, Home shelves, Releases, Pull List
+   week, reading-list issues, series header). A single small box-shadow per cover
+   is cheap to paint and, unlike filter: drop-shadow(), is composited with the
+   element; do not make it larger or layered (240 covers per page) and do not
+   animate it. Dark themes get a stronger shadow plus a hairline edge, since a
+   shadow has nothing to darken there. */
+:root {
+    --clu-cover-shadow: 0 3px 8px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-bs-theme="dark"] {
+    --clu-cover-shadow: 0 3px 10px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.pl-week img,
+.sh-cover img,
+.rl-it .book-cover {
+    box-shadow: var(--clu-cover-shadow);
 }
 
 /* ---- Navbar: a floating bar (header.html) ----------------------------------

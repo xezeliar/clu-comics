@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/filters.html' import toolbar %}
 {% from 'partials/publisher_dot.html' import publisher_dot with context %}
 
 {% block title %}{{ series.name }} - Series{% endblock %}
@@ -224,92 +225,80 @@
     <!-- Mapping Section -->
     <div class="row mb-4" id="mapping">
         <div class="col-12">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h5 class="mb-1"><i class="bi bi-folder2-open me-2"></i>Collection Mapping</h5>
-                            <p class="text-muted mb-0" id="mapped-path-display">
-                                {% if mapped_path %}
-                                <span class="text-success"><i class="bi bi-check-circle me-1"></i>{{ mapped_path
-                                    }}</span>
-                                {% else %}
-                                <span class="text-muted">Not mapped to local collection</span>
-                                {% endif %}
-                            </p>
-                        </div>
-                        <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
-                            <div class="d-flex flex-wrap gap-2">
-                                <button class="btn btn-outline-primary" onclick="openMappingModal()">
-                                    <i class="bi bi-folder-symlink me-1"></i>
-                                    {% if mapped_path %}Change{% else %}Map{% endif %} Location
-                                </button>
-                            </div>
-                            {% if last_synced_at %}
-                            <small class="text-muted" id="last-synced-display">
-                                <i class="bi bi-clock me-1"></i>Synced: {{ last_synced_at }}
-                            </small>
+            {# The mapping and the series' actions are one toolbar, like every list
+               page's: rows of small outline buttons, no coloured outlines, no card. #}
+            {% call toolbar('Collection mapping and series actions', id='mappingToolbar') %}
+                <div class="clu-toolbar-row">
+                    <div class="me-auto" style="min-width: 0;">
+                        <h2 class="h6 mb-1"><i class="bi bi-folder2-open me-2" aria-hidden="true"></i>Collection Mapping</h2>
+                        <p class="text-muted mb-0 small text-break" id="mapped-path-display">
+                            {% if mapped_path %}
+                            <span class="text-success"><i class="bi bi-check-circle me-1"></i>{{ mapped_path }}</span>
+                            {% else %}
+                            <span class="text-muted">Not mapped to local collection</span>
                             {% endif %}
-                        </div>
+                        </p>
                     </div>
-                    {% if mapped_path %}
-                    <hr class="my-2">
-                    <div class="d-flex justify-content-end gap-3">
-                        {% if not (run and run.missing) %}
-                        <button class="btn btn-outline-primary btn-sm" onclick="checkForMissing()"
-                            id="checkMissingBtn"
-                            title="Search the configured sources for this series' missing issues">
-                            <i class="bi bi-search me-1"></i>Check for Missing Issues
-                        </button>
-                        {% endif %}
-                        <button class="btn btn-outline-secondary btn-sm" onclick="syncSeries()" id="sync-btn"
-                            title="Check API for New Issues">
-                            <i class="bi bi-arrow-repeat me-1"></i>API Sync
-                        </button>
-                        <button class="btn btn-outline-success btn-sm" onclick="refreshCollectionStatus()"
-                            id="refresh-btn" title="Check Collection for New Issues">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-                        </button>
+                    {% if last_synced_at %}
+                    <small class="clu-toolbar-count" id="last-synced-display">
+                        <i class="bi bi-clock me-1"></i>Synced: {{ last_synced_at }}
+                    </small>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openMappingModal()"
+                        id="mapLocationBtn">
+                        <i class="bi bi-folder-symlink me-1" aria-hidden="true"></i>{% if mapped_path %}Change{% else %}Map{% endif %} Location
+                    </button>
+                </div>
+                {# Always rendered, hidden until the series is mapped: series.js reveals
+                   these rows after a mapping is saved and hides them on removal. #}
+                <div class="clu-toolbar-row" id="mappingActions"{% if not mapped_path %} hidden{% endif %}>
+                    {% if not (run and run.missing) %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkForMissing()"
+                        id="checkMissingBtn"
+                        title="Search the configured sources for this series' missing issues">
+                        <i class="bi bi-search me-1" aria-hidden="true"></i>Check for Missing Issues
+                    </button>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="syncSeries()" id="sync-btn"
+                        title="Check API for New Issues">
+                        <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>API Sync
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshCollectionStatus()"
+                        id="refresh-btn" title="Check Collection for New Issues">
+                        <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
+                    </button>
+                    <div class="clu-toolbar-end">
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" role="switch"
                                    id="stackSubscription"
                                    {% if series_subscription %}checked{% endif %}
                                    onchange="toggleStackSubscription(this.checked)">
-                            <label class="form-check-label" for="stackSubscription">
-                                <small>On the Stack</small>
-                            </label>
+                            <label class="form-check-label small" for="stackSubscription">On the Stack</label>
                         </div>
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" role="switch"
                                    id="monitorSeries"
                                    {% if series_monitored %}checked{% endif %}
                                    onchange="toggleMonitored(this.checked)">
-                            <label class="form-check-label" for="monitorSeries"
-                                   title="When off, this series is not searched for new or missing issues">
-                                <small>Monitor</small>
-                            </label>
+                            <label class="form-check-label small" for="monitorSeries"
+                                   title="When off, this series is not searched for new or missing issues">Monitor</label>
                         </div>
                     </div>
-                    {% endif %}
-
-                    <!-- Search Aliases Section -->
-                    {% if mapped_path %}
-                    <hr class="my-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <div>
-                            <h6 class="mb-0"><i class="bi bi-share me-2"></i>GetComics Search Aliases</h6>
-                            <small class="text-muted">Add alternative series names to help GetComics find this series</small>
-                        </div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="openAliasesModal()">
-                            <i class="bi bi-pencil me-1"></i>Edit
-                        </button>
+                </div>
+                <div class="clu-toolbar-row" id="aliasesRow"{% if not mapped_path %} hidden{% endif %}>
+                    <!-- Search Aliases -->
+                    <div class="me-auto" style="min-width: 0;">
+                        <h3 class="h6 mb-0"><i class="bi bi-share me-2" aria-hidden="true"></i>GetComics Search Aliases</h3>
+                        <small class="text-muted">Add alternative series names to help GetComics find this series</small>
                     </div>
-                    <div id="aliasesDisplay" class="small text-muted">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openAliasesModal()">
+                        <i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit
+                    </button>
+                    <div id="aliasesDisplay" class="small text-muted w-100">
                         <em>Loading...</em>
                     </div>
-                    {% endif %}
                 </div>
-            </div>
+            {% endcall %}
         </div>
     </div>
 

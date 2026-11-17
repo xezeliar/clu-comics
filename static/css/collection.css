@@ -263,7 +263,7 @@
     aspect-ratio: 2/3;
     border-radius: 8px;
     overflow: clip;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--clu-cover-shadow);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -370,7 +370,6 @@
    inside the navbar, which is data-bs-theme="dark" on every theme. */
 :root[data-bs-theme="dark"] .thumbnail-container {
     background-color: var(--bs-tertiary-bg);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
 }
 
 /* Drag and drop styles. An outline rather than a border, so the hovered
@@ -908,7 +907,7 @@ body.collection-select-mode .new-badge {
     border-radius: 8px;
     overflow: hidden;
     background-color: var(--bs-tertiary-bg);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--clu-cover-shadow);
     margin-bottom: 8px;
     display: flex;
     align-items: center;
