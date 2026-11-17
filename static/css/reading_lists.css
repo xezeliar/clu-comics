@@ -503,3 +503,10 @@ body.rl-issue-select #rlItems { margin-bottom: 5rem; }
 @media (pointer: coarse) {
     button.rl-role::before { content: ""; position: absolute; inset: -.6rem -.25rem; }
 }
+
+/* Folder tiles: a flex child only shrinks below its text width with
+   min-width:0, which is what lets .text-truncate clip a long folder name
+   (Bootstrap 5 has no min-w-0 utility). The right padding keeps the name
+   clear of the kebab menu. */
+.rl-folder-link { min-width: 0; padding-right: 2.5rem; }
+.rl-folder-text { min-width: 0; flex: 1 1 auto; }

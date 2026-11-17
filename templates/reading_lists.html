@@ -142,11 +142,11 @@ owner, so everything shows exactly as before. #}
         {% for f in subfolders %}
         <div class="col">
             <div class="card h-100 position-relative">
-                <a class="card-body d-flex align-items-center gap-2 text-decoration-none stretched-link"
+                <a class="card-body rl-folder-link d-flex align-items-center gap-2 text-decoration-none stretched-link"
                     href="{{ url_for('reading_lists.index', folder=f.id) }}">
                     <i class="bi bi-folder-fill fs-3 text-warning" aria-hidden="true"></i>
-                    <span class="min-w-0">
-                        <span class="d-block fw-semibold text-truncate">{{ f.name }}</span>
+                    <span class="rl-folder-text">
+                        <span class="d-block fw-semibold text-truncate" title="{{ f.name }}">{{ f.name }}</span>
                         <small class="text-body-secondary">{{ f.list_count }} list{{ '' if f.list_count == 1 else 's' }}{% if f.folder_count %} · {{ f.folder_count }} folder{{ '' if f.folder_count == 1 else 's' }}{% endif %}</small>
                     </span>
                 </a>
