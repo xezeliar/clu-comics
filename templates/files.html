@@ -19,6 +19,9 @@
 #}
 {% macro fm_pane(panel, label, lib) %}
 <section class="fm-pane" id="{{ panel }}-pane" data-panel="{{ panel }}" aria-label="{{ label }}">
+  {# Each pane has its own floating toolbar (places, path, search, letters) above
+     its list, so Source and Destination read as two separate tools. #}
+  <div class="fm-toolbar">
   <div class="fm-ph">
     <h2 class="fm-lbl">{{ label }}</h2>
     <div class="btn-group fm-places files-source-views" role="group" aria-label="{{ label }} place">
@@ -50,9 +53,12 @@
       <!-- CLU.letterBar draws the buttons (files.js updateFilterBar) -->
     </div>
   </div>
+  </div>
+  <div class="fm-body">
   <ul id="{{ panel }}-list" class="fm-list drop-target" role="grid" aria-multiselectable="true"
       aria-label="{{ label }} files" tabindex="0"></ul>
   <div class="fm-ft" id="{{ panel }}-footer" aria-live="polite"></div>
+  </div>
 </section>
 {% endmacro %}
 

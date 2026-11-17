@@ -591,7 +591,11 @@ a.clu-stat:focus-visible .clu-stat-value {
     margin-bottom: 1.5rem;
     padding: 0.75rem 1rem;
     background-color: var(--bs-tertiary-bg);
-    border-radius: var(--bs-border-radius-lg);
+    /* Floats like the navbar above it: a hairline edge for dark themes, where a
+       shadow has nothing to darken, and a soft shadow for light ones. */
+    border: 1px solid var(--bs-border-color);
+    border-radius: 1rem;
+    box-shadow: 0 0.375rem 1.5rem rgba(0, 0, 0, 0.08);
 }
 
 .clu-toolbar-row {
@@ -792,6 +796,72 @@ a.clu-stat:focus-visible .clu-stat-value {
     }
 
     body:has(#comicReaderModal[style*="display: flex"]) .clu-tabbar { display: none; }
+}
+
+/* ---- Navbar: a floating bar (header.html) ----------------------------------
+   The bar is the container inside the <nav>, on the theme's raised surface
+   (--bs-tertiary-bg) with a hairline edge and a soft shadow, the same surface
+   as .clu-toolbar. It used to be a full-width bg-primary slab with
+   data-bs-theme="dark"; it now reads the theme's own tokens, so a light and a
+   dark theme get the same bar and no per-theme rule has to paint it.
+   Text is the theme's ink on its raised surface, which every theme passes at
+   4.5:1 (core/themes.py PALETTES). The active item is a tint of the primary
+   plus bold weight and a bar in the link colour: never white-on-primary, which
+   fails on the Catppuccin flavours (their primary is light), and never the
+   primary fill alone, which is only about 2:1 against the bar on most dark
+   themes. nav.navbar.clu-navbar outranks the themes' own .navbar variables. */
+nav.navbar.clu-navbar {
+    --bs-navbar-color: var(--bs-body-color);
+    --bs-navbar-hover-color: var(--bs-emphasis-color);
+    --bs-navbar-active-color: var(--bs-emphasis-color);
+    --bs-navbar-brand-color: var(--bs-emphasis-color);
+    --bs-navbar-brand-hover-color: var(--bs-emphasis-color);
+    --bs-navbar-toggler-border-color: var(--bs-border-color);
+    --bs-navbar-padding-y: 0;
+    padding-top: calc(0.75rem + env(safe-area-inset-top, 0px));
+    padding-bottom: 0.75rem;
+    background: transparent !important;
+    border: 0 !important;
+}
+
+nav.navbar.clu-navbar > [class*="container"] {
+    width: calc(100% - 1.5rem);
+    padding: 0.5rem 0.75rem;
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 1rem;
+    box-shadow: 0 0.375rem 1.5rem rgba(0, 0, 0, 0.08);
+}
+
+.clu-navbar .navbar-brand {
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.clu-navbar .navbar-toggler {
+    color: var(--bs-body-color);
+}
+
+.clu-navbar .navbar-nav .nav-link {
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.625rem;
+}
+
+.clu-navbar .navbar-nav .nav-link:hover,
+.clu-navbar .navbar-nav .nav-link:focus-visible {
+    background-color: rgba(var(--bs-body-color-rgb), 0.08);
+}
+
+.clu-navbar .navbar-nav .nav-link.active {
+    background-color: var(--bs-primary-bg-subtle);
+    font-weight: 700;
+    box-shadow: inset 0 -3px 0 var(--bs-link-color);
+}
+
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+    .clu-navbar .navbar-nav .nav-link.active {
+        background-color: color-mix(in srgb, var(--bs-primary) 22%, transparent);
+    }
 }
 
 /* ── Home-screen web app ────────────────────────────────────────────────────

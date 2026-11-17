@@ -7,7 +7,10 @@
 {% set _nav_is_clerk = _nav_role in ['clerk', 'owner'] %}
 {% set _nav_is_owner = _nav_role == 'owner' %}
 
-<nav class="navbar navbar-expand-lg bg-primary navbar-dark" data-bs-theme="dark">
+{# A floating bar on the theme's raised surface (clu-page.css "Navbar"). It no
+   longer carries bg-primary or data-bs-theme="dark": it reads the theme's own
+   tokens, so every theme, light or dark, gets the same bar. #}
+<nav class="navbar navbar-expand-lg clu-navbar">
   <div class="{{ page_width_chrome(_shell) if _shell is defined else 'container-lg' }}">
     <a class="navbar-brand d-flex align-items-center" href="/">
       <img src="{{ url_for('static', filename='images/clu.png') }}" alt="CLU Logo" width="40" class="me-2">
@@ -16,7 +19,7 @@
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#cluNavbar"
       aria-controls="cluNavbar" aria-expanded="false" aria-label="Toggle navigation">
-      <span class="navbar-toggler-icon"></span>
+      <i class="bi bi-list fs-4" aria-hidden="true"></i>
     </button>
 
     <div class="collapse navbar-collapse" id="cluNavbar">

@@ -108,8 +108,8 @@ components:
     rounded: "{rounded.round}"
     size: "32px"
   navbar:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.body-bg}"
+    backgroundColor: "{colors.tertiary-bg}"
+    textColor: "{colors.body-color}"
 ---
 
 # Design System: Comic Library Utilities (CLU)
@@ -136,7 +136,7 @@ Two looks are rejected outright. CLU is not a **generic SaaS dashboard** (gradie
 The palette is borrowed: Bootstrap's semantic roles, filled in by whichever theme the user picked, plus a small set of fixed colours that only ever appear on top of cover art or inside the reader.
 
 ### Primary
-- **Theme Primary** (`--bs-primary`): the header navbar fill, primary actions (one per view), active nav and pagination state, selection tint (`rgba(var(--bs-primary-rgb), 0.15)`). It is the theme's accent and the only accent the chrome uses.
+- **Theme Primary** (`--bs-primary`): the navbar's active-item tint, primary actions (one per view), active nav and pagination state, selection tint (`rgba(var(--bs-primary-rgb), 0.15)`). It is the theme's accent and the only accent the chrome uses.
 
 ### Secondary
 - **Theme Secondary** (`--bs-secondary`): the workhorse outline buttons in toolbars, filter bars and pagers. Most buttons in CLU are `btn-outline-secondary`.
@@ -164,7 +164,7 @@ The palette is borrowed: Bootstrap's semantic roles, filled in by whichever them
 
 **Publisher dots are a named exception to the Sticker Exception.** One fixed colour is allowed on the themed page: the publisher's house colour, from the fixed table in `core/publishers.py` (about a dozen houses; any other publisher gets no dot, never a hashed colour). Colour is identity, never the only signal: the name is always written beside the dot, and the dot carries a faint ring in the page ink so black and white houses show on every theme. The Appearance switch `appearance_publisher_dots` hides them.
 
-**The Fill-and-Text Rule.** Themes drive `.bg-x` and `.text-x` from one variable, and templates put white text on fills and coloured text on the page. Never key a rule on a bare `[data-bs-theme=dark]`: the navbar carries that attribute on every theme, Latte included. A page rule that truly must differ on dark themes uses `:root[data-bs-theme="dark"]`; local theme files never branch on it at all.
+**The Fill-and-Text Rule.** Themes drive `.bg-x` and `.text-x` from one variable, and templates put white text on fills and coloured text on the page. Never key a rule on a bare `[data-bs-theme=dark]`: it is how Bootstrap marks a dark subtree, and dark-only styling must use `:root[data-bs-theme="dark"]`. A page rule that truly must differ on dark themes uses `:root[data-bs-theme="dark"]`; local theme files never branch on it at all.
 
 **The Selection Rule.** Selected and drop-target covers use `--clu-select` (the theme primary pushed 30% toward `--bs-emphasis-color`, defined in `collection.css`), so a muted primary still marks a selection clearly and carries a white check.
 
@@ -195,7 +195,7 @@ The palette is borrowed: Bootstrap's semantic roles, filled in by whichever them
 
 ## Layout
 
-Pages sit under a full-width navbar, with a sticky footer (`body.d-flex.flex-column.min-vh-100`). The standard page is: page header, a toolbar of filters and search, then content.
+Pages sit under a floating navbar, with a sticky footer (`body.d-flex.flex-column.min-vh-100`). The standard page is: page header, a toolbar of filters and search, then content.
 
 **The Shell Rule.** `base.html` owns the page width and top rhythm: it wraps every page's content in `.clu-shell.container-lg` (1.5rem above, 2.5rem below). A page never adds its own outer container, vertical padding or `max-width`. Cover grids (Home/Collection, Library, Source Wall, Releases, To Read) override `{% block page_shell %}` to `container-fluid clu-shell-wide`, whose side gutter grows with the screen. Nothing else is full width. `tests/unit/test_page_header.py` holds both lists.
 
@@ -205,7 +205,7 @@ Breakpoints are Bootstrap's (576 / 768 / 992 / 1200 / 1400px). The navbar collap
 
 ## Elevation & Depth
 
-Flat by default. Surfaces lie on the page with Bootstrap borders and the theme's tonal steps (`--bs-tertiary-bg`). Depth appears in two places: as a response to hover on things you can open, and under real overlays. The reader goes further, with a black backdrop that takes over the screen.
+Flat by default. Surfaces lie on the page with Bootstrap borders and the theme's tonal steps (`--bs-tertiary-bg`). Depth appears in three places: as a response to hover on things you can open, under real overlays, and in the page chrome (the navbar and the list toolbar), which float on a soft shadow and a hairline edge. The reader goes further, with a black backdrop that takes over the screen.
 
 ### Shadow Vocabulary
 - **Cover rest** (`box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1)`): the barely-there edge that separates a cover from the page.
@@ -261,7 +261,7 @@ Small fixed-colour labels pinned 8px in from a cover's corners, like price stick
 
 ### Filters, search and pagers
 A list's toolbar is built from shared parts, never by hand: Jinja macros in `templates/partials/filters.html`, their script twins in `static/js/clu-filters.js`, and one page bar in `static/js/clu-pager.js`. All three scripts load on every page from `base.html`. `tests/unit/test_shared_filters.py` is the ratchet.
-- **The toolbar** (`toolbar()`, a call block): every list's controls sit in one flat panel straight after the page header, on `--bs-tertiary-bg` with the large radius, no border, no shadow and 1.5rem below. It is never a `.card`, never two panels, and has no divider lines inside. Rows (`.clu-toolbar-row`) always come in the same order:
+- **The toolbar** (`toolbar()`, a call block): every list's controls sit in one flat panel straight after the page header, on `--bs-tertiary-bg` with a 1rem radius, a `--bs-border-color` hairline, a soft shadow and 1.5rem below, so it floats like the navbar above it. It is never a `.card`, never two panels, and has no divider lines inside. Rows (`.clu-toolbar-row`) always come in the same order:
   1. **Controls:** search first, then selects and segmented controls (axis, library). Then `.clu-toolbar-end`, pushed right, holding the result count (`.clu-toolbar-count`), mode buttons (Multi-Select, Refresh), the view toggle and Per page, in that order.
   2. **One row per filter bar**, each with a short plain label (Status, Source, Tags, Sort). Labels have no icons and line up in one column.
   3. **The letter bar**, always last.
@@ -279,7 +279,7 @@ A list's toolbar is built from shared parts, never by hand: Jinja macros in `tem
 - **Page sizes:** one set everywhere, 24 / 60 / 120 / 240 (`helpers/paging.py`, rendered by `per_page_select`). Each size fills whole rows of the cover grid at 2, 3, 4 and 6 columns. Lists open on 60, and Collection on 24. A size remembered under an older set is moved to the nearest size, not reset.
 
 ### Navigation
-- **Navbar:** full-width, `bg-primary` with `data-bs-theme="dark"` on every theme, logo plus "CLU" wordmark at left, items right-aligned, collapsing below `lg`.
+- **Navbar:** a floating bar (`.clu-navbar`), not a full-width slab: the container inside the `<nav>` sits on `--bs-tertiary-bg` with a `--bs-border-color` hairline, a 1rem radius and a soft shadow, the same surface as the toolbar below it. It reads the theme's own tokens and no longer carries `bg-primary` or `data-bs-theme="dark"`. Logo plus "CLU" wordmark at left, items right-aligned, collapsing below `lg`. The active item is a tint of `--bs-primary` with bold weight and a 3px bar in `--bs-link-color`: never white-on-primary (fails on Catppuccin, whose primary is light) and never the primary fill alone (about 2:1 against the bar on most dark themes).
 - **Grouping:** dropdowns gather related pages (Home: Library, Source Wall; Pull List: Releases, Wanted, Publishers, Status). Items are role-gated, so Readers see fewer.
 - **State:** `.active` on the current item and its parent dropdown. Counts sit as pills on the item's top-right corner: warning for watched files, danger for failed downloads.
 - **Active Operations:** a spinning warning-coloured icon with a count, opening a dropdown of progress rows (6px bars, ellipsised label and detail).

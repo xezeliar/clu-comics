@@ -42,20 +42,46 @@
     gap: 1rem;
 }
 
+/* A pane is two things: its own floating toolbar (.fm-toolbar: places, path,
+   search, letters) and the list under it (.fm-body). Source and Destination
+   each have both, so they read as two separate tools, not one box. */
 .fm-pane {
-    border: 1px solid var(--bs-border-color);
-    border-radius: var(--bs-border-radius-lg);
-    background: var(--bs-body-bg);
     display: flex;
     flex-direction: column;
+    gap: .75rem;
     min-width: 0;
+}
+
+/* Same surface as .clu-toolbar and the navbar (clu-page.css). */
+.fm-toolbar {
+    padding: .25rem 0 .1rem;
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 1rem;
+    box-shadow: 0 .375rem 1.5rem rgba(0, 0, 0, .08);
     transition: border-color .15s, box-shadow .15s;
 }
 
-/* The pane the keyboard shortcuts and the bar act on. */
-.fm-pane.is-active {
+.fm-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    background: var(--bs-body-bg);
+    overflow: hidden;
+    transition: border-color .15s, box-shadow .15s;
+}
+
+/* The pane the keyboard shortcuts and the bar act on: its list gets the ring,
+   and its toolbar the edge, so the active pane is clear at a glance. */
+.fm-pane.is-active .fm-body {
     border-color: var(--clu-select);
     box-shadow: 0 0 0 1px var(--clu-select);
+}
+
+.fm-pane.is-active .fm-toolbar {
+    border-color: var(--clu-select);
 }
 
 .fm-ph {
@@ -454,9 +480,14 @@
         display: none;
     }
 
-    .fm-pane.is-active {
+    .fm-pane.is-active .fm-body,
+    .fm-pane.is-active .fm-toolbar {
         border-color: var(--bs-border-color);
         box-shadow: none;
+    }
+
+    .fm-pane.is-active .fm-toolbar {
+        box-shadow: 0 .375rem 1.5rem rgba(0, 0, 0, .08);
     }
 
     .fm-lbl {
@@ -560,7 +591,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .fm-pane,
+    .fm-toolbar,
+    .fm-body,
     .fm-row,
     .fm-ck {
         transition: none;
