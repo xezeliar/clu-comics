@@ -108,3 +108,21 @@ def test_toolbar_navigation_buttons_are_quiet_link_pills():
     block = block[:block.index("}")]
     assert "--bs-btn-color: var(--bs-link-color)" in block
     assert "--bs-btn-border-color: transparent" in block
+
+
+def test_file_manager_place_switcher_is_segmented_including_its_nested_dropdown():
+    html = read("templates", "files.html")
+    assert 'class="btn-group clu-seg fm-places files-source-views"' in html
+    css = read("static", "css", "clu-page.css")
+    assert ".btn-group.clu-seg > .btn-group > .btn" in css
+
+
+def test_lone_toolbar_action_buttons_are_pills_but_grouped_ones_keep_corners():
+    css = read("static", "css", "clu-page.css")
+    block = css[css.index(".clu-toolbar-row > .btn,"):]
+    block = block[:block.index("}")]
+    for sel in (".clu-toolbar-row > .dropdown > .btn", ".clu-toolbar-end > .btn"):
+        assert sel in block
+    assert "border-radius: var(--bs-border-radius-pill)" in block
+    # Never a bare descendant selector: that would round the joined groups too.
+    assert ".clu-toolbar .btn {" not in css
