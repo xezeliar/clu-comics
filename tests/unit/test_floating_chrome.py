@@ -96,3 +96,15 @@ def test_filters_and_letters_are_pills_and_the_count_is_a_chip():
     count = css[css.index("\n.clu-toolbar-count {"):]
     count = count[:count.index("}")]
     assert "border-radius: var(--bs-border-radius-pill)" in count
+
+
+def test_toolbar_navigation_buttons_are_quiet_link_pills():
+    html = read("templates", "collection.html")
+    for ident in ("folderViewBtn", "allBooksBtn", "missingXmlBtn", "rescanMissingXmlBtn"):
+        tag = html[html.rindex("<button", 0, html.index(f'id="{ident}"')):html.index(f'id="{ident}"')]
+        assert "clu-nav-btn" in tag, ident
+    css = read("static", "css", "clu-page.css")
+    block = css[css.index(".btn.clu-nav-btn {"):]
+    block = block[:block.index("}")]
+    assert "--bs-btn-color: var(--bs-link-color)" in block
+    assert "--bs-btn-border-color: transparent" in block
