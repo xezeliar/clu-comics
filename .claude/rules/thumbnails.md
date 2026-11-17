@@ -265,6 +265,31 @@ upload). Things that look arbitrary and are not:
 
 Tests: `tests/unit/test_custom_covers.py`, `tests/routes/test_custom_covers_routes.py`.
 
+### Hero covers (Home)
+
+The Home hero needs a cover far sharper than the 300px grid thumbnail, which goes
+soft when stretched. `core/hero_cover.py` serves the **same first page at 720px**
+from its own cache, `CACHE_DIR/hero_covers/<shard>/<md5(path)>.jpg`, through
+`GET /api/hero-cover?path=` (`routes/collection.py`). Things that look arbitrary
+and are not:
+
+- **It does not touch the thumbnail cache, its `thumbnail_jobs` rows or its
+  in-flight guard.** One image is built synchronously on first request; there is
+  nothing to queue. It extends the one page reader (`_first_page(height=)`,
+  `_render(height=)`) rather than copying it, so the "do not inline a tenth copy"
+  rule above still holds.
+- **It never upscales** (`Image.thumbnail` only shrinks), so a small page is
+  served at its own size.
+- **Same staleness rule as the thumbnail** (`is_thumbnail_stale`: comic mtime >
+  cover mtime, "cannot tell" serves what exists), because the key is the path.
+- **Confined before anything is opened:** `is_allowed_path` (realpath) first, so
+  a path outside every root is a 404 that opens nothing, then the user's grant.
+- **404 means "no cover", not an error.** The page's `img.onerror` falls back to
+  `/api/thumbnail`. Do not return the thumbnail from this route.
+- `/cache` shards sit at depth 2, inside the bounded chown walk in `entrypoint.sh`.
+
+Tests: `tests/routes/test_hero_cover_routes.py`, `tests/unit/test_featured_hero.py`.
+
 Both recursive sweeps (`/api/generate-all-missing-thumbnails` and
 `/api/regenerate-all-thumbnails`, in `routes/collection.py`) run on a background
 thread and report through the `core/app_state.py` operations registry. They must

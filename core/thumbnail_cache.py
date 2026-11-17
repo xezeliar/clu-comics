@@ -229,8 +229,9 @@ def _sorted_page_names(names):
     )
 
 
-def _render(image_file):
-    """Resize an open page stream to the cache's standard size."""
+def _render(image_file, height=THUMBNAIL_HEIGHT):
+    """Resize an open page stream to ``height`` px tall (the cache's standard
+    size by default). Only ever shrinks: a page smaller than ``height`` is kept."""
     from PIL import Image
 
     img = Image.open(image_file)
@@ -238,7 +239,7 @@ def _render(image_file):
         img = img.convert("RGB")
     aspect_ratio = img.width / img.height
     img.thumbnail(
-        (int(THUMBNAIL_HEIGHT * aspect_ratio), THUMBNAIL_HEIGHT),
+        (int(height * aspect_ratio), height),
         Image.Resampling.LANCZOS,
     )
     # Decode before the caller closes the archive. PIL is lazy, and thumbnail()
@@ -249,7 +250,7 @@ def _render(image_file):
     return img
 
 
-def _first_page(file_path):
+def _first_page(file_path, height=THUMBNAIL_HEIGHT):
     """Open the first page of a comic and return it as a resized PIL image.
 
     Returns None when the archive holds no pages or the type is unsupported.
@@ -265,7 +266,7 @@ def _first_page(file_path):
             if not pages:
                 return None
             with zf.open(pages[0]) as page:
-                return _render(page)
+                return _render(page, height)
 
     if lowered.endswith((".cbr", ".rar")):
         import rarfile
@@ -275,7 +276,7 @@ def _first_page(file_path):
             if not pages:
                 return None
             with rf.open(pages[0]) as page:
-                return _render(page)
+                return _render(page, height)
 
     app_logger.warning(f"Unsupported file type for thumbnail: {file_path}")
     return None

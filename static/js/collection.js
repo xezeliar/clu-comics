@@ -5085,92 +5085,118 @@ async function loadContinueReadingSwiper() {
 }
 
 /**
- * Featured hero: the top next-up issue as a large cover with Read Now / Save.
- * Stays hidden when nothing is on the stack.
+ * Featured hero on Home: one issue as a sharp cover beside its title, on a
+ * blurred copy of the same cover. The issue is the first that exists of:
+ *   1. On the Stack (the next unread issue of what you read most recently),
+ *   2. Continue Reading (the comic you left mid-way),
+ *   3. the newest comic added to the library.
+ * Stays hidden when none exists. The cover is /api/hero-cover (720px tall);
+ * the 300px thumbnail is only the fallback when no large cover can be made.
  */
 async function loadFeaturedHero() {
     const hero = document.getElementById('featuredHero');
     if (!hero) return;
-    try {
-        const response = await fetch('/api/on-the-stack?limit=1');
-        const data = await response.json();
-        const item = data.success && data.items && data.items[0];
-        if (!item) return;
 
-        const cover = `/api/thumbnail?path=${encodeURIComponent(item.file_path)}`;
-        const issue = item.issue_number ? ` #${item.issue_number}` : '';
-        const title = `${item.series_name || item.file_name}${issue}`;
-
-        hero.textContent = '';
-        const card = document.createElement('div');
-        card.className = 'featured-hero-card';
-        const bg = document.createElement('div');
-        bg.className = 'featured-hero-bg';
-        bg.style.backgroundImage = `url("${cover}")`;
-        const body = document.createElement('div');
-        body.className = 'featured-hero-body';
-
-        const label = document.createElement('span');
-        label.className = 'featured-hero-label';
-        label.textContent = item.reading_list_name ? `Up next \u00b7 ${item.reading_list_name}` : 'Up next';
-        const h = document.createElement('h2');
-        h.className = 'featured-hero-title';
-        h.textContent = title;
-        body.append(label, h);
-
-        if (item.description) {
-            const p = document.createElement('p');
-            p.className = 'featured-hero-desc';
-            p.textContent = item.description;
-            body.append(p);
+    const getJson = async (url) => {
+        try {
+            const r = await fetch(url);
+            return r.ok ? await r.json() : null;
+        } catch (e) {
+            return null;
         }
+    };
+    const stripExt = (name) => (name || '').replace(/\.(cbz|cbr|zip|rar|pdf)$/i, '');
 
-        const actions = document.createElement('div');
-        actions.className = 'featured-hero-actions';
-        const read = document.createElement('button');
-        read.type = 'button';
-        read.className = 'btn btn-light rounded-pill';
-        read.textContent = 'Read Now';
-        read.onclick = () => openReaderForFile(item.file_path);
-        const save = document.createElement('button');
-        save.type = 'button';
-        save.className = 'btn btn-outline-light rounded-pill';
-        save.innerHTML = '<i class="bi bi-plus-lg me-1" aria-hidden="true"></i><span>Save</span>';
-        const paintSave = (marked) => {
-            save.classList.toggle('marked', marked);
-            save.querySelector('i').className = (marked ? 'bi bi-check-lg' : 'bi bi-plus-lg') + ' me-1';
-            save.querySelector('span').textContent = marked ? 'Saved' : 'Save';
+    let pick = null;
+    const stack = await getJson('/api/on-the-stack?limit=1');
+    const s0 = stack && stack.success && stack.items && stack.items[0];
+    if (s0) {
+        pick = {
+            path: s0.file_path,
+            title: s0.series_name || stripExt(s0.file_name),
+            issue: s0.issue_number,
+            description: s0.description,
+            label: 'Up next',
+            context: s0.reading_list_name || ''
         };
-        save.onclick = async () => {
-            const marked = save.classList.contains('marked');
-            paintSave(!marked);
-            try {
-                const r = await fetch('/api/favorites/to-read', {
-                    method: marked ? 'DELETE' : 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: item.file_path, type: 'file' })
-                });
-                const d = await r.json();
-                if (!d.success) throw new Error(d.error || 'Unknown error');
-                CLU.showSuccess(marked ? `${title} removed from To Read` : `${title} added to To Read`);
-            } catch (e) {
-                paintSave(marked);
-                CLU.showError('Failed to update To Read: ' + e.message);
-            }
-        };
-        actions.append(read, save);
-        body.append(actions);
-        card.append(bg, body);
-        hero.append(card);
-        hero.style.display = '';
-
-        fetch(`/api/favorites/to-read/check?path=${encodeURIComponent(item.file_path)}`)
-            .then(r => r.json())
-            .then(d => { if (d && d.is_to_read) paintSave(true); })
-            .catch(() => { });
-    } catch (error) {
-        console.error('Error loading featured hero:', error);
     }
+    if (!pick) {
+        const cont = await getJson('/api/continue-reading?limit=1');
+        const c0 = cont && cont.success && cont.items && cont.items[0];
+        if (c0) {
+            pick = {
+                path: c0.comic_path,
+                title: stripExt(c0.file_name),
+                label: 'Continue reading',
+                progress: c0.progress_percent
+            };
+        }
+    }
+    if (!pick) {
+        const recent = await getJson('/list-recent-files?limit=1');
+        const r0 = recent && recent.success && recent.files && recent.files[0];
+        if (r0) {
+            pick = { path: r0.file_path, title: stripExt(r0.file_name), label: 'New in your library' };
+        }
+    }
+    if (!pick || !pick.path) return;
+
+    const cover = `/api/hero-cover?path=${encodeURIComponent(pick.path)}`;
+    const thumb = `/api/thumbnail?path=${encodeURIComponent(pick.path)}`;
+    const el = (tag, cls, text) => {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text !== undefined) n.textContent = text;
+        return n;
+    };
+
+    const card = el('div', 'featured-hero-card');
+    const bg = el('div', 'featured-hero-bg');
+    bg.setAttribute('aria-hidden', 'true');
+    const scrim = el('div', 'featured-hero-scrim');
+    scrim.setAttribute('aria-hidden', 'true');
+
+    const img = document.createElement('img');
+    img.className = 'featured-hero-cover';
+    img.alt = '';
+    img.decoding = 'async';
+    // The large cover first; a 404 means none could be built, so use the thumbnail.
+    img.onerror = () => {
+        img.onerror = null;
+        img.src = thumb;
+        bg.style.backgroundImage = `url("${thumb}")`;
+    };
+    img.src = cover;
+    bg.style.backgroundImage = `url("${cover}")`;
+
+    const body = el('div', 'featured-hero-body');
+    const meta = el('div', 'featured-hero-meta');
+    meta.append(el('span', 'featured-hero-label', pick.label));
+    if (pick.context) meta.append(el('span', 'featured-hero-context', pick.context));
+    const h = el('h2', 'featured-hero-title', pick.title);
+    if (pick.issue) h.append(' ', el('span', 'featured-hero-issue', `#${pick.issue}`));
+    body.append(meta, h);
+
+    if (pick.description) {
+        body.append(el('p', 'featured-hero-desc', pick.description));
+    }
+    if (pick.progress) {
+        const bar = el('div', 'featured-hero-progress');
+        const fill = el('div', 'featured-hero-progress-fill');
+        fill.style.width = `${Math.max(0, Math.min(100, pick.progress))}%`;
+        bar.append(fill);
+        body.append(bar);
+    }
+
+    const read = el('button', 'btn btn-light btn-lg rounded-pill featured-hero-read', 'Read Now');
+    read.type = 'button';
+    read.onclick = () => openReaderForFile(pick.path);
+    body.append(read);
+
+    card.append(bg, scrim, img, body);
+    hero.textContent = '';
+    hero.append(card);
+    hero.style.display = '';
 }
 
 /**

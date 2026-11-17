@@ -19,7 +19,8 @@ import traceback
 from io import BytesIO
 from datetime import datetime, timedelta
 from flask import (Blueprint, request, jsonify, render_template, redirect,
-                   url_for, flash, send_file, current_app)
+                   url_for, flash, send_file, send_from_directory,
+                   current_app)
 from PIL import Image
 from core.app_logging import app_logger
 from core.metadata_normalize import strip_provider_ids
@@ -2105,3 +2106,38 @@ def generate_all_missing_thumbnails():
 def regenerate_all_thumbnails():
     """Rebuild art for every subfolder, destroying any existing folder image."""
     return _start_thumbnail_sweep(regenerate_all=True)
+
+
+@collection_bp.route('/api/hero-cover')
+def hero_cover():
+    """A large cover for the Home hero (core/hero_cover.py).
+
+    The per-comic thumbnail is 300px tall and goes soft when stretched across a
+    hero card, so this serves the same first page at 720px from its own cache.
+    Confined before anything is opened, in the order /api/folder-thumbnail uses:
+    the path must lie in an allowed root (realpath, so a symlink out is refused),
+    and the user must hold a grant on it. A path that is not allowed is
+    indistinguishable from one that does not exist. 404 means "no cover": the
+    page falls back to the small thumbnail.
+    """
+    from core.hero_cover import ensure_hero_cover
+
+    path = request.args.get('path')
+    if not path:
+        return jsonify({"error": "Missing path"}), 400
+    if not is_allowed_path(path):
+        return jsonify({"error": "Not found"}), 404
+    denied = enforce_path_access(path)
+    if denied:
+        return denied
+    cover = ensure_hero_cover(path)
+    if not cover:
+        return jsonify({"error": "Not found"}), 404
+    try:
+        return send_from_directory(os.path.dirname(cover), os.path.basename(cover),
+                                   max_age=3600)
+    except OSError:
+        # Cached but unreadable (a root-owned file under a PUID start): the next
+        # request rebuilds it, as /api/thumbnail does.
+        app_logger.warning(f"Hero cover {cover} is not readable")
+        return jsonify({"error": "Not found"}), 404

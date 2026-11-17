@@ -1240,23 +1240,41 @@ body.collection-select-mode .grid-item.file {
     display: flex; align-items: center; justify-content: center;
 }
 
-/* Featured hero (Home): big cover, title, blurb, Read Now / Save. Theme-neutral:
-   text sits on a dark scrim over the cover, so it is white on every theme. */
-.featured-hero-card { position: relative; overflow: hidden; border-radius: 1.25rem;
-    min-height: 22rem; display: flex; align-items: flex-end; background: #111; color: #fff; }
-.featured-hero-bg { position: absolute; inset: 0; background-size: cover;
-    background-position: center top; }
-.featured-hero-card::before { content: ""; position: absolute; inset: 0; z-index: 1;
-    background: linear-gradient(to top, rgba(0,0,0,.92) 0%, rgba(0,0,0,.55) 45%, rgba(0,0,0,0) 80%); }
-.featured-hero-body { position: relative; z-index: 2; width: 100%; padding: 1.5rem;
-    text-align: center; }
-.featured-hero-label { display: inline-block; font-size: .75rem; letter-spacing: .08em;
-    text-transform: uppercase; border: 1px solid rgba(255,255,255,.8); border-radius: .25rem;
-    padding: .1rem .45rem; }
-.featured-hero-title { margin: .5rem 0 .25rem; font-weight: 700; }
-.featured-hero-desc { max-width: 40rem; margin: 0 auto .75rem; opacity: .9;
-    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+/* Featured hero (Home): a sharp cover beside the title, on a blurred copy of
+   the same cover. The text sits on a dark scrim over the blur, so it is white on
+   every theme, and the blur hides the softness of any small cover. */
+.featured-hero-card { position: relative; overflow: hidden; border-radius: 1.5rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2.5rem;
+    padding: 2.5rem 3rem; background: #14122b; color: #fff;
+    box-shadow: 0 1.125rem 2.5rem rgba(20, 18, 43, .28); }
+.featured-hero-bg { position: absolute; inset: -2.5rem; background-size: cover;
+    background-position: center; filter: blur(2.25rem); transform: scale(1.1); }
+.featured-hero-scrim { position: absolute; inset: 0; background: rgba(8, 7, 20, .58); }
+.featured-hero-cover { position: relative; flex: 0 0 auto; width: 15rem; max-width: 100%;
+    aspect-ratio: 2 / 3; object-fit: cover; border-radius: .625rem; background: #1b1930;
+    box-shadow: 0 1.375rem 2.75rem rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .12); }
+.featured-hero-body { position: relative; flex: 1 1 22rem; min-width: 0;
+    display: flex; flex-direction: column; align-items: flex-start; gap: .75rem; }
+.featured-hero-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .625rem; }
+.featured-hero-label { font-size: .75rem; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; background: #fff; color: #14122b; border-radius: .375rem;
+    padding: .25rem .625rem; }
+.featured-hero-context { font-size: .875rem; color: rgba(255, 255, 255, .9); }
+.featured-hero-title { margin: 0; font-size: clamp(1.75rem, 4vw, 2.875rem); font-weight: 800;
+    line-height: 1.05; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.featured-hero-issue { font-weight: 500; color: rgba(255, 255, 255, .8); }
+.featured-hero-desc { margin: 0; max-width: 36rem; font-size: 1.0625rem; line-height: 1.5;
+    color: rgba(255, 255, 255, .93);
+    display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical;
     overflow: hidden; }
-.featured-hero-actions { display: flex; gap: .75rem; justify-content: center; }
-.featured-hero-actions .btn { min-width: 9rem; }
-@media (min-width: 768px) { .featured-hero-card { min-height: 26rem; } }
+.featured-hero-progress { width: 11.25rem; height: 4px; border-radius: 2px;
+    background: rgba(255, 255, 255, .28); }
+.featured-hero-progress-fill { height: 100%; border-radius: 2px; background: #fff; }
+.featured-hero-read { min-width: 11rem; margin-top: .5rem; font-weight: 700; }
+@media (max-width: 575.98px) {
+    .featured-hero-card { padding: 1.5rem 1.125rem; gap: 1rem; justify-content: center; text-align: center; }
+    .featured-hero-cover { width: 12.5rem; }
+    .featured-hero-body { align-items: center; flex-basis: 100%; }
+    .featured-hero-meta { justify-content: center; }
+    .featured-hero-read { width: 100%; }
+}
