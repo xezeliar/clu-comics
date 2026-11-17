@@ -1278,3 +1278,39 @@ body.collection-select-mode .grid-item.file {
     .featured-hero-meta { justify-content: center; }
     .featured-hero-read { width: 100%; }
 }
+
+/* Carousel (more than one slide). The carousel owns the rounded corners and the
+   shadow, because the track scrolls and would clip a card's own shadow. There is
+   no autoplay: swipe, the dots, the arrows and the arrow keys move it. */
+.featured-hero-carousel { position: relative; border-radius: 1.5rem; overflow: hidden;
+    box-shadow: 0 1.125rem 2.5rem rgba(20, 18, 43, .28); }
+.featured-hero-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain; scrollbar-width: none; }
+.featured-hero-track::-webkit-scrollbar { display: none; }
+.featured-hero-track:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+.featured-hero-track > .featured-hero-card { flex: 0 0 100%; min-width: 0;
+    scroll-snap-align: start; scroll-snap-stop: always; border-radius: 0; box-shadow: none;
+    padding-bottom: 3.75rem; }
+.featured-hero-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+    width: 2.75rem; height: 2.75rem; display: inline-flex; align-items: center;
+    justify-content: center; padding: 0; border-radius: 50%; color: #fff; font-size: 1.125rem;
+    background: rgba(8, 7, 20, .55); border: 1px solid rgba(255, 255, 255, .45); }
+.featured-hero-arrow:hover:not(:disabled) { background: rgba(8, 7, 20, .8); }
+.featured-hero-arrow:focus-visible, .featured-hero-dot:focus-visible {
+    outline: 2px solid #fff; outline-offset: 2px; }
+.featured-hero-arrow:disabled { opacity: .35; }
+.featured-hero-prev { left: 1rem; }
+.featured-hero-next { right: 1rem; }
+.featured-hero-dots { position: absolute; z-index: 2; bottom: .5rem; right: 1.25rem;
+    display: flex; align-items: center; }
+/* 44px touch target around an 8px dot; the current one is a 26px bar. */
+.featured-hero-dot { width: 2.75rem; height: 2.75rem; padding: 0; border: 0; background: none;
+    display: inline-flex; align-items: center; justify-content: center; }
+.featured-hero-dot > span { display: block; width: .5rem; height: .5rem; border-radius: .25rem;
+    background: rgba(255, 255, 255, .55); transition: width .2s; }
+.featured-hero-dot[aria-current] > span { width: 1.625rem; background: #fff; }
+@media (prefers-reduced-motion: reduce) { .featured-hero-dot > span { transition: none; } }
+@media (max-width: 575.98px) {
+    .featured-hero-arrow { display: none; }
+    .featured-hero-dots { left: 0; right: 0; justify-content: center; }
+}

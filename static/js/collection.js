@@ -5085,14 +5085,23 @@ async function loadContinueReadingSwiper() {
 }
 
 /**
- * Featured hero on Home: one issue as a sharp cover beside its title, on a
- * blurred copy of the same cover. The issue is the first that exists of:
+ * Featured hero on Home: up to HERO_MAX issues as a swipeable carousel. Each
+ * slide is a sharp cover beside its title, on a blurred copy of the same cover.
+ * The slides are filled in this order, without repeating a comic:
  *   1. On the Stack (the next unread issue of what you read most recently),
- *   2. Continue Reading (the comic you left mid-way),
- *   3. the newest comic added to the library.
- * Stays hidden when none exists. The cover is /api/hero-cover (720px tall);
- * the 300px thumbnail is only the fallback when no large cover can be made.
+ *   2. Continue Reading (comics you left mid-way),
+ *   3. the newest comics added to the library.
+ * Stays hidden when none exists; a single comic is a plain card with no controls.
+ *
+ * There is deliberately NO auto-advance: a slide that changes while you are
+ * deciding is a misclick waiting to happen, and moving content needs a pause
+ * control and reduced-motion handling for no benefit here. Swipe, the dots, the
+ * arrows and the arrow keys move it. Covers are /api/hero-cover (720px tall) and
+ * are fetched only for the slide on screen and the next one; the 300px thumbnail
+ * is only the fallback when no large cover can be made.
  */
+const HERO_MAX = 5;
+
 async function loadFeaturedHero() {
     const hero = document.getElementById('featuredHero');
     if (!hero) return;
@@ -5107,42 +5116,40 @@ async function loadFeaturedHero() {
     };
     const stripExt = (name) => (name || '').replace(/\.(cbz|cbr|zip|rar|pdf)$/i, '');
 
-    let pick = null;
-    const stack = await getJson('/api/on-the-stack?limit=1');
-    const s0 = stack && stack.success && stack.items && stack.items[0];
-    if (s0) {
-        pick = {
-            path: s0.file_path,
-            title: s0.series_name || stripExt(s0.file_name),
-            issue: s0.issue_number,
-            description: s0.description,
-            label: 'Up next',
-            context: s0.reading_list_name || ''
-        };
-    }
-    if (!pick) {
-        const cont = await getJson('/api/continue-reading?limit=1');
-        const c0 = cont && cont.success && cont.items && cont.items[0];
-        if (c0) {
-            pick = {
-                path: c0.comic_path,
-                title: stripExt(c0.file_name),
-                label: 'Continue reading',
-                progress: c0.progress_percent
-            };
-        }
-    }
-    if (!pick) {
-        const recent = await getJson('/list-recent-files?limit=1');
-        const r0 = recent && recent.success && recent.files && recent.files[0];
-        if (r0) {
-            pick = { path: r0.file_path, title: stripExt(r0.file_name), label: 'New in your library' };
-        }
-    }
-    if (!pick || !pick.path) return;
+    const [stack, cont, recent] = await Promise.all([
+        getJson(`/api/on-the-stack?limit=${HERO_MAX}`),
+        getJson(`/api/continue-reading?limit=${HERO_MAX}`),
+        getJson(`/list-recent-files?limit=${HERO_MAX}`)
+    ]);
 
-    const cover = `/api/hero-cover?path=${encodeURIComponent(pick.path)}`;
-    const thumb = `/api/thumbnail?path=${encodeURIComponent(pick.path)}`;
+    const picks = [];
+    const seen = new Set();
+    const add = (pick) => {
+        if (!pick.path || seen.has(pick.path) || picks.length >= HERO_MAX) return;
+        seen.add(pick.path);
+        picks.push(pick);
+    };
+    ((stack && stack.success && stack.items) || []).forEach(i => add({
+        path: i.file_path,
+        title: i.series_name || stripExt(i.file_name),
+        issue: i.issue_number,
+        description: i.description,
+        label: 'Up next',
+        context: i.reading_list_name || ''
+    }));
+    ((cont && cont.success && cont.items) || []).forEach(i => add({
+        path: i.comic_path,
+        title: stripExt(i.file_name),
+        label: 'Continue reading',
+        progress: i.progress_percent
+    }));
+    ((recent && recent.success && recent.files) || []).forEach(i => add({
+        path: i.file_path,
+        title: stripExt(i.file_name),
+        label: 'New in your library'
+    }));
+    if (!picks.length) return;
+
     const el = (tag, cls, text) => {
         const n = document.createElement(tag);
         if (cls) n.className = cls;
@@ -5150,53 +5157,145 @@ async function loadFeaturedHero() {
         return n;
     };
 
-    const card = el('div', 'featured-hero-card');
-    const bg = el('div', 'featured-hero-bg');
-    bg.setAttribute('aria-hidden', 'true');
-    const scrim = el('div', 'featured-hero-scrim');
-    scrim.setAttribute('aria-hidden', 'true');
+    const buildSlide = (pick, index) => {
+        const card = el('div', 'featured-hero-card');
+        card.setAttribute('role', 'group');
+        card.setAttribute('aria-roledescription', 'slide');
+        card.setAttribute('aria-label', `${index + 1} of ${picks.length}`);
+        const bg = el('div', 'featured-hero-bg');
+        bg.setAttribute('aria-hidden', 'true');
+        const scrim = el('div', 'featured-hero-scrim');
+        scrim.setAttribute('aria-hidden', 'true');
+        const img = document.createElement('img');
+        img.className = 'featured-hero-cover';
+        img.alt = '';
+        img.decoding = 'async';
 
-    const img = document.createElement('img');
-    img.className = 'featured-hero-cover';
-    img.alt = '';
-    img.decoding = 'async';
-    // The large cover first; a 404 means none could be built, so use the thumbnail.
-    img.onerror = () => {
-        img.onerror = null;
-        img.src = thumb;
-        bg.style.backgroundImage = `url("${thumb}")`;
+        const body = el('div', 'featured-hero-body');
+        const meta = el('div', 'featured-hero-meta');
+        meta.append(el('span', 'featured-hero-label', pick.label));
+        if (pick.context) meta.append(el('span', 'featured-hero-context', pick.context));
+        const h = el('h2', 'featured-hero-title', pick.title);
+        if (pick.issue) h.append(' ', el('span', 'featured-hero-issue', `#${pick.issue}`));
+        body.append(meta, h);
+        if (pick.description) body.append(el('p', 'featured-hero-desc', pick.description));
+        if (pick.progress) {
+            const bar = el('div', 'featured-hero-progress');
+            const fill = el('div', 'featured-hero-progress-fill');
+            fill.style.width = `${Math.max(0, Math.min(100, pick.progress))}%`;
+            bar.append(fill);
+            body.append(bar);
+        }
+        const read = el('button', 'btn btn-light btn-lg rounded-pill featured-hero-read', 'Read Now');
+        read.type = 'button';
+        read.onclick = () => openReaderForFile(pick.path);
+        body.append(read);
+        card.append(bg, scrim, img, body);
+
+        // Covers load on demand (see show()), so five slides do not fetch five
+        // 720px images before the user has looked at the first.
+        let loaded = false;
+        card.loadCover = () => {
+            if (loaded) return;
+            loaded = true;
+            const cover = `/api/hero-cover?path=${encodeURIComponent(pick.path)}`;
+            const thumb = `/api/thumbnail?path=${encodeURIComponent(pick.path)}`;
+            // A 404 means no large cover could be built, so use the thumbnail.
+            img.onerror = () => {
+                img.onerror = null;
+                img.src = thumb;
+                bg.style.backgroundImage = `url("${thumb}")`;
+            };
+            img.src = cover;
+            bg.style.backgroundImage = `url("${cover}")`;
+        };
+        return card;
     };
-    img.src = cover;
-    bg.style.backgroundImage = `url("${cover}")`;
 
-    const body = el('div', 'featured-hero-body');
-    const meta = el('div', 'featured-hero-meta');
-    meta.append(el('span', 'featured-hero-label', pick.label));
-    if (pick.context) meta.append(el('span', 'featured-hero-context', pick.context));
-    const h = el('h2', 'featured-hero-title', pick.title);
-    if (pick.issue) h.append(' ', el('span', 'featured-hero-issue', `#${pick.issue}`));
-    body.append(meta, h);
-
-    if (pick.description) {
-        body.append(el('p', 'featured-hero-desc', pick.description));
-    }
-    if (pick.progress) {
-        const bar = el('div', 'featured-hero-progress');
-        const fill = el('div', 'featured-hero-progress-fill');
-        fill.style.width = `${Math.max(0, Math.min(100, pick.progress))}%`;
-        bar.append(fill);
-        body.append(bar);
-    }
-
-    const read = el('button', 'btn btn-light btn-lg rounded-pill featured-hero-read', 'Read Now');
-    read.type = 'button';
-    read.onclick = () => openReaderForFile(pick.path);
-    body.append(read);
-
-    card.append(bg, scrim, img, body);
+    const slides = picks.map(buildSlide);
     hero.textContent = '';
-    hero.append(card);
+
+    if (slides.length === 1) {
+        slides[0].loadCover();
+        hero.append(slides[0]);
+        hero.style.display = '';
+        return;
+    }
+
+    const region = el('div', 'featured-hero-carousel');
+    region.setAttribute('role', 'region');
+    region.setAttribute('aria-roledescription', 'carousel');
+    region.setAttribute('aria-label', 'Featured');
+    const track = el('div', 'featured-hero-track');
+    track.tabIndex = 0;
+    track.append(...slides);
+
+    let current = 0;
+    const dots = [];
+    const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const show = (i) => {
+        current = i;
+        slides.forEach((slide, n) => {
+            // Off-screen slides must not take keyboard focus or be read out.
+            slide.inert = n !== i;
+            if (Math.abs(n - i) <= 1) slide.loadCover();
+        });
+        dots.forEach((dot, n) => {
+            if (n === i) dot.setAttribute('aria-current', 'true');
+            else dot.removeAttribute('aria-current');
+        });
+        prev.disabled = i === 0;
+        next.disabled = i === slides.length - 1;
+    };
+    const goTo = (i) => {
+        const target = Math.max(0, Math.min(slides.length - 1, i));
+        track.scrollTo({ left: target * track.clientWidth, behavior: reduceMotion() ? 'auto' : 'smooth' });
+        show(target);
+    };
+
+    const arrow = (cls, icon, label) => {
+        const b = el('button', `featured-hero-arrow ${cls}`);
+        b.type = 'button';
+        b.setAttribute('aria-label', label);
+        const i = el('i', `bi ${icon}`);
+        i.setAttribute('aria-hidden', 'true');
+        b.append(i);
+        return b;
+    };
+    const prev = arrow('featured-hero-prev', 'bi-chevron-left', 'Previous slide');
+    const next = arrow('featured-hero-next', 'bi-chevron-right', 'Next slide');
+    prev.onclick = () => goTo(current - 1);
+    next.onclick = () => goTo(current + 1);
+
+    const dotRow = el('div', 'featured-hero-dots');
+    slides.forEach((_, n) => {
+        const d = el('button', 'featured-hero-dot');
+        d.type = 'button';
+        d.setAttribute('aria-label', `Show slide ${n + 1} of ${slides.length}`);
+        d.append(el('span'));
+        d.onclick = () => goTo(n);
+        dots.push(d);
+        dotRow.append(d);
+    });
+
+    // Swiping scrolls the track natively; follow it to keep the dots in step.
+    let frame = 0;
+    track.addEventListener('scroll', () => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+            const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+            if (i !== current) show(i);
+        });
+    }, { passive: true });
+    track.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') { e.preventDefault(); goTo(current + 1); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }
+    });
+
+    region.append(track, prev, next, dotRow);
+    hero.append(region);
     hero.style.display = '';
+    show(0);
 }
 
 /**

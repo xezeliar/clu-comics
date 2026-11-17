@@ -22,18 +22,58 @@ def read(*parts):
 
 def _hero_js():
     js = read("static", "js", "collection.js")
-    start = js.index("async function loadFeaturedHero()")
+    start = js.index("const HERO_MAX = ")
     return js[start:js.index("async function loadOnTheStackSwiper()", start)]
 
 
-def test_fallback_chain_is_on_the_stack_then_continue_reading_then_newest():
+def test_fills_up_to_five_slides_in_fallback_order_without_repeats():
     body = _hero_js()
+    assert "const HERO_MAX = 5;" in body
     order = [body.index(u) for u in (
-        "/api/on-the-stack?limit=1",
-        "/api/continue-reading?limit=1",
-        "/list-recent-files?limit=1",
+        "/api/on-the-stack?limit=${HERO_MAX}",
+        "/api/continue-reading?limit=${HERO_MAX}",
+        "/list-recent-files?limit=${HERO_MAX}",
     )]
     assert order == sorted(order)
+    # The three sources are merged in that order, a comic once, capped at HERO_MAX.
+    adds = [body.index(m) for m in ("label: 'Up next'", "label: 'Continue reading'",
+                                    "label: 'New in your library'")]
+    assert adds == sorted(adds)
+    assert "seen.has(pick.path)" in body and "picks.length >= HERO_MAX" in body
+
+
+def test_there_is_no_auto_advance():
+    """A slide that changes while you are deciding is a misclick waiting to
+    happen, and moving content would need a pause control and reduced-motion
+    handling. Swipe, dots, arrows and the arrow keys are the only ways."""
+    body = _hero_js()
+    for banned in ("setInterval", "setTimeout", "autoplay", "autoPlay", "requestIdleCallback"):
+        assert banned not in body, banned
+
+
+def test_covers_load_lazily_for_the_current_and_next_slide_only():
+    body = _hero_js()
+    assert "card.loadCover = " in body
+    assert "Math.abs(n - i) <= 1" in body
+    # Nothing fetches a cover while the slides are being built.
+    build = body[body.index("const buildSlide"):body.index("const slides = ")]
+    assert build.count("/api/hero-cover") == 1
+    assert "img.src = cover" in build and "card.loadCover = () =>" in build
+
+
+def test_carousel_is_keyboard_and_screen_reader_usable():
+    body = _hero_js()
+    assert "aria-roledescription', 'carousel'" in body
+    assert "aria-roledescription', 'slide'" in body
+    assert "slide.inert = n !== i" in body        # off-screen slides take no focus
+    assert "'aria-current'" in body                # the current dot
+    assert "Show slide ${n + 1} of ${slides.length}" in body
+    assert "ArrowRight" in body and "ArrowLeft" in body
+    assert "prefers-reduced-motion" in body        # no smooth scrolling if reduced
+    css = read("static", "css", "collection.css")
+    assert "scroll-snap-type: x mandatory" in css
+    dot = css[css.index(".featured-hero-dot {"):]
+    assert "width: 2.75rem" in dot[:dot.index("}")] and "height: 2.75rem" in dot[:dot.index("}")]
 
 
 def test_cover_is_the_large_one_with_the_thumbnail_as_fallback_only():
