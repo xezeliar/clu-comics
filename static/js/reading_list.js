@@ -815,6 +815,51 @@ function bulkDeleteSelected() {
     toastContainer.appendChild(toast);
 }
 
+function openBulkTagModal() {
+    if (selectedListIds.size === 0) {
+        CLU.toast('No lists selected', 'warning');
+        return;
+    }
+    document.getElementById('bulkTagCount').textContent = selectedListIds.size;
+    document.getElementById('bulkTagAdd').value = '';
+    document.getElementById('bulkTagRemove').value = '';
+    fetch('/api/reading-lists/tags').then(r => r.json()).then(d => {
+        document.getElementById('bulkTagOptions').innerHTML = '';
+        (d.tags || []).forEach(t => {
+            const o = document.createElement('option');
+            o.value = t;
+            document.getElementById('bulkTagOptions').appendChild(o);
+        });
+    }).catch(() => {});
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkTagModal')).show();
+}
+
+function applyBulkTags() {
+    const split = id => document.getElementById(id).value.split(',').map(t => t.trim()).filter(Boolean);
+    const add = split('bulkTagAdd');
+    const remove = split('bulkTagRemove');
+    if (!add.length && !remove.length) {
+        CLU.toast('Enter tags to add or remove', 'warning');
+        return;
+    }
+    const btn = document.getElementById('bulkTagApply');
+    btn.disabled = true;
+    fetch('/api/reading-lists/bulk-tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedListIds).map(id => parseInt(id, 10)), add, remove })
+    })
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) { CLU.toast(d.message || 'Failed to update tags', 'error'); return; }
+            CLU.toast(d.message, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('bulkTagModal')).hide();
+            setTimeout(() => window.location.reload(), 600);
+        })
+        .catch(() => CLU.toast('An error occurred', 'error'))
+        .finally(() => { btn.disabled = false; });
+}
+
 function confirmDeleteAll() {
     // Every list, not just this page's cards.
     const grid = document.querySelector('.reading-list-grid');
