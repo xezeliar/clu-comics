@@ -46,6 +46,12 @@ from helpers.paging import DEFAULT_PER_PAGE, PAGE_SIZES, per_page_from
 from helpers.library import get_library_for_path
 
 series_bp = Blueprint("series", __name__)
+from core.creators import (  # noqa: E402
+    kind_for_role,
+    pending_provider_issue_ids,
+    provider_credits,
+    save_provider_issue_credits,
+)
 
 
 # =============================================================================
@@ -1455,6 +1461,8 @@ def series_view(slug):
             header_focus=header_focus,
             run=run,
             series_credits=series_credits,
+            provider_credits=provider_credits(series_id),
+            provider_issue_total=len(all_issues),
             arrived_paths=arrived_paths,
         )
     except Exception as e:
@@ -1573,6 +1581,36 @@ def api_search_series():
             ), 503
         app_logger.error(f"Error searching Metron series: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+PROVIDER_CREDITS_BATCH = 10
+
+
+@series_bp.route("/api/series/<int:series_id>/provider-credits", methods=["POST"])
+def load_provider_credits(series_id):
+    """Fetch Metron's credits for the next few issues of the series that have none
+    stored. One request per issue, paced by Metron's per-send limiter, so a
+    series is loaded batch by batch: the page calls this until ``remaining`` is 0."""
+    api = metron.get_flask_api()
+    if not api:
+        return jsonify({"success": False, "error": "Metron credentials not configured"}), 400
+    ids = [i["id"] for i in get_issues_for_series(series_id)]
+    pending = pending_provider_issue_ids(series_id, ids)
+    for issue_id in pending[:PROVIDER_CREDITS_BATCH]:
+        issue = metron.fetch_issue_detail(api, issue_id)
+        if issue is None:
+            reason = metron.paused_reason() or "Metron did not answer"
+            return jsonify({"success": False, "error": reason,
+                            "remaining": len(pending), "total": len(ids)}), 503
+        credits = []
+        for credit in getattr(issue, "credits", None) or []:
+            for role in getattr(credit, "role", None) or []:
+                kind = kind_for_role(getattr(role, "name", ""))
+                if kind:
+                    credits.append((kind, str(getattr(credit, "creator", "") or "").strip()))
+        save_provider_issue_credits(series_id, issue_id, credits)
+        pending.remove(issue_id)
+    return jsonify({"success": True, "remaining": len(pending), "total": len(ids)})
 
 
 @series_bp.route("/api/series/<int:series_id>/map", methods=["POST"])

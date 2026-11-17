@@ -169,6 +169,36 @@
                     </p>
                 </details>
                 {% endif %}
+                {#- Everyone Metron credits, including issues not in the library.
+                    Loaded on demand: Metron holds credits per issue, so it costs one
+                    request per issue. -#}
+                <details class="sh-all" id="providerCredits">
+                    <summary>All creators on Metron</summary>
+                    {% if provider_credits and provider_credits.roles %}
+                    <table>
+                        <tbody>
+                        {% for role in provider_credits.roles %}
+                        <tr><th scope="row">{{ role.label }}</th><td>
+                            {%- for p in role.people -%}
+                            {% if not loop.first %} · {% endif %}<a href="{{ url_for('creators.creator_page', name=p.name) }}">{{ p.name }}</a> <span class="text-body-secondary">{{ p.count }}</span>
+                            {%- endfor -%}
+                        </td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+                    {% if provider_issue_total %}
+                    {% set _fetched = provider_credits.fetched if provider_credits else 0 %}
+                    <p class="small text-body-secondary mb-1" id="providerCreditsStatus"
+                       data-total="{{ provider_issue_total }}">Credits loaded for {{ _fetched }} of {{ provider_issue_total }} issues.</p>
+                    {% if _fetched < provider_issue_total %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="providerCreditsLoad"
+                            data-url="{{ url_for('series.load_provider_credits', series_id=series.id) }}">
+                        Load credits from Metron
+                    </button>
+                    {% endif %}
+                    {% endif %}
+                </details>
             </div>
         </div>
     </section>
@@ -988,6 +1018,26 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Loads Metron's credits batch by batch (the server fetches ~10 issues a call),
+// then reloads to show the merged list.
+document.getElementById('providerCreditsLoad')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget, status = document.getElementById('providerCreditsStatus');
+    btn.disabled = true;
+    try {
+        for (;;) {
+            const r = await fetch(btn.dataset.url, { method: 'POST' });
+            const d = await r.json();
+            if (!d.success) { CLU.toast(d.error || 'Could not load credits', 'error'); break; }
+            status.textContent = `Credits loaded for ${d.total - d.remaining} of ${d.total} issues.`;
+            if (!d.remaining) { window.location.reload(); return; }
+        }
+    } catch (err) {
+        CLU.toast('Could not load credits', 'error');
+    }
+    btn.disabled = false;
+});
+</script>
 {{ super() }}
 {% if first_issue_image and not header_banner %}
 {#- Set header: drag the cover (or use the slider) to pick the slice the banner

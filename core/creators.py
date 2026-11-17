@@ -245,6 +245,85 @@ def series_credits(folder, prefixes=None, top=2):
     return {"issues": issues, "credited": credited, "roles": roles, "header": header}
 
 
+def kind_for_role(role_name):
+    """The ``CREDIT_KINDS`` entry a provider's role name belongs to, or None.
+
+    Substring matches, because Metron spells roles out ("Script", "Cover
+    Artist", "Colorist (Flats)"). ``cover`` goes first: "Cover Artist" must not
+    fall into penciller through "artist"."""
+    r = (role_name or "").lower()
+    for needle, kind in (("cover", "coverartist"), ("writer", "writer"),
+                         ("script", "writer"), ("plot", "writer"),
+                         ("pencil", "penciller"), ("artist", "penciller"),
+                         ("ink", "inker"), ("colo", "colorist"),
+                         ("letter", "letterer")):
+        if needle in r:
+            return kind
+    return None
+
+
+def pending_provider_issue_ids(series_id, issue_ids):
+    """The ids in ``issue_ids`` whose Metron credits were never fetched."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return list(issue_ids)
+            done = {r[0] for r in conn.execute(
+                "SELECT DISTINCT issue_id FROM metron_issue_credits WHERE series_id = ?",
+                (series_id,))}
+    except Exception as e:
+        app_logger.error(f"Failed to read fetched Metron credits for {series_id}: {e}")
+        return list(issue_ids)
+    return [i for i in issue_ids if i not in done]
+
+
+def save_provider_issue_credits(series_id, issue_id, credits):
+    """Store one issue's ``[(kind, name), ...]``; an empty list records "none"."""
+    rows = sorted({(k, n) for k, n in credits if k in CREDIT_KINDS and n}) or [("", "")]
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return False
+            conn.execute("DELETE FROM metron_issue_credits WHERE issue_id = ?", (issue_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO metron_issue_credits (series_id, issue_id, kind, name)"
+                " VALUES (?, ?, ?, ?)", [(series_id, issue_id, k, n) for k, n in rows])
+            conn.commit()
+            return True
+    except Exception as e:
+        app_logger.error(f"Failed to save Metron credits for issue {issue_id}: {e}")
+        return False
+
+
+def provider_credits(series_id):
+    """Everyone Metron credits on a series' fetched issues, shaped like
+    ``series_credits``: ``{"fetched": issues fetched, "roles": [...]}`` with
+    each person's issue count. None when nothing is fetched or unreadable."""
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            fetched = conn.execute(
+                "SELECT COUNT(DISTINCT issue_id) FROM metron_issue_credits WHERE series_id = ?",
+                (series_id,)).fetchone()[0]
+            rows = conn.execute(
+                "SELECT kind, MIN(name) AS name, COUNT(DISTINCT issue_id) AS n"
+                " FROM metron_issue_credits WHERE series_id = ? AND kind != ''"
+                " GROUP BY kind, name COLLATE NOCASE", (series_id,)).fetchall()
+    except Exception as e:
+        app_logger.error(f"Failed to read Metron credits for {series_id}: {e}")
+        return None
+    if not fetched:
+        return None
+    roles = []
+    for kind in CREDIT_KINDS:
+        people = sorted(({"name": r["name"], "count": r["n"]} for r in rows if r["kind"] == kind),
+                        key=lambda p: (-p["count"], p["name"].casefold()))
+        if people:
+            roles.append({"kind": kind, "label": ROLE_LABELS[kind], "people": people})
+    return {"fetched": fetched, "roles": roles}
+
+
 def _issue_sort_key(number):
     """Numeric issue order; non-numbers (annuals, specials) sort after the numbered ones."""
     try:
