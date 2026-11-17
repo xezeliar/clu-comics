@@ -83,6 +83,19 @@ let currentPath = '';
 let currentIsLibraryRoot = true;
 let isLoading = false;
 let allItems = []; // Stores all files and folders for the current directory
+
+// An issue's folder is its series folder; the server resolves that to the page.
+function openIssueSeriesPage(filePath) {
+    const folder = filePath.substring(0, filePath.lastIndexOf('/'));
+    fetch('/api/series/for-folder?path=' + encodeURIComponent(folder))
+        .then(r => r.json())
+        .then(d => {
+            if (d.success && d.url) window.location.href = d.url;
+            else CLU.toast(d.error || 'No series page for this issue', 'warning');
+        })
+        .catch(() => CLU.toast('Could not open the series page', 'error'));
+}
+
 // Comic pinned as the current folder's cover, or null. Comes from /api/browse
 // so the three-dots item can read "Set" vs "Unset" without a request per file.
 let pinnedCover = null;
@@ -2238,6 +2251,7 @@ function renderGrid(items) {
                     '.action-mark-unread': () => markIssueAsUnread(item.path),
                     '.action-hide-history': () => hideFromHistory(item.path),
                     '.action-add-to-list': () => openAddToReadingListModal(item.path),
+                    '.action-go-to-series': () => openIssueSeriesPage(item.path),
                     '.action-delete': () => showDeleteConfirmation(item)
                 };
 
@@ -4483,6 +4497,7 @@ document.addEventListener('click', (e) => {
         'read-date': () => openSetReadDateModal(path, readIssuesSet.has(path)),
         'unread': () => markIssueAsUnread(path),
         'list': () => openAddToReadingListModal(path),
+        'series': () => openIssueSeriesPage(path),
     }[act.dataset.act];
     // The next modal (or the reader) opens once this one has gone.
     modal.addEventListener('hidden.bs.modal', run, { once: true });
