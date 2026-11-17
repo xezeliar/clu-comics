@@ -37,6 +37,7 @@ from core.database import (
     update_reading_list_name,
     update_reading_list_description,
     update_reading_list_tags,
+    bulk_update_reading_list_tags,
     get_all_reading_list_tags,
     update_reading_list_source_version,
     get_reading_lists_with_source,
@@ -876,6 +877,28 @@ def update_tags(list_id):
         return jsonify({'success': True, 'message': 'Tags updated'})
     else:
         return jsonify({'success': False, 'message': 'Failed to update tags'})
+
+
+@reading_lists_bp.route('/api/reading-lists/bulk-tags', methods=['POST'])
+def bulk_update_tags():
+    """Add/remove tags on many lists. Body: {"ids": [1,2], "add": ["x"], "remove": ["y"]}."""
+    data = request.get_json(silent=True) or {}
+    ids, add, remove = data.get('ids'), data.get('add') or [], data.get('remove') or []
+    if not isinstance(ids, list) or not ids or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in ids):
+        return jsonify({'success': False, 'message': 'No lists specified'}), 400
+    if not isinstance(add, list) or not isinstance(remove, list):
+        return jsonify({'success': False, 'message': 'add and remove must be lists'}), 400
+    add = [t.strip() for t in add if isinstance(t, str) and t.strip()]
+    remove = [t.strip() for t in remove if isinstance(t, str) and t.strip()]
+    if not add and not remove:
+        return jsonify({'success': False, 'message': 'No tags specified'}), 400
+
+    updated = bulk_update_reading_list_tags(ids, add, remove)
+    if updated is None:
+        return jsonify({'success': False, 'message': 'Failed to update tags'}), 500
+    return jsonify({'success': True, 'updated': updated,
+                    'message': f'Updated tags on {updated} of {len(ids)} reading lists'})
 
 
 @reading_lists_bp.route('/api/reading-lists/tags')

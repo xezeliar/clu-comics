@@ -343,6 +343,37 @@ class TestDeleteList:
         assert resp.get_json()["success"] is False
 
 
+class TestBulkTags:
+
+    @patch("routes.reading_lists.bulk_update_reading_list_tags", return_value=2)
+    def test_bulk_tags_ok(self, mock_up, client):
+        resp = client.post("/api/reading-lists/bulk-tags",
+                           json={"ids": [1, 2], "add": [" x ", ""], "remove": ["y"]})
+        assert resp.status_code == 200
+        assert resp.get_json()["updated"] == 2
+        mock_up.assert_called_once_with([1, 2], ["x"], ["y"])
+
+    @pytest.mark.parametrize("body", [
+        {}, {"ids": [], "add": ["x"]}, {"ids": ["1"], "add": ["x"]},
+        {"ids": [1]}, {"ids": [1], "add": "x"}])
+    def test_bulk_tags_rejects_bad_input(self, client, body):
+        assert client.post("/api/reading-lists/bulk-tags", json=body).status_code == 400
+
+    @patch("routes.reading_lists.bulk_update_reading_list_tags", return_value=None)
+    def test_bulk_tags_db_failure(self, mock_up, client):
+        resp = client.post("/api/reading-lists/bulk-tags", json={"ids": [1], "add": ["x"]})
+        assert resp.status_code == 500
+
+    def test_bulk_tags_merges_per_list(self, client, db_connection):
+        from core.database import (create_reading_list, update_reading_list_tags,
+                                   bulk_update_reading_list_tags, get_reading_list)
+        a, b = create_reading_list("A"), create_reading_list("B")
+        update_reading_list_tags(a, ["Marvel", "old"])
+        assert bulk_update_reading_list_tags([a, b, 99999], ["marvel", "new"], ["OLD"]) == 2
+        assert get_reading_list(a)["tags"] == ["Marvel", "new"]
+        assert get_reading_list(b)["tags"] == ["marvel", "new"]
+
+
 class TestBulkDeleteLists:
 
     @patch("routes.reading_lists.delete_reading_list", return_value=True)

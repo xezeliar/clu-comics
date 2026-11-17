@@ -13714,6 +13714,45 @@ def update_reading_list_tags(list_id, tags):
         return False
 
 
+def bulk_update_reading_list_tags(list_ids, add=(), remove=()):
+    """Add and/or remove tags on many reading lists in one transaction.
+
+    Tags match case-insensitively; an added tag keeps the spelling of the
+    first one already on the list, and a list's existing tags keep their order.
+    Returns the number of lists found and updated, or None on a database error.
+    """
+    import json
+
+    add = [t for t in add if t]
+    drop = {t.casefold() for t in remove}
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            updated = 0
+            for list_id in list_ids:
+                row = conn.execute(
+                    "SELECT tags FROM reading_lists WHERE id = ?", (list_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+                tags = [t for t in _reading_list_tags(row["tags"])
+                        if t.casefold() not in drop]
+                have = {t.casefold() for t in tags}
+                for t in add:
+                    if t.casefold() not in have:
+                        tags.append(t)
+                        have.add(t.casefold())
+                conn.execute("UPDATE reading_lists SET tags = ? WHERE id = ?",
+                             (json.dumps(tags), list_id))
+                updated += 1
+            conn.commit()
+            return updated
+    except Exception as e:
+        app_logger.error(f"Error bulk-updating reading list tags: {e}")
+        return None
+
+
 def get_all_reading_list_tags():
     """
     Get all unique tags across all reading lists for autocomplete.
