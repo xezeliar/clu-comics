@@ -515,19 +515,68 @@ def plan_smart_rename(
     return result
 
 
+# --- No-clobber rename -------------------------------------------------------
+#
+# The plan is computed when the preview opens, and applied whenever the user
+# clicks Apply -- or from a client-supplied plan. A comic that lands at a
+# planned name in between (a download, another rename, a second tab) would be
+# silently replaced by ``os.rename`` on POSIX, so the rename itself refuses an
+# existing destination. The primitive lives in ``helpers.no_clobber`` (the
+# TARGET filing pass and the metadata renamer use it too, #731); the names
+# below are kept for this module's callers.
+
+from helpers.no_clobber import (  # noqa: E402
+    _RENAME_NOREPLACE,
+    _link_then_unlink,
+    _load_renameat2,
+    _renameat2_noreplace,
+    rename_no_clobber as _rename_no_clobber,
+)
+
+
 def apply_smart_rename(plan: Dict) -> Dict:
     """
     Apply a plan produced by `plan_smart_rename`.
 
-    Returns a summary dict with counts and per-file errors.
+    Never replaces a file. An item whose destination is taken -- by a file that
+    appeared after the preview, or by an earlier item of this same batch -- is
+    left untouched, counted as skipped and listed in ``conflicts`` with the
+    reason. An item whose destination is the source of another item in the
+    batch (A -> B while B -> C) waits until that one has moved; a cycle is
+    refused.
+
+    Returns a summary dict with counts, per-file errors and conflicts.
     """
-    summary = {"renamed": 0, "skipped": 0, "failed": 0, "errors": [], "directories": []}
+    summary = {
+        "renamed": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": [],
+        "conflicts": [],
+        "directories": [],
+    }
 
     try:
         from app import update_index_on_move
     except Exception:
         update_index_on_move = None
 
+    def conflict(old_path, new_path, reason):
+        summary["skipped"] += 1
+        summary["conflicts"].append(
+            {
+                "old_path": old_path,
+                "new_path": new_path,
+                "old_name": os.path.basename(old_path or ""),
+                "new_name": os.path.basename(new_path or ""),
+                "reason": reason,
+            }
+        )
+        app_logger.warning(f"smart_rename: not renaming {old_path} -> {new_path}: {reason}")
+
+    # Collect every rename first, so the batch can be checked as a whole.
+    queue = []
+    claimed = {}
     for dir_entry in plan.get("directories", []):
         if dir_entry.get("status") != "ok":
             summary["skipped"] += 1
@@ -540,29 +589,70 @@ def apply_smart_rename(plan: Dict) -> Dict:
             if f.get("status") != "ok":
                 summary["skipped"] += 1
                 continue
-            old_path = f["old_path"]
-            new_path = f["new_path"]
+            old_path = f.get("old_path")
+            new_path = f.get("new_path")
+            if not isinstance(old_path, str) or not isinstance(new_path, str) or not new_path:
+                summary["failed"] += 1
+                summary["errors"].append(
+                    {"old_path": old_path, "new_path": new_path, "error": "Malformed plan entry"}
+                )
+                continue
+            if old_path == new_path:
+                summary["skipped"] += 1
+                continue
+            key = os.path.normcase(os.path.abspath(new_path))
+            if key in claimed:
+                conflict(
+                    old_path,
+                    new_path,
+                    f"{os.path.basename(claimed[key])} is also being renamed to this name",
+                )
+                continue
+            claimed[key] = old_path
+            queue.append((old_path, new_path))
+
+        summary["directories"].append({"dir": dir_entry.get("dir"), "status": "ok"})
+
+    pending_sources = {old for old, _ in queue}
+    while queue:
+        deferred = []
+        for old_path, new_path in queue:
+            # A -> B while B -> C: B has to move first, or A would find B taken.
+            if new_path in pending_sources and not _same_file(old_path, new_path):
+                deferred.append((old_path, new_path))
+                continue
+            pending_sources.discard(old_path)
             try:
-                os.rename(old_path, new_path)
-                summary["renamed"] += 1
-                if update_index_on_move:
-                    try:
-                        update_index_on_move(old_path, new_path)
-                    except Exception as e:
-                        app_logger.warning(
-                            f"smart_rename: index update failed for {old_path} -> {new_path}: {e}"
-                        )
+                _rename_no_clobber(old_path, new_path)
+            except FileExistsError:
+                conflict(
+                    old_path,
+                    new_path,
+                    "a file already exists with that name (it appeared after the preview)",
+                )
+                continue
             except Exception as e:
                 summary["failed"] += 1
                 summary["errors"].append(
                     {"old_path": old_path, "new_path": new_path, "error": str(e)}
                 )
-                app_logger.error(
-                    f"smart_rename: rename failed {old_path} -> {new_path}: {e}"
-                )
+                app_logger.error(f"smart_rename: rename failed {old_path} -> {new_path}: {e}")
+                continue
 
-        summary["directories"].append(
-            {"dir": dir_entry.get("dir"), "status": "ok"}
-        )
+            summary["renamed"] += 1
+            if update_index_on_move:
+                try:
+                    update_index_on_move(old_path, new_path)
+                except Exception as e:
+                    app_logger.warning(
+                        f"smart_rename: index update failed for {old_path} -> {new_path}: {e}"
+                    )
+
+        if len(deferred) == len(queue):
+            # Nothing moved this pass: what is left is a cycle (A -> B -> A).
+            for old_path, new_path in deferred:
+                conflict(old_path, new_path, "the target is part of a rename cycle in this batch")
+            break
+        queue = deferred
 
     return summary

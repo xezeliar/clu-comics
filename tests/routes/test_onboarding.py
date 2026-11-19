@@ -31,6 +31,7 @@ class TestOnboardingState:
              patch("core.config.get_watch_dir", return_value="/w"), \
              patch("core.config.get_target_dir", return_value="/t"), \
              patch("core.settings.get_bool", return_value=True), \
+             patch("core.auth.accounts_require_login", return_value=False), \
              patch("core.database.db_conn") as db:
             db.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = (1,)
             data = client.get("/api/onboarding").get_json()

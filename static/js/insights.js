@@ -19,11 +19,6 @@
   var WHO = [['teams', 'Teams', 'teams'], ['characters', 'Characters', 'characters'], ['writers', 'Writers', 'creators'], ['publishers', 'Publishers', null]];
 
   var fmt = function (n) { return Number(n || 0).toLocaleString(); };
-  var esc = function (s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-    });
-  };
   var plural = function (n, w) { return fmt(n) + ' ' + w + (n === 1 ? '' : 's'); };
   var day = function (s) { return new Date(s + 'T00:00:00Z'); };
   var iso = function (d) { return d.toISOString().slice(0, 10); };
@@ -52,15 +47,15 @@
       var same = list.every(function (r) { return r.count === list[0].count; });
       if (same) {
         var c = list[0].count;
-        return '<p>' + esc(and(list.map(function (r) { return r.name; }))) + ', ' +
+        return '<p>' + CLU.escapeHtml(and(list.map(function (r) { return r.name; }))) + ', ' +
           (c === 1 ? 'one issue' : fmt(c) + ' issues') + (list.length > 1 ? ' each' : '') + '.</p>';
       }
-      return '<p>' + esc(and(list.map(function (r) { return r.name + ' (' + fmt(r.count) + ')'; }))) + '.</p>';
+      return '<p>' + CLU.escapeHtml(and(list.map(function (r) { return r.name + ' (' + fmt(r.count) + ')'; }))) + '.</p>';
     }
     var open = !!state.all[key], rows = open ? list : list.slice(0, n), max = list[0].count;
     return '<ol class="in-rank">' + rows.map(function (r) {
-      var name = link ? '<a class="n" href="' + esc(link(r.name)) + '" title="' + esc(r.name) + '">' + esc(r.name) + '</a>'
-        : '<span class="n" title="' + esc(r.name) + '">' + esc(r.name) + '</span>';
+      var name = link ? '<a class="n" href="' + CLU.escapeHtml(link(r.name)) + '" title="' + CLU.escapeHtml(r.name) + '">' + CLU.escapeHtml(r.name) + '</a>'
+        : '<span class="n" title="' + CLU.escapeHtml(r.name) + '">' + CLU.escapeHtml(r.name) + '</span>';
       return '<li>' + name + '<span class="c">' + fmt(r.count) + '</span><span class="b" aria-hidden="true"><i style="width:' +
         Math.max(2, r.count / max * 100) + '%"></i></span></li>';
     }).join('') + '</ol>' + more(key, list.length, n);
@@ -136,8 +131,8 @@
   }
   function strip(items) { return '<ol class="in-strip">' + items.join('') + '</ol>'; }
   function cover(path, title) {
-    return '<a class="in-cover" href="' + esc(openHref(path)) + '" aria-label="Open ' + esc(title) + '">' +
-      '<img src="' + esc(thumb(path)) + '" alt="" loading="lazy"></a>';
+    return '<a class="in-cover" href="' + CLU.escapeHtml(openHref(path)) + '" aria-label="Open ' + CLU.escapeHtml(title) + '">' +
+      '<img src="' + CLU.escapeHtml(thumb(path)) + '" alt="" loading="lazy"></a>';
   }
   function strips() {
     var cont = state.cont || [], recent = state.recent || [];
@@ -146,15 +141,15 @@
     if (cont.length) {
       h += '<div><h3>Continue reading</h3>' + strip(cont.map(function (it) {
         var t = stem(it.file_name), p = it.page_number, n = it.total_pages;
-        return '<li>' + cover(it.comic_path, t) + '<div class="in-prog" role="progressbar" aria-label="' + esc(t) +
+        return '<li>' + cover(it.comic_path, t) + '<div class="in-prog" role="progressbar" aria-label="' + CLU.escapeHtml(t) +
           '" aria-valuenow="' + p + '" aria-valuemin="0" aria-valuemax="' + n + '"><i style="width:' + Math.min(100, p / n * 100) + '%"></i></div>' +
-          '<div class="ct" title="' + esc(t) + '">' + esc(t) + '</div><div class="cm">p. ' + fmt(p) + ' of ' + fmt(n) + '</div></li>';
+          '<div class="ct" title="' + CLU.escapeHtml(t) + '">' + CLU.escapeHtml(t) + '</div><div class="cm">p. ' + fmt(p) + ' of ' + fmt(n) + '</div></li>';
       })) + '</div>';
     }
     if (recent.length) {
-      h += '<div><h3>Recently read <a class="in-lk" href="' + esc(URLS.timeline) + '">Timeline</a></h3>' + strip(recent.map(function (it) {
+      h += '<div><h3>Recently read <a class="in-lk" href="' + CLU.escapeHtml(URLS.timeline) + '">Timeline</a></h3>' + strip(recent.map(function (it) {
         var t = stem(it.name), k = String(it.read_at || '').slice(0, 10);
-        return '<li>' + cover(it.path, t) + '<div class="ct" title="' + esc(t) + '">' + esc(t) + '</div>' +
+        return '<li>' + cover(it.path, t) + '<div class="ct" title="' + CLU.escapeHtml(t) + '">' + CLU.escapeHtml(t) + '</div>' +
           (k ? '<div class="cm">' + nice(k) + '</div>' : '') + '</li>';
       })) + '</div>';
     }
@@ -166,9 +161,9 @@
   };
   // The photo tile (the markup partials/person_tile.html draws for the index pages).
   function tile(it, pub) {
-    var img = it.art ? '<img src="' + esc(it.art) + '" alt="" loading="lazy" decoding="async">' : '<span class="pt-ini">' + esc(initials(it.name)) + '</span>';
-    return '<li><a class="pt' + (pub ? ' pt-pub' : '') + '" href="' + esc(it.href) + '"><span class="pt-img" aria-hidden="true">' + img +
-      '</span><span class="pt-n">' + esc(it.name) + '</span><span class="pt-c">' + issuesOf(it.count) + '</span></a></li>';
+    var img = it.art ? '<img src="' + CLU.escapeHtml(it.art) + '" alt="" loading="lazy" decoding="async">' : '<span class="pt-ini">' + CLU.escapeHtml(initials(it.name)) + '</span>';
+    return '<li><a class="pt' + (pub ? ' pt-pub' : '') + '" href="' + CLU.escapeHtml(it.href) + '"><span class="pt-img" aria-hidden="true">' + img +
+      '</span><span class="pt-n">' + CLU.escapeHtml(it.name) + '</span><span class="pt-c">' + issuesOf(it.count) + '</span></a></li>';
   }
   function whoList(y) {
     var d = state.who[y];
@@ -177,7 +172,7 @@
     var out = WHO.map(function (t) {
       var sec = d[t[0]];
       if (!sec || !sec.items || !sec.items.length) return '';
-      var all = t[2] && URLS[t[2]] ? '<a class="in-lk" href="' + esc(URLS[t[2]]) + '">See all ' + t[1].toLowerCase() + '</a>' : '';
+      var all = t[2] && URLS[t[2]] ? '<a class="in-lk" href="' + CLU.escapeHtml(URLS[t[2]]) + '">See all ' + t[1].toLowerCase() + '</a>' : '';
       return '<section class="in-who" aria-label="' + t[1] + '"><header><h4>' + t[1] + '<span>' + fmt(sec.total) + ' in your library</span></h4>' + all +
         '</header><ul class="pt-grid">' + sec.items.map(function (it) { return tile(it, t[0] === 'publishers'); }).join('') + '</ul></section>';
     }).join('');
@@ -250,7 +245,7 @@
     var pct = c.files ? Math.round(c.read / c.files * 100) : 0;
     var facts = [
       c.read ? '<div><dt>Read</dt><dd><b data-clu-count>' + fmt(c.read) + '</b> of ' + fmt(c.files) + ' · ' + pct + '%<span class="in-meter" aria-hidden="true"><i style="width:' + pct + '%"></i></span></dd></div>' : '',
-      c.missing ? '<div><dt>Missing</dt><dd><a href="' + esc(URLS.wanted) + '"><b data-clu-count>' + fmt(c.missing) + '</b> ' + (c.missing === 1 ? 'issue' : 'issues') + ' in ' + fmt(c.missing_series) + ' series' + '</a></dd></div>' : '',
+      c.missing ? '<div><dt>Missing</dt><dd><a href="' + CLU.escapeHtml(URLS.wanted) + '"><b data-clu-count>' + fmt(c.missing) + '</b> ' + (c.missing === 1 ? 'issue' : 'issues') + ' in ' + fmt(c.missing_series) + ' series' + '</a></dd></div>' : '',
       c.added_30 ? '<div><dt>Dated in the last 30 days</dt><dd><b data-clu-count>' + fmt(c.added_30) + '</b></dd></div>' : ''
     ].join('');
 
@@ -274,11 +269,11 @@
     }
 
     var f = c.formats || [], ftot = f.reduce(function (a, x) { return a + x.count; }, 0), formats = '';
-    if (f.length === 1) formats = '<p>All ' + fmt(ftot) + ' comics are ' + esc(f[0].type.toUpperCase()) + '.</p>';
+    if (f.length === 1) formats = '<p>All ' + fmt(ftot) + ' comics are ' + CLU.escapeHtml(f[0].type.toUpperCase()) + '.</p>';
     else if (f.length) {
-      formats = '<div class="in-share" role="img" aria-label="' + esc(f.map(function (x) { return x.type.toUpperCase() + ' ' + fmt(x.count); }).join(', ')) + '">' +
+      formats = '<div class="in-share" role="img" aria-label="' + CLU.escapeHtml(f.map(function (x) { return x.type.toUpperCase() + ' ' + fmt(x.count); }).join(', ')) + '">' +
         f.map(function (x) { return '<i style="flex:' + x.count + '"></i>'; }).join('') + '</div><ul class="in-share-k">' +
-        f.map(function (x) { return '<li>' + esc(x.type.toUpperCase()) + ' ' + fmt(x.count) + ' <span>' + Math.max(1, Math.round(x.count / ftot * 100)) + '%</span></li>'; }).join('') + '</ul>';
+        f.map(function (x) { return '<li>' + CLU.escapeHtml(x.type.toUpperCase()) + ' ' + fmt(x.count) + ' <span>' + Math.max(1, Math.round(x.count / ftot * 100)) + '%</span></li>'; }).join('') + '</ul>';
     }
 
     var big = c.largest || [], files = state.all.files ? big : big.slice(0, 8);
@@ -289,8 +284,8 @@
       '<div class="in-two"><div><h3>Publishers</h3>' + rank('pubs', c.publishers || [], 8) + '</div>' +
       '<div><h3>Biggest series <span>issues</span></h3>' + rank('series', c.series || [], 8) + '</div></div>' +
       (big.length ? '<div class="in-solo"><h3>Largest files</h3><ol class="in-files">' + files.map(function (x) {
-        return '<li><span class="font-monospace n" title="' + esc(x.name) + '">' + esc(x.name) + '</span>' +
-          (x.folder ? '<span class="sub">' + esc(x.folder) + '</span>' : '') + '<span class="c">' + size(x.size) + '</span></li>';
+        return '<li><span class="font-monospace n" title="' + CLU.escapeHtml(x.name) + '">' + CLU.escapeHtml(x.name) + '</span>' +
+          (x.folder ? '<span class="sub">' + CLU.escapeHtml(x.folder) + '</span>' : '') + '<span class="c">' + size(x.size) + '</span></li>';
       }).join('') + '</ol>' + more('files', big.length, 8) + '</div>' : '');
     // Count the facts up once, on first draw (clu-motion scans only static markup).
     if (!state.counted && window.CLU && CLU.countUp) {
@@ -304,7 +299,7 @@
   function showSkipped(items) {
     document.getElementById('skippedIssuesList').innerHTML = items.map(function (it) {
       return '<div class="list-group-item d-flex justify-content-between align-items-start gap-2"><div class="text-truncate" title="' +
-        esc(it.file) + '">' + esc(it.file) + '</div><span class="badge text-bg-secondary">' + esc(it.reason) + '</span></div>';
+        CLU.escapeHtml(it.file) + '">' + CLU.escapeHtml(it.file) + '</div><span class="badge text-bg-secondary">' + CLU.escapeHtml(it.reason) + '</span></div>';
     }).join('');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('skippedIssuesModal')).show();
   }

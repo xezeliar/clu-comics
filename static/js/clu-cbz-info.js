@@ -47,6 +47,7 @@
   // Page viewer state
   var _viewerPath = null;
   var _viewerPageCount = 0;
+  var _viewerRev = '';            // the archive's mtime, from /cbz-metadata
   var _viewerCurrentPage = 0;
   var _viewerPreloadedPages = {};
 
@@ -254,12 +255,24 @@
     img.src = src;
   }
 
+  /**
+   * URL of one page image. The archive's mtime rides along as `v`: the page
+   * route's URL does not change when a crop, edit or rebuild rewrites the
+   * file, and a browser reuses an image it already loaded from the same URL
+   * in this document, so the preview kept showing the old cover. Never a
+   * timestamp -- an unchanged file must keep its URL.
+   */
+  function _pageUrl(path, pageNum) {
+    var url = '/api/read/' + _encodePathForReader(path) + '/page/' + pageNum;
+    return _viewerRev ? url + '?v=' + encodeURIComponent(_viewerRev) : url;
+  }
+
   function _loadCbzPage(pageNum) {
     if (!_viewerPath || pageNum < 0 || pageNum >= _viewerPageCount) return;
     var path = _viewerPath;
     _viewerCurrentPage = pageNum;
     _updatePageButtons();
-    _showImage('/api/read/' + _encodePathForReader(path) + '/page/' + pageNum, 'Page ' + (pageNum + 1), function (img) {
+    _showImage(_pageUrl(path, pageNum), 'Page ' + (pageNum + 1), function (img) {
       if (path !== _viewerPath || pageNum !== _viewerCurrentPage) return;
       _fetchPageInfo(pageNum, img.naturalWidth, img.naturalHeight);
     });
@@ -283,7 +296,7 @@
     [currentPage + 1, currentPage + 2, currentPage - 1].forEach(function (pn) {
       if (pn >= 0 && pn < _viewerPageCount && !_viewerPreloadedPages[pn]) {
         var img = new Image();
-        img.src = '/api/read/' + _encodePathForReader(_viewerPath) + '/page/' + pn;
+        img.src = _pageUrl(_viewerPath, pn);
         _viewerPreloadedPages[pn] = true;
       }
     });
@@ -447,10 +460,6 @@
     return _parts(field).every(function (k) { return _isBlank(_effectiveValue(k)); });
   }
 
-  function _escapeAttr(text) {
-    return CLU.escapeHtml(String(text)).replace(/"/g, '&quot;');
-  }
-
   function _monthName(m) {
     var n = /^\s*\d{1,2}\s*$/.test(m) ? parseInt(m, 10) : 0;
     return n >= 1 && n <= 12 ? _MONTHS[n - 1] : m;
@@ -484,7 +493,7 @@
     if (field.url && /^https?:\/\/\S+$/i.test(value)) {
       var shown = value.replace(/^https?:\/\//i, '').replace(/\/$/, '');
       if (shown.length > 34) shown = shown.slice(0, 33) + '…';
-      return '<a href="' + _escapeAttr(value) + '" target="_blank" rel="noopener noreferrer">' +
+      return '<a href="' + CLU.escapeHtml(value) + '" target="_blank" rel="noopener noreferrer">' +
         CLU.escapeHtml(shown) + ' <i class="bi bi-box-arrow-up-right small" aria-hidden="true"></i>' +
         '<span class="visually-hidden"> (opens in a new tab)</span></a>';
     }
@@ -519,7 +528,7 @@
     var display = _fieldBlank(field)
       ? '<span class="ci-empty">Not set</span>'
       : _formatValue(field, _effectiveValue(field.key));
-    var label = _escapeAttr(field.label);
+    var label = CLU.escapeHtml(field.label);
     return '<div class="ci-row' + (dirty ? ' ci-dirty' : '') + '" data-key="' + field.key + '">' +
       '<dt>' + label + (dirty ? '<span class="visually-hidden"> (edited)</span>' : '') + '</dt>' +
       '<dd><span class="ci-v" data-key="' + field.key + '">' + display + '</span>' +
@@ -1012,6 +1021,7 @@
         if (filePath !== _currentFilePath) return;   // superseded by Prev/Next
         if (data.error) throw new Error(data.error);
         _currentData = data;
+        _viewerRev = data.modified ? String(data.modified) : '';
         _currentComicInfo = data.comicinfo || {};
         _hasComicInfo = !!data.comicinfo;
         _currentProvider = data.provider || null;

@@ -29,7 +29,7 @@
   <span class="clu-ap-nm">{{ p.label }}<span class="visually-hidden">{{ ', dark' if p.dark else ', light' }}</span></span>
 </button>
 {%- endmacro %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/clu-appearance.css') }}">
+<link rel="stylesheet" href="{{ asset('css/clu-appearance.css') }}">
 <div class="clu-ap" id="{{ _id }}" data-per-user="{{ 'true' if ap_per_user else 'false' }}"
   data-override="{{ 'true' if ap_override else 'false' }}">
   <script type="application/json" class="clu-ap-data">{{ {'catalog': ap_catalog, 'state': ap_state}|tojson }}</script>

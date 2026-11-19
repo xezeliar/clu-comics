@@ -7,7 +7,11 @@ from core.database import (
     add_library,
     add_file_index_entry,
     add_to_read,
-    get_api_token,
+    LEGACY_TOKEN_DIGEST_PREFIX,
+    _hash_token,
+    get_api_token_digest,
+    get_user_preference,
+    migrate_legacy_api_token_to_digest,
     rotate_api_token,
     set_api_browse_mode,
     set_publisher_favorite,
@@ -118,10 +122,61 @@ class TestTokenHelpers:
         assert t1 and t2
         assert t1 != t2
         # Latest one wins
-        assert get_api_token() == t2
+        assert get_api_token_digest() == _hash_token(t2)
 
-    def test_get_api_token_none_when_unset(self, db_connection):
-        assert get_api_token() is None
+    def test_get_api_token_digest_none_when_unset(self, db_connection):
+        assert get_api_token_digest() is None
+
+    def test_rotated_token_is_stored_hashed_and_authenticates(self, db_connection, client):
+        token = rotate_api_token()
+        stored = get_user_preference("api_token")
+        assert stored == LEGACY_TOKEN_DIGEST_PREFIX + _hash_token(token)
+        assert token not in stored
+        resp = client.get("/api/v1/auth/ping",
+                          headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+
+class TestLegacyTokenMigration:
+    """Upgrade: a plaintext legacy token is replaced by its digest, once, and
+    the client holding it keeps working."""
+
+    def test_plain_value_is_replaced_by_its_digest(self, with_token):
+        assert migrate_legacy_api_token_to_digest() is True
+        stored = get_user_preference("api_token")
+        assert stored == LEGACY_TOKEN_DIGEST_PREFIX + _hash_token(TOKEN)
+        assert TOKEN not in stored
+
+    def test_is_idempotent(self, with_token):
+        assert migrate_legacy_api_token_to_digest() is True
+        once = get_user_preference("api_token")
+        assert migrate_legacy_api_token_to_digest() is False
+        assert get_user_preference("api_token") == once
+
+    def test_noop_when_unset(self, db_connection):
+        assert migrate_legacy_api_token_to_digest() is False
+        assert get_user_preference("api_token") is None
+
+    def test_existing_client_still_authenticates_after_migration(
+            self, auth_headers, client):
+        migrate_legacy_api_token_to_digest()
+        resp = client.get("/api/v1/auth/ping", headers=auth_headers)
+        assert resp.status_code == 200
+
+    def test_wrong_token_still_refused_after_migration(self, with_token, client):
+        migrate_legacy_api_token_to_digest()
+        resp = client.get("/api/v1/auth/ping",
+                          headers={"Authorization": "Bearer " + "fake-" + "other"})
+        assert resp.status_code == 401
+
+    def test_presenting_the_digest_itself_is_refused(self, with_token, client):
+        """The stored digest is not a credential."""
+        migrate_legacy_api_token_to_digest()
+        digest = _hash_token(TOKEN)
+        for value in (digest, LEGACY_TOKEN_DIGEST_PREFIX + digest):
+            resp = client.get("/api/v1/auth/ping",
+                              headers={"Authorization": f"Bearer {value}"})
+            assert resp.status_code == 401
 
 
 # =============================================================================
@@ -1157,6 +1212,7 @@ class TestDashboardLists:
         # the recent endpoint has predictable data regardless of library
         # configuration.
         import time as _time
+        add_library("Test", "/data")  # the recent feed lists only files inside a library
         now = _time.time()
         conn = get_db_connection()
         c = conn.cursor()
@@ -1197,6 +1253,7 @@ class TestDashboardLists:
         self, auth_headers, db_connection, client
     ):
         import time as _time
+        add_library("Test", "/data")  # the recent feed lists only files inside a library
         now = _time.time()
         conn = get_db_connection()
         c = conn.cursor()

@@ -4,6 +4,7 @@ Covers the two self-service endpoints (/api/account/appearance, /api/account/
 dashboard), the override -> site-default fallback as it reaches the rendered
 page, and the implicit-owner (no-login) path.
 """
+import re
 import pytest
 
 from core.database import (
@@ -274,7 +275,8 @@ class TestImplicitOwnerHeader:
     def _single_user(self, db_connection, monkeypatch):
         monkeypatch.delenv("CLU_USERNAME", raising=False)
         monkeypatch.delenv("CLU_PASSWORD", raising=False)
-        create_user("owner", password="ownerpass", role="owner")
+        # An open install: the owner has no password (a password means login).
+        create_user("owner", password=None, role="owner", needs_setup=1)
         yield
 
     def test_no_username_chip_without_login(self, client):
@@ -343,9 +345,10 @@ class TestRenderedTheme:
         _login(client, "reader", "readerpass")
         html = client.get("/account").get_data(as_text=True)
 
-        assert ('/static/css/themes/solarized-light.css" rel="stylesheet" '
-                'media="(prefers-color-scheme: light)"') in html
-        assert '/static/css/themes/nord.css" rel="stylesheet" media="(prefers-color-scheme: dark)"' in html
+        assert re.search(r'/static/css/themes/solarized-light\.css(\?v=[^"]*)?" rel="stylesheet" '
+                         r'media="\(prefers-color-scheme: light\)"', html)
+        assert re.search(r'/static/css/themes/nord\.css(\?v=[^"]*)?" rel="stylesheet" '
+                         r'media="\(prefers-color-scheme: dark\)"', html)
         # The device decides the scheme, in a blocking head script.
         assert '<html lang="en">' in html
         assert "matchMedia('(prefers-color-scheme: dark)')" in html

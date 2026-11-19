@@ -45,6 +45,8 @@ the other **as a whole word**, and the leftover after subtracting it must pass
   `generate_filename_pattern` uses), so `Batman - The Dark Knight` and
   `Batman: The Dark Knight` are one series. Parentheses and brackets are
   deliberately *kept*: `_BENIGN_SERIES_EXTRA` reads them to recognise `(2025)`.
+  That class, the apostrophe rule and the leading article now live once, in
+  `core/series_names.py`; see `series-name-matching.md`.
 - **The verdict is memoized on the normalised pair.** This is asked per wanted
   issue × per remaining file; without the memo a large library pays the regex
   millions of times.
@@ -103,6 +105,13 @@ refused claim asks the holder for one more pass (bounded by
 a caller that stands down silently can strand a file in TARGET until the next
 download finishes. `/api/scan-downloads` answers **409** rather than reporting a
 scan it did not run.
+
+> **"Is a re-run owed?" and "release the claim" are one step under the lock**
+> (`finish_target_sweep_pass`). They used to be two, and a request landing
+> between them saw the claim held, set the flag, and had it cleared unread by
+> the release. The lock is never held while the body runs; requests during a
+> pass coalesce into one further pass; a pass that raises still runs a pending
+> re-run, and only the final pass's exception propagates.
 
 **`core/problem_replacements.py` is the destructive twin** and uses the same
 collector (`skip_converted_siblings=False` — it decides `.cbr` vs `.cbz` for

@@ -59,6 +59,114 @@ let currentEditFilePath = null;
 // show Add vs Remove without a per-item /to-read/check round trip.
 let wantToReadPaths = new Set();
 
+// File and folder names come from the filesystem, so they reach the DOM as
+// text, never as HTML. Fills `el` with the name and, when `sizeText` is
+// given, the "(12.3 MB)" label after it.
+function setNameWithSize(el, name, sizeText) {
+  el.textContent = name;
+  if (sizeText != null && sizeText !== '') {
+    el.appendChild(document.createTextNode(' '));
+    const size = document.createElement('span');
+    size.className = 'text-info-emphasis small ms-2 file-size-label';
+    size.dataset.size = sizeText;
+    size.textContent = `(${sizeText})`;
+    el.appendChild(size);
+  }
+}
+
+// Minimal element builder: domEl('div', {className: 'x', title: name}, 'text', childNode).
+// Props go through DOM properties / setAttribute and string children become
+// text nodes, so nothing passed here is ever parsed as HTML. `dataset` and
+// `style` take objects; `on<event>` keys take listeners.
+function domEl(tag, props, ...children) {
+  const el = document.createElement(tag);
+  if (props) {
+    Object.keys(props).forEach(key => {
+      const value = props[key];
+      if (value == null || value === false) return;
+      if (key === 'className') el.className = value;
+      else if (key === 'text') el.textContent = value;
+      else if (key === 'dataset') Object.assign(el.dataset, value);
+      else if (key === 'style' && typeof value === 'object') Object.assign(el.style, value);
+      else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2).toLowerCase(), value);
+      else el.setAttribute(key, value === true ? '' : String(value));
+    });
+  }
+  children.flat().forEach(child => {
+    if (child == null || child === false) return;
+    el.appendChild(typeof child === 'object' ? child : document.createTextNode(String(child)));
+  });
+  return el;
+}
+
+// "Old: <code>a</code> / New: <code>b</code>" rows shared by the rename previews.
+function renamePreviewRows(oldName, newName) {
+  return [
+    domEl('div', null, domEl('strong', null, 'Old:'), ' ', domEl('code', null, oldName)),
+    domEl('div', null, domEl('strong', null, 'New:'), ' ', domEl('code', null, newName))
+  ];
+}
+
+// Body of a GCD series row: name, publisher, issue count and a year badge
+// (plus a language badge under it when `withLanguage`).
+function gcdSeriesItemContent(series, yearRange, withLanguage) {
+  const yearBadge = domEl('span', { className: 'badge bg-primary rounded-pill' }, yearRange);
+  return [
+    domEl('div', { className: 'ms-2 me-auto' },
+      domEl('div', { className: 'fw-bold' }, series.name),
+      domEl('small', { className: 'text-muted' },
+        `Publisher: ${series.publisher_name || 'Unknown'}`, domEl('br'),
+        `Issue Count: ${series.issue_count || 'Unknown'}`)),
+    withLanguage
+      ? domEl('div', { className: 'text-end' }, yearBadge, domEl('br'),
+          domEl('span', { className: 'badge bg-dark rounded-pill' }, series.language))
+      : yearBadge
+  ];
+}
+
+// A provider description can carry its own markup (ComicVine's does). Read
+// it in an inert document and keep only the text.
+function htmlToText(html) {
+  if (!html) return '';
+  try {
+    return new DOMParser().parseFromString(String(html), 'text/html').body.textContent || '';
+  } catch (e) {
+    return String(html);
+  }
+}
+
+// Body of a ComicVine / GCD API volume row: cover, name, publisher, issue
+// count, description preview and the year (plus `langDisplay`, when given).
+function volumeItemContent(volume, langDisplay) {
+  const thumbStyle = { width: '80px', height: '120px' };
+  const thumb = volume.image_url
+    ? domEl('img', {
+        src: volume.image_url, className: 'img-thumbnail me-3',
+        style: Object.assign({ objectFit: 'cover' }, thumbStyle),
+        alt: `${volume.name} cover`
+      })
+    : domEl('div', {
+        className: 'me-3 d-flex align-items-center justify-content-center bg-secondary text-white',
+        style: Object.assign({ fontSize: '10px' }, thumbStyle)
+      }, 'No Cover');
+  const description = htmlToText(volume.description);
+  const yearBadge = domEl('span', { className: 'badge bg-success rounded-pill' }, volume.start_year || 'Unknown');
+  return [
+    thumb,
+    domEl('div', { className: 'flex-grow-1 d-flex justify-content-between align-items-start' },
+      domEl('div', { className: 'me-2' },
+        domEl('div', { className: 'fw-bold' }, volume.name),
+        domEl('small', { className: 'text-muted' },
+          `Publisher: ${volume.publisher_name || 'Unknown'}`, domEl('br'),
+          `Issues: ${volume.count_of_issues || 'Unknown'}`),
+        description ? domEl('small', { className: 'text-muted d-block mt-1' }, description) : null),
+      langDisplay == null
+        ? yearBadge
+        : domEl('div', { className: 'text-end' }, yearBadge,
+            langDisplay ? domEl('span', { className: 'badge bg-info rounded-pill ms-1' }, langDisplay) : null))
+  ];
+}
+
 // Format file size helper function
 function formatSize(bytes) {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -2127,10 +2235,13 @@ function waitForMoveCompletion(opId, label, itemCount, undo) {
 
 // Batch renames run on the shared file-job queue (core/job_queue.py), so one
 // can wait behind a tagging or Remove XML job. Say which it is.
-function renameStartedHtml(data, startedText) {
-  return data.queued
-    ? '<strong>Queued.</strong> It will start when the current job finishes.'
-    : '<strong>Started!</strong> ' + startedText;
+// The success banner shown in a rename modal once the batch is accepted.
+function renameStartedBanner(data, startedText) {
+  return domEl('div', { className: 'alert alert-success text-center' },
+    domEl('i', { className: 'bi bi-check-circle-fill me-2' }),
+    data.queued
+      ? [domEl('strong', null, 'Queued.'), ' It will start when the current job finishes.']
+      : [domEl('strong', null, 'Started!'), ' ' + startedText]);
 }
 
 // Wait for a batch-rename op, then toast and refresh.
@@ -2411,10 +2522,7 @@ function previewCustomRename() {
 
           const previewItem = document.createElement('div');
           previewItem.className = 'mb-2 p-2 border rounded';
-          previewItem.innerHTML = `
-                <div><strong>Old:</strong> <code>${CLU.escapeHtml(fileData.name)}</code></div>
-                <div><strong>New:</strong> <code>${CLU.escapeHtml(newName)}</code></div>
-              `;
+          previewItem.append(...renamePreviewRows(fileData.name, newName));
           previewList.appendChild(previewItem);
         });
       }
@@ -2464,12 +2572,7 @@ function executeCustomRename() {
         return;
       }
       const renamePreviewList = document.getElementById('renamePreviewList');
-      renamePreviewList.innerHTML = `
-            <div class="alert alert-success text-center">
-              <i class="bi bi-check-circle-fill me-2"></i>
-              ${renameStartedHtml(data, `Renaming ${count} files…`)}
-            </div>
-          `;
+      renamePreviewList.replaceChildren(renameStartedBanner(data, `Renaming ${count} files…`));
       document.getElementById('previewRenameBtn').style.display = 'none';
       document.getElementById('executeRenameBtn').style.display = 'none';
       setTimeout(() => customRenameModal.hide(), 1500);
@@ -2583,10 +2686,7 @@ function previewReplaceText() {
 
           const previewItem = document.createElement('div');
           previewItem.className = 'mb-2 p-2 border rounded';
-          previewItem.innerHTML = `
-                <div><strong>Old:</strong> <code>${CLU.escapeHtml(fileData.name)}</code></div>
-                <div><strong>New:</strong> <code>${CLU.escapeHtml(newName)}</code></div>
-              `;
+          previewItem.append(...renamePreviewRows(fileData.name, newName));
           previewList.appendChild(previewItem);
         });
       }
@@ -2634,12 +2734,7 @@ function executeReplaceText() {
         return;
       }
       const replacePreviewList = document.getElementById('replacePreviewList');
-      replacePreviewList.innerHTML = `
-            <div class="alert alert-success text-center">
-              <i class="bi bi-check-circle-fill me-2"></i>
-              ${renameStartedHtml(data, `Replacing text in ${count} files…`)}
-            </div>
-          `;
+      replacePreviewList.replaceChildren(renameStartedBanner(data, `Replacing text in ${count} files…`));
       document.getElementById('previewReplaceBtn').style.display = 'none';
       document.getElementById('executeReplaceBtn').style.display = 'none';
       setTimeout(() => replaceTextModal.hide(), 1500);
@@ -2830,10 +2925,10 @@ function displaySeriesRenamePreview(fileList) {
   fileList.forEach(file => {
     const div = document.createElement('div');
     div.className = 'mb-2 p-2 border rounded';
-    div.innerHTML = `
-          <div><strong>Original:</strong> <code>${file.originalName}</code></div>
-          <div><strong>New:</strong> <code class="text-success">${file.newName}</code></div>
-        `;
+    div.append(
+      domEl('div', null, domEl('strong', null, 'Original:'), ' ', domEl('code', null, file.originalName)),
+      domEl('div', null, domEl('strong', null, 'New:'), ' ', domEl('code', { className: 'text-success' }, file.newName))
+    );
     previewContainer.appendChild(div);
   });
 }
@@ -3016,16 +3111,13 @@ function displaySearchResults(results, query) {
       const icon = item.type === 'directory' ? 'bi-folder' : 'bi-file-earmark-zip';
       const size = item.type === 'file' ? formatSize(item.size) : '';
 
-      resultItem.innerHTML = `
-            <div class="d-flex align-items-center">
-              <i class="bi ${icon} me-2"></i>
-              <span>${item.name}</span>
-              ${size ? `<span class="text-info-emphasis small ms-2">(${size})</span>` : ''}
-            </div>
-            <div class="text-muted small">
-              ${item.parent}
-            </div>
-          `;
+      const nameSpan = domEl('span');
+      setNameWithSize(nameSpan, item.name, size || null);
+      resultItem.append(
+        domEl('div', { className: 'd-flex align-items-center' },
+          domEl('i', { className: `bi ${icon} me-2` }), nameSpan),
+        domEl('div', { className: 'text-muted small' }, item.parent)
+      );
 
       // Add click handler to navigate to the item
       resultItem.addEventListener('click', () => {
@@ -3179,10 +3271,11 @@ function searchGCDMetadata(filePath, fileName) {
             <div class="spinner-border spinner-border-sm me-2" role="status">
               <span class="visually-hidden">Loading...</span>
             </div>
-            Searching GCD database for "${nameWithoutExt}"...
+            <span class="gcd-search-label"></span>
           </div>
         </div>
       `;
+  loadingToast.querySelector('.gcd-search-label').textContent = `Searching GCD database for "${nameWithoutExt}"...`;
   document.body.appendChild(loadingToast);
 
   // Make request to backend
@@ -3356,13 +3449,13 @@ async function processNestedVolumeDirectories(parentPath, parentName, volumeDire
         <div class="modal-dialog">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Processing Volume Directories: ${seriesName}</h5>
+              <h5 class="modal-title"></h5>
             </div>
             <div class="modal-body">
               <div class="mb-3">
                 <div class="d-flex justify-content-between">
                   <span>Progress:</span>
-                  <span id="volumeProgressText">0 / ${volumeDirectories.length}</span>
+                  <span id="volumeProgressText"></span>
                 </div>
                 <div class="progress">
                   <div id="volumeProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
@@ -3381,6 +3474,8 @@ async function processNestedVolumeDirectories(parentPath, parentName, volumeDire
           </div>
         </div>
       `;
+  progressModal.querySelector('.modal-title').textContent = `Processing Volume Directories: ${seriesName}`;
+  progressModal.querySelector('#volumeProgressText').textContent = `0 / ${volumeDirectories.length}`;
   document.body.appendChild(progressModal);
 
   const volumeModal = new bootstrap.Modal(progressModal);
@@ -3442,7 +3537,7 @@ async function processNestedVolumeDirectories(parentPath, parentName, volumeDire
       const resultsDiv = document.getElementById('volumeResults');
       const resultItem = document.createElement('div');
       resultItem.className = 'text-success';
-      resultItem.innerHTML = `✓ ${volumeName} - ${comicFiles.length} files processed`;
+      resultItem.textContent = `✓ ${volumeName} - ${comicFiles.length} files processed`;
       resultsDiv.appendChild(resultItem);
 
     } catch (error) {
@@ -3450,7 +3545,7 @@ async function processNestedVolumeDirectories(parentPath, parentName, volumeDire
       const resultsDiv = document.getElementById('volumeResults');
       const resultItem = document.createElement('div');
       resultItem.className = 'text-danger';
-      resultItem.innerHTML = `✗ ${volumeName} - ${error.message}`;
+      resultItem.textContent = `✗ ${volumeName} - ${error.message}`;
       resultsDiv.appendChild(resultItem);
     }
 
@@ -3635,13 +3730,7 @@ function renderDirectorySeriesList(seriesData, directoryPath, directoryName, com
       ? (series.year_ended ? `${series.year_began}-${series.year_ended}` : `${series.year_began}-ongoing`)
       : 'Unknown';
 
-    seriesItem.innerHTML = `
-          <div class="ms-2 me-auto">
-            <div class="fw-bold">${series.name}</div>
-            <small class="text-muted">Publisher: ${series.publisher_name || 'Unknown'}<br>Issue Count: ${series.issue_count || 'Unknown'}</small>
-          </div>
-          <span class="badge bg-primary rounded-pill">${yearRange}</span>
-        `;
+    seriesItem.append(...gcdSeriesItemContent(series, yearRange));
 
     seriesItem.addEventListener('click', () => {
       // Highlight selected item
@@ -3701,13 +3790,13 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
         <div class="modal-dialog">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Processing Directory: ${directoryName}</h5>
+              <h5 class="modal-title"></h5>
             </div>
             <div class="modal-body">
               <div class="mb-3">
                 <div class="d-flex justify-content-between">
                   <span>Progress:</span>
-                  <span id="bulkProgressText">0 / ${comicFiles.length}</span>
+                  <span id="bulkProgressText"></span>
                 </div>
                 <div class="progress">
                   <div id="bulkProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
@@ -3726,6 +3815,8 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
           </div>
         </div>
       `;
+  progressModal.querySelector('.modal-title').textContent = `Processing Directory: ${directoryName}`;
+  progressModal.querySelector('#bulkProgressText').textContent = `0 / ${comicFiles.length}`;
   document.body.appendChild(progressModal);
 
   const bulkModal = new bootstrap.Modal(progressModal);
@@ -3914,10 +4005,10 @@ function processBulkGCDMetadata(directoryPath, directoryName, seriesId, comicFil
     for (let i = 0; i < failedFiles.length && !cancelled; i++) {
       const failedFile = failedFiles[i];
 
-      document.getElementById('bulkCurrentFile').innerHTML = `
-            <div class="mb-2">Secondary search phase: Using filename-based search</div>
-            <div class="text-muted small">Processing: ${CLU.escapeHtml(failedFile.fileName)} (${i + 1}/${totalFailed})</div>
-          `;
+      document.getElementById('bulkCurrentFile').replaceChildren(
+        domEl('div', { className: 'mb-2' }, 'Secondary search phase: Using filename-based search'),
+        domEl('div', { className: 'text-muted small' }, `Processing: ${failedFile.fileName} (${i + 1}/${totalFailed})`)
+      );
 
       try {
         // Search using just the filename (not tied to the original series)
@@ -4139,16 +4230,7 @@ function renderSeriesList(seriesData) {
       ? (series.year_ended ? `${series.year_began}-${series.year_ended}` : `${series.year_began}-ongoing`)
       : 'Unknown';
 
-    seriesItem.innerHTML = `
-          <div class="ms-2 me-auto">
-            <div class="fw-bold">${series.name}</div>
-            <small class="text-muted">Publisher: ${series.publisher_name || 'Unknown'}<br>Issue Count: ${series.issue_count || 'Unknown'}</small>
-          </div>
-          <div class="text-end">
-            <span class="badge bg-primary rounded-pill">${yearRange}</span><br>
-            <span class="badge bg-dark rounded-pill">${series.language}</span>
-          </div>
-        `;
+    seriesItem.append(...gcdSeriesItemContent(series, yearRange, true));
 
     seriesItem.addEventListener('click', () => {
       // Highlight selected item
@@ -4213,10 +4295,11 @@ function searchComicVineMetadata(filePath, fileName) {
         <div class="spinner-border spinner-border-sm me-2" role="status">
           <span class="visually-hidden">Loading...</span>
         </div>
-        Searching ComicVine for "${nameWithoutExt}"...
+        <span class="cv-search-label"></span>
       </div>
     </div>
   `;
+  loadingToast.querySelector('.cv-search-label').textContent = `Searching ComicVine for "${nameWithoutExt}"...`;
   document.body.appendChild(loadingToast);
 
   // Make request to backend
@@ -4323,26 +4406,7 @@ function showComicVineVolumeSelectionModal(data, filePath, fileName) {
     volumeItem.className = 'list-group-item list-group-item-action d-flex align-items-start';
     volumeItem.style.cursor = 'pointer';
 
-    const yearDisplay = volume.start_year || 'Unknown';
-    const descriptionPreview = volume.description ?
-      `<small class="text-muted d-block mt-1">${volume.description}</small>` : '';
-
-    // Display thumbnail if available, otherwise show placeholder
-    const thumbnailHtml = volume.image_url ?
-      `<img src="${volume.image_url}" class="img-thumbnail me-3" style="width: 80px; height: 120px; object-fit: cover;" alt="${volume.name} cover">` :
-      `<div class="me-3 d-flex align-items-center justify-content-center bg-secondary text-white" style="width: 80px; height: 120px; font-size: 10px;">No Cover</div>`;
-
-    volumeItem.innerHTML = `
-      ${thumbnailHtml}
-      <div class="flex-grow-1 d-flex justify-content-between align-items-start">
-        <div class="me-2">
-          <div class="fw-bold">${volume.name}</div>
-          <small class="text-muted">Publisher: ${volume.publisher_name || 'Unknown'}<br>Issues: ${volume.count_of_issues || 'Unknown'}</small>
-          ${descriptionPreview}
-        </div>
-        <span class="badge bg-success rounded-pill">${yearDisplay}</span>
-      </div>
-    `;
+    volumeItem.append(...volumeItemContent(volume, null));
 
     volumeItem.addEventListener('click', () => {
       // Highlight selected item
@@ -4407,29 +4471,8 @@ function showGCDApiSeriesSelectionModal(data, filePath, fileName) {
       volumeItem.className = 'list-group-item list-group-item-action d-flex align-items-start';
       volumeItem.style.cursor = 'pointer';
 
-      const yearDisplay = volume.start_year || 'Unknown';
       const langDisplay = (volume.language || '').toUpperCase();
-      const descriptionPreview = volume.description ?
-        `<small class="text-muted d-block mt-1">${volume.description}</small>` : '';
-
-      const thumbnailHtml = volume.image_url ?
-        `<img src="${volume.image_url}" class="img-thumbnail me-3" style="width: 80px; height: 120px; object-fit: cover;" alt="${volume.name} cover">` :
-        `<div class="me-3 d-flex align-items-center justify-content-center bg-secondary text-white" style="width: 80px; height: 120px; font-size: 10px;">No Cover</div>`;
-
-      volumeItem.innerHTML = `
-        ${thumbnailHtml}
-        <div class="flex-grow-1 d-flex justify-content-between align-items-start">
-          <div class="me-2">
-            <div class="fw-bold">${volume.name}</div>
-            <small class="text-muted">Publisher: ${volume.publisher_name || 'Unknown'}<br>Issues: ${volume.count_of_issues || 'Unknown'}</small>
-            ${descriptionPreview}
-          </div>
-          <div class="text-end">
-            <span class="badge bg-success rounded-pill">${yearDisplay}</span>
-            ${langDisplay ? `<span class="badge bg-info rounded-pill ms-1">${langDisplay}</span>` : ''}
-          </div>
-        </div>
-      `;
+      volumeItem.append(...volumeItemContent(volume, langDisplay));
 
       volumeItem.addEventListener('click', () => {
         volumeList.querySelectorAll('.list-group-item').forEach(item => item.classList.remove('active'));
@@ -4476,7 +4519,7 @@ function showGCDApiSeriesSelectionModal(data, filePath, fileName) {
       selectEl.style.width = '120px';
       selectEl.innerHTML = '<option value="">All languages</option>';
       Object.keys(langSet).sort().forEach(key => {
-        selectEl.innerHTML += `<option value="${key}">${key} (${langSet[key]})</option>`;
+        selectEl.appendChild(domEl('option', { value: key }, `${key} (${langSet[key]})`));
       });
       filterContainer.parentNode.insertBefore(selectEl, filterContainer);
       selectEl.addEventListener('change', () => {
@@ -4514,7 +4557,7 @@ function showGCDApiStartYearPrompt(data, filePath, fileName) {
   const volumeList = document.getElementById('cvVolumeList');
   volumeList.innerHTML = `
     <div class="p-3">
-      <p class="text-muted">${message}</p>
+      <p class="text-muted gcd-start-year-message"></p>
       <p class="text-muted small">The GCD API filters by the year a series <strong>started</strong>,
         not the issue publication year. For example, a 2026 issue may belong to a series that started in 2025.</p>
       <div class="input-group mb-2">
@@ -4528,6 +4571,7 @@ function showGCDApiStartYearPrompt(data, filePath, fileName) {
       </button>
     </div>
   `;
+  volumeList.querySelector('.gcd-start-year-message').textContent = message;
 
   const searchBtn = document.getElementById('gcdApiStartYearSearchBtn');
   const yearInput = document.getElementById('gcdApiStartYearInput');
@@ -4632,25 +4676,22 @@ function showMangaSeriesSelectionModal(data, filePath, fileName, libraryId, skip
     seriesItem.className = 'list-group-item list-group-item-action d-flex align-items-start';
     seriesItem.style.cursor = 'pointer';
 
-    const yearDisplay = series.start_year || 'Unknown';
-    const descriptionPreview = series.description ?
-      `<small class="text-muted d-block mt-1">${series.description.substring(0, 200)}${series.description.length > 200 ? '...' : ''}</small>` : '';
-
-    const thumbnailHtml = series.image_url ?
-      `<img src="${series.image_url}" class="img-thumbnail me-3" style="width: 80px; height: 120px; object-fit: cover;" alt="${series.name} cover">` :
-      `<div class="me-3 d-flex align-items-center justify-content-center bg-secondary text-white" style="width: 80px; height: 120px; font-size: 10px;">No Cover</div>`;
-
-    seriesItem.innerHTML = `
-      ${thumbnailHtml}
-      <div class="flex-grow-1 d-flex justify-content-between align-items-start">
-        <div class="me-2">
-          <div class="fw-bold">${series.name}</div>
-          <small class="text-muted">Volumes: ${series.count_of_issues || 'Unknown'}</small>
-          ${descriptionPreview}
-        </div>
-        <span class="badge bg-success rounded-pill">${yearDisplay}</span>
-      </div>
-    `;
+    const description = htmlToText(series.description);
+    const parts = volumeItemContent({
+      name: series.name, image_url: series.image_url, start_year: series.start_year,
+      description: null
+    }, null);
+    // Manga rows show a volume count instead of publisher + issue count.
+    const textCol = parts[1].querySelector('.me-2');
+    textCol.replaceChildren(
+      domEl('div', { className: 'fw-bold' }, series.name),
+      domEl('small', { className: 'text-muted' }, `Volumes: ${series.count_of_issues || 'Unknown'}`)
+    );
+    if (description) {
+      textCol.appendChild(domEl('small', { className: 'text-muted d-block mt-1' },
+        description.substring(0, 200) + (description.length > 200 ? '...' : '')));
+    }
+    seriesItem.append(...parts);
 
     seriesItem.addEventListener('click', () => {
       // Highlight selected
@@ -5016,35 +5057,40 @@ function showSmartRenameModal(plan, panel) {
   let skipCount = 0;
   const issues = [];
 
+  const issueItem = (code, text) => domEl('li', null, domEl('code', null, code), `: ${text}`);
+  const cellStyle = { maxWidth: '300px' };
+
   for (const dir of (plan.directories || [])) {
     if (dir.status !== 'ok') {
       const reason = dir.reason ? ` — ${dir.reason}` : '';
-      issues.push(`<li><code>${escapeHtml(dir.dir)}</code>: ${escapeHtml(dir.status)}${escapeHtml(reason)}</li>`);
+      issues.push(issueItem(dir.dir, `${dir.status}${reason}`));
       continue;
     }
     if (dir.warning) {
-      issues.push(`<li><code>${escapeHtml(dir.dir)}</code>: ${escapeHtml(dir.warning)}</li>`);
+      issues.push(issueItem(dir.dir, dir.warning));
     }
     for (const f of (dir.files || [])) {
       if (f.status === 'ok') {
         okCount++;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="text-muted small text-truncate" style="max-width:300px" title="${escapeHtml(f.old_path)}">${escapeHtml(f.old_name)}</td>
-          <td class="small text-truncate" style="max-width:300px" title="${escapeHtml(f.new_path)}">${escapeHtml(f.new_name)}</td>`;
-        tbody.appendChild(tr);
+        tbody.appendChild(domEl('tr', null,
+          domEl('td', { className: 'text-muted small text-truncate', style: cellStyle, title: f.old_path }, f.old_name),
+          domEl('td', { className: 'small text-truncate', style: cellStyle, title: f.new_path }, f.new_name)));
       } else {
         skipCount++;
         const label = f.status === 'excluded_term'
-          ? `skipped (matched "${escapeHtml(f.matched_term || '')}")`
-          : escapeHtml(f.status);
-        issues.push(`<li><code>${escapeHtml(f.old_name)}</code>: ${label}</li>`);
+          ? `skipped (matched "${f.matched_term || ''}")`
+          : f.status;
+        issues.push(issueItem(f.old_name, label));
       }
     }
   }
 
   summaryEl.textContent = `${okCount} file(s) will be renamed. ${skipCount} skipped.`;
-  issuesEl.innerHTML = issues.length ? `<details class="mt-2"><summary class="text-muted small">Issues (${issues.length})</summary><ul class="small mt-2">${issues.join('')}</ul></details>` : '';
+  if (issues.length) {
+    issuesEl.appendChild(domEl('details', { className: 'mt-2' },
+      domEl('summary', { className: 'text-muted small' }, `Issues (${issues.length})`),
+      domEl('ul', { className: 'small mt-2' }, issues)));
+  }
 
   applyBtn.disabled = okCount === 0;
   applyBtn.onclick = async () => {
@@ -5075,8 +5121,28 @@ async function applySmartRenamePlan(plan, panel) {
       return false;
     }
     const s = j.summary || {};
+    const conflicts = Array.isArray(s.conflicts) ? s.conflicts : [];
     const msg = `Renamed ${s.renamed || 0}, skipped ${s.skipped || 0}, failed ${s.failed || 0}`;
-    CLU.showToast('Smart Rename', msg, (s.failed || 0) > 0 ? 'warning' : 'success');
+    CLU.showToast('Smart Rename', msg,
+      ((s.failed || 0) > 0 || conflicts.length) ? 'warning' : 'success');
+    if (conflicts.length) {
+      // A destination that was taken at apply time is never overwritten; say
+      // which files were left alone and why.
+      const shown = conflicts.slice(0, 5)
+        .map(c => `${c.old_name} → ${c.new_name}: ${c.reason}`);
+      if (conflicts.length > shown.length) {
+        shown.push(`…and ${conflicts.length - shown.length} more`);
+      }
+      // Stays until closed: the user needs time to read which files they were.
+      CLU.showToast(`Not renamed (${conflicts.length})`, shown.join('; '), 'warning', 0);
+    }
+    const errors = Array.isArray(s.errors) ? s.errors : [];
+    if (errors.length) {
+      const first = errors[0];
+      const name = (first.old_path || '').split(/[\\/]/).pop();
+      CLU.showError(`Rename failed for ${name}: ${first.error}` +
+        (errors.length > 1 ? ` (and ${errors.length - 1} more)` : ''));
+    }
     const currentPath = panel === 'source' ? currentSourcePath : currentDestinationPath;
     if (currentPath) loadDirectories(currentPath, panel);
     return true;
@@ -5084,16 +5150,6 @@ async function applySmartRenamePlan(plan, panel) {
     CLU.showToast('Smart Rename Error', e.message, 'error');
     return false;
   }
-}
-
-function escapeHtml(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -5140,7 +5196,11 @@ function openEditModal(filePath) {
   document.getElementById('editCBZModalText').textContent = `Editing ${filename}`;
 
   // Load CBZ contents
-  fetch(`/edit?file_path=${encodeURIComponent(filePath)}`)
+  fetch('/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_path: filePath })
+  })
     .then(response => {
       if (!response.ok) {
         throw new Error("Failed to load edit content.");
@@ -5156,9 +5216,8 @@ function openEditModal(filePath) {
       CLU.initEditModalReorder();
     })
     .catch(error => {
-      container.innerHTML = `<div class="alert alert-danger" role="alert">
-                                  <strong>Error:</strong> ${error.message}
-                              </div>`;
+      container.replaceChildren(domEl('div', { className: 'alert alert-danger', role: 'alert' },
+        domEl('strong', null, 'Error:'), ` ${error.message}`));
       CLU.showToast('Error', error.message, 'error');
     });
 }
@@ -5215,9 +5274,8 @@ function openSplitModal(filePath) {
       CLU.renderSplitGroups(res.data);
     })
     .catch(error => {
-      container.innerHTML = `<div class="alert alert-danger" role="alert">
-                                  <strong>Error:</strong> ${error.message}
-                              </div>`;
+      container.replaceChildren(domEl('div', { className: 'alert alert-danger', role: 'alert' },
+        domEl('strong', null, 'Error:'), ` ${error.message}`));
       CLU.showToast('Error', error.message, 'error');
     });
 }

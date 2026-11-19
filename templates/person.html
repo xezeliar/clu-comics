@@ -12,8 +12,8 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
-<link rel="stylesheet" href="{{ url_for('static', filename='css/reader.css') }}?v={{ range(1, 10000) | random }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/people-tiles.css') }}">
+<link rel="stylesheet" href="{{ asset('css/reader.css') }}">
+<link rel="stylesheet" href="{{ asset('css/people-tiles.css') }}">
 <style>
     .person-grid {
         list-style: none; margin: 0 0 2rem; padding: 0;
@@ -217,8 +217,8 @@
 {% block scripts %}
 {{ super() }}
 <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
-<script src="{{ url_for('static', filename='js/clu-streaming.js') }}"></script>
-<script src="{{ url_for('static', filename='js/reader.js') }}?v={{ range(1, 10000) | random }}"></script>
+<script src="{{ asset('js/clu-streaming.js') }}"></script>
+<script src="{{ asset('js/reader.js') }}"></script>
 <script>
 (function () {
     const apiUrl = {{ (url_for('creators.api_creator_issues', name=p.name) if is_creator else url_for('creators.api_team_issues' if kind == 'teams' else 'creators.api_character_issues', name=p.name)) | tojson }};

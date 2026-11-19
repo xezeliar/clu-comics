@@ -202,7 +202,7 @@ class TestDoMoveBatch:
                               "fn": fn, "user_id": user_id})
             return "tag-op"
 
-        def default_move(s, d):
+        def default_move(s, d, is_file):
             moved.append(s)
 
         fake = _fake_app(
@@ -210,7 +210,7 @@ class TestDoMoveBatch:
             **app_overrides,
         )
         with _FakeApp(fake), \
-             patch("routes.files.shutil.move", side_effect=move or default_move), \
+             patch("routes.files._move_item", side_effect=move or default_move), \
              patch("routes.files.os.path.isfile", return_value=True), \
              patch("routes.files.app_state") as mock_state, \
              patch("routes.files.memory_context"), \
@@ -250,6 +250,25 @@ class TestDoMoveBatch:
         assert job["user_id"] == 7
         r["state"].complete_operation.assert_called_once_with("op1", error=False)
 
+    def test_rar_named_cbz_is_listed_on_library_health(self, tmp_path):
+        """The move phase is the one step that always runs, so it is what
+        reports the file; the row's advice is Rebuild."""
+        dest = tmp_path / "X-Force 001 (2004).cbz"
+        dest.write_bytes(b"7z\xbc\xaf\x27\x1c\x00\x04" + b"\x00" * 32)
+        good =tmp_path / "X-Force 002 (2004).cbz"
+        good.write_bytes(b"PK\x03\x04zip")
+        items = [{"source": "/t/a.cbz", "destination": str(dest)},
+                 {"source": "/t/b.cbz", "destination": str(good)}]
+        with patch("core.problem_files.record_problem") as rec:
+            self._run(items)
+        assert rec.call_count == 1
+        args, kwargs = rec.call_args
+        assert args[0] == str(dest)
+        from core.problem_files import classify, SOURCE_CONVERT
+        assert args[1] == SOURCE_CONVERT
+        verdict = classify(kwargs["error_class"], kwargs["error_message"])
+        assert verdict["repairable"] and verdict["action"] == "rebuild"
+
     def test_no_metadata_job_when_auto_metadata_disabled(self):
         logged = []
         r = self._run(self._items(2), auto_meta=False,
@@ -260,7 +279,7 @@ class TestDoMoveBatch:
     def test_a_failed_item_does_not_stop_the_rest(self):
         moved = []
 
-        def flaky(s, d):
+        def flaky(s, d, is_file):
             if s.endswith("b1.cbz"):
                 raise OSError("busy")
             moved.append(s)
@@ -336,6 +355,37 @@ class TestDoTagBatch:
         moved = [("/data/lib/b0.cbz", True), ("/data/lib/b1.cbz", True)]
         self._run(["metron"], moved=moved, auto_fetch_metron_metadata=boom)
         assert seen == ["/data/lib/b0.cbz", "/data/lib/b1.cbz"]
+
+    RAR = b"Rar!\x1a\x07\x00" + b"\x00" * 32
+
+    def test_rar_named_cbz_is_converted_before_tagging(self, tmp_path):
+        comic = tmp_path / "X-Force 001 (2004).cbz"
+        comic.write_bytes(self.RAR)
+
+        def fake_convert(path):
+            with zipfile.ZipFile(path, "w") as z:
+                z.writestr("001.jpg", b"page")
+            return True
+
+        with patch("core.settings.get_bool", return_value=True), \
+             patch("cbz_ops.single_file.convert_to_cbz", side_effect=fake_convert) as conv:
+            calls, _ = self._run(["metron"], moved=[(str(comic), True)])
+        conv.assert_called_once_with(str(comic))
+        assert calls == [("metron", str(comic))]
+
+    def test_rar_named_cbz_is_not_sent_to_providers_when_unconverted(self, tmp_path):
+        """Autoconvert off, or the conversion failed: no provider lookups are
+        spent on an archive none of them can write to."""
+        comic = tmp_path / "X-Force 002 (2004).cbz"
+        comic.write_bytes(self.RAR)
+        logged = []
+        for autoconvert in (False, True):
+            with patch("core.settings.get_bool", return_value=autoconvert), \
+                 patch("cbz_ops.single_file.convert_to_cbz", return_value=False):
+                calls, _ = self._run(["metron"], moved=[(str(comic), True)],
+                                     log_file_if_in_data=lambda p: logged.append(p))
+            assert calls == []
+        assert logged == [str(comic), str(comic)]
 
     def test_renamed_file_logged_under_final_path(self):
         logged = []
@@ -870,6 +920,34 @@ class TestCombineCbz:
         assert data["success"] is True
         assert data["total_images"] == 4
 
+    @patch("routes.files.is_valid_library_path", return_value=False)
+    def test_file_in_a_name_prefix_lookalike_of_target_is_denied(
+            self, mock_valid, client, create_cbz, tmp_path):
+        target = tmp_path / "processed"
+        target.mkdir(exist_ok=True)
+        lookalike = tmp_path / "processed2"
+        lookalike.mkdir()
+        inside = str(target / "part1.cbz")
+        os.replace(create_cbz("part1.cbz", num_images=1), inside)
+        inside2 = str(target / "part3.cbz")
+        os.replace(create_cbz("part3.cbz", num_images=1), inside2)
+        outside = str(lookalike / "part2.cbz")
+        os.replace(create_cbz("part2.cbz", num_images=1), outside)
+        with patch("core.config.get_target_dir", return_value=str(target)), \
+                patch("core.config.get_watch_dir", return_value=str(tmp_path / "temp")), \
+                patch("routes.files.file_op_refusal", return_value=None):
+            resp = client.post("/api/combine-cbz", json={
+                "files": [inside, outside], "output_name": "Combined",
+                "directory": str(target),
+            })
+            assert resp.status_code == 403
+            # Both inside TARGET: the same request passes the gate.
+            ok = client.post("/api/combine-cbz", json={
+                "files": [inside, inside2], "output_name": "Combined",
+                "directory": str(target),
+            })
+        assert ok.status_code == 200
+
 
 def _make_multi_issue_cbz(path, issues, series="Cult of Dracula"):
     """issues: dict issue_str -> page_count. Pages named '<series> <issue> - NNNN.png'."""
@@ -904,6 +982,22 @@ class TestSplitCbz:
         f.write_bytes(b"fake")
         resp = client.get(f"/api/split-cbz/inspect?file_path={f}")
         assert resp.status_code == 403
+
+    @patch("routes.files.is_valid_library_path", return_value=False)
+    def test_inspect_in_a_name_prefix_lookalike_of_watch_is_denied(
+            self, mock_valid, client, tmp_path):
+        """``temp2`` starts with ``temp`` but is not WATCH."""
+        watch = tmp_path / "temp"
+        watch.mkdir()
+        lookalike = tmp_path / "temp2"
+        lookalike.mkdir()
+        f = _make_multi_issue_cbz(lookalike / "a.cbz", {"001": 1})
+        with patch("core.config.get_watch_dir", return_value=str(watch)), \
+                patch("core.config.get_target_dir", return_value=str(tmp_path / "proc")):
+            resp = client.get(f"/api/split-cbz/inspect?file_path={f}")
+            assert resp.status_code == 403
+            inside = _make_multi_issue_cbz(watch / "b.cbz", {"001": 1})
+            assert client.get(f"/api/split-cbz/inspect?file_path={inside}").status_code == 200
 
     @patch("routes.files.is_valid_library_path", return_value=True)
     def test_inspect_groups(self, mock_valid, client, tmp_path):

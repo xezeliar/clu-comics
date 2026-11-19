@@ -75,5 +75,6 @@ def test_fill_is_lightened_for_the_dark_capsule(css):
 @pytest.mark.parametrize("name", ["person.html", "smart_collections.html"])
 def test_every_host_fetches_a_fresh_reader(name):
     html = read("templates", name)
-    assert "filename='js/reader.js') }}?v=" in html
-    assert "filename='css/reader.css') }}?v=" in html
+    # asset() carries the file's content hash, so a change to the reader is always refetched.
+    assert "asset('js/reader.js')" in html
+    assert "asset('css/reader.css')" in html

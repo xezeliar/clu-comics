@@ -16,7 +16,6 @@
     'use strict';
 
     const POLL_MS = 1500;
-    const esc = (v) => CLU.escapeHtml(v == null ? '' : String(v));
 
     let listId = null;
     let modal = null;
@@ -63,14 +62,14 @@
     }
 
     function seriesLabel(s) {
-        const year = s.year_began ? ` (${esc(s.year_began)})` : '';
-        const extra = [s.publisher_name, s.status].filter(Boolean).map(esc).join(' · ');
-        return `<div class="fw-semibold">${esc(s.name)}${year}</div>` +
+        const year = s.year_began ? ` (${CLU.escapeHtml(s.year_began)})` : '';
+        const extra = [s.publisher_name, s.status].filter(Boolean).map(CLU.escapeHtml).join(' · ');
+        return `<div class="fw-semibold">${CLU.escapeHtml(s.name)}${year}</div>` +
             (extra ? `<div class="small text-muted">${extra}</div>` : '');
     }
 
     function issuesLabel(issues) {
-        const shown = issues.slice(0, 8).map(n => '#' + esc(n)).join(', ');
+        const shown = issues.slice(0, 8).map(n => '#' + CLU.escapeHtml(n)).join(', ');
         return issues.length > 8 ? `${shown} <span class="text-muted">+${issues.length - 8} more</span>` : shown;
     }
 
@@ -84,20 +83,20 @@
         const rel = row.relative_path || '';
         const value = rel ? libraryPath() + rel : '';
         return `<input type="text" class="form-control form-control-sm series-setup-path"
-            data-rel="${esc(rel)}" value="${esc(value)}" aria-label="Folder for ${esc(row.list_name)}"
+            data-rel="${CLU.escapeHtml(rel)}" value="${CLU.escapeHtml(value)}" aria-label="Folder for ${CLU.escapeHtml(row.list_name)}"
             placeholder="Built from your folder pattern">`;
     }
 
     function renderRow(row) {
         const issues = issuesLabel(row.issues || []);
-        const listName = esc(row.list_name) + (row.list_year ? ` (${esc(row.list_year)})` : '');
+        const listName = CLU.escapeHtml(row.list_name) + (row.list_year ? ` (${CLU.escapeHtml(row.list_year)})` : '');
 
         if (row.state === 'resolved') {
             const how = row.how === 'name' ? 'text-warning' : 'text-muted';
-            return `<tr data-series-id="${esc(row.series.series_id)}">
+            return `<tr data-series-id="${CLU.escapeHtml(row.series.series_id)}">
                 <td><input class="form-check-input series-setup-tick" type="checkbox" checked
-                    aria-label="Set up ${esc(row.series.name)}"></td>
-                <td>${seriesLabel(row.series)}<div class="small ${how}">${esc(HOW[row.how] || '')}</div></td>
+                    aria-label="Set up ${CLU.escapeHtml(row.series.name)}"></td>
+                <td>${seriesLabel(row.series)}<div class="small ${how}">${CLU.escapeHtml(HOW[row.how] || '')}</div></td>
                 <td class="small">${issues}</td>
                 <td>${pathInput(row)}</td>
             </tr>`;
@@ -107,16 +106,16 @@
                 <td><i class="bi bi-check-circle text-success" title="Already on your Pull List"></i></td>
                 <td>${seriesLabel(row.series)}</td>
                 <td class="small">${issues}</td>
-                <td class="small">Already on your Pull List<div class="text-truncate">${esc(row.mapped_path || '')}</div></td>
+                <td class="small">Already on your Pull List<div class="text-truncate">${CLU.escapeHtml(row.mapped_path || '')}</div></td>
             </tr>`;
         }
         if (row.state === 'choose') {
             // A candidate already on the Pull List is shown, but cannot be picked:
             // setting it up again would change nothing.
             const options = row.candidates.map(c =>
-                `<option value="${esc(c.series_id)}"${c.mapped ? ' disabled' : ''}>${esc(c.name)}` +
-                `${c.year_began ? ' (' + esc(c.year_began) + ')' : ''}` +
-                `${c.issue_count ? ' — ' + esc(c.issue_count) + ' issues' : ''}` +
+                `<option value="${CLU.escapeHtml(c.series_id)}"${c.mapped ? ' disabled' : ''}>${CLU.escapeHtml(c.name)}` +
+                `${c.year_began ? ' (' + CLU.escapeHtml(c.year_began) + ')' : ''}` +
+                `${c.issue_count ? ' — ' + CLU.escapeHtml(c.issue_count) + ' issues' : ''}` +
                 `${c.mapped ? ' — already on your Pull List' : ''}</option>`).join('');
             return `<tr data-series-id="">
                 <td><input class="form-check-input series-setup-tick" type="checkbox" disabled
@@ -168,10 +167,10 @@
     function renderResults(result) {
         const items = (result.series || []).map(r => {
             const icon = r.ok ? 'bi-check-circle text-success' : 'bi-x-circle text-danger';
-            const what = r.ok ? esc(r.path) : esc(r.error || 'Failed');
+            const what = r.ok ? CLU.escapeHtml(r.path) : CLU.escapeHtml(r.error || 'Failed');
             return `<li class="list-group-item d-flex gap-2">
                 <i class="bi ${icon} mt-1" aria-hidden="true"></i>
-                <div><div class="fw-semibold">${esc(r.name || ('Series ' + r.series_id))}</div>
+                <div><div class="fw-semibold">${CLU.escapeHtml(r.name || ('Series ' + r.series_id))}</div>
                 <div class="small text-muted text-break">${what}</div></div></li>`;
         }).join('');
         const done = (result.series || []).filter(r => r.ok).length;

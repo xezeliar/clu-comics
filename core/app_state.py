@@ -117,12 +117,26 @@ def claim_target_sweep():
         return True
 
 
-def request_target_sweep_rerun():
-    """Consume the pending-rerun flag; True when another pass is owed."""
+def finish_target_sweep_pass(may_continue=True):
+    """End one pass: keep the claim for another pass, or give it up.
+
+    Returns True when a re-run was requested and *may_continue* allows one; the
+    request is consumed and the caller still holds the claim. Otherwise the
+    claim is released and False is returned.
+
+    Deciding "nothing more is owed" and releasing the claim MUST be one step
+    under the lock. They used to be two (consume the flag, then release in a
+    ``finally``), and a request landing between them saw the claim still held,
+    set the flag and returned -- and the release then cleared that flag
+    unread, stranding the download that asked until some later one finished.
+    """
     with _target_sweep_lock:
-        wanted = _target_sweep["rerun"]
+        if may_continue and _target_sweep["rerun"]:
+            _target_sweep["rerun"] = False
+            return True
+        _target_sweep["started_at"] = None
         _target_sweep["rerun"] = False
-        return wanted
+        return False
 
 
 def release_target_sweep():
@@ -151,7 +165,12 @@ def target_sweep_age():
 
 
 def single_flight_target_sweep(func):
-    """Serialise *func*, re-running it once per request that arrived meanwhile.
+    """Serialise *func*, running one more pass if any request arrived meanwhile.
+
+    Requests during a pass coalesce into a single further pass, up to
+    MAX_TARGET_SWEEP_PASSES in all. A pass that raises still honours a pending
+    re-run; the exception propagates only if the final pass raised (earlier
+    failures are logged).
 
     A decorator rather than a wrapper function because api.py imports the name
     ``process_incoming_wanted_issues`` and must not be edited, so the claiming
@@ -169,20 +188,66 @@ def single_flight_target_sweep(func):
                 "Wanted scan already running; coalescing into the run in flight"
             )
             return None
+        # The lock is only taken between passes, never while the body runs, so
+        # a request arriving mid-pass is recorded at once and returns.
+        held = True
         try:
-            result = func(*args, **kwargs)
-            passes = 1
-            while passes < MAX_TARGET_SWEEP_PASSES and request_target_sweep_rerun():
+            passes = 0
+            while True:
                 passes += 1
-                app_logger.debug(f"Wanted scan: coalesced re-run (pass {passes})")
-                result = func(*args, **kwargs)
-            return result
+                result, error = None, None
+                try:
+                    result = func(*args, **kwargs)
+                except Exception as e:
+                    # A failed pass must not swallow a re-run someone asked
+                    # for meanwhile: their download still needs filing.
+                    error = e
+                if not finish_target_sweep_pass(passes < MAX_TARGET_SWEEP_PASSES):
+                    held = False
+                    break
+                if error is not None:
+                    app_logger.error(
+                        f"Wanted scan pass {passes} failed: {error}; "
+                        "running the re-run requested meanwhile",
+                        exc_info=error,
+                    )
+                app_logger.debug(
+                    f"Wanted scan: coalesced re-run (pass {passes + 1})"
+                )
         finally:
-            # Unconditional: one failed pass must not lock the scan out for the
-            # life of the process.
-            release_target_sweep()
+            # Anything that escaped the loop (KeyboardInterrupt, SystemExit, an
+            # error in the bookkeeping itself) must not leave the claim held,
+            # or every later sweep would stand down for the life of the process.
+            if held:
+                release_target_sweep()
+        if error is not None:
+            raise error
+        return result
 
     return wrapper
+
+
+# A download the wanted pass declined to file because its name is already taken
+# in the series folder (#731). It stays in TARGET and is matched again on every
+# pass while the issue stays wanted -- and a pass runs per completed download --
+# so the refusal is announced once per file and is DEBUG after that. Keyed on
+# (path, mtime, size): a re-download landing at the same path is a new file and
+# is announced again. In memory on purpose; a restart costs one repeated line.
+_filing_refusals = set()
+_filing_refusals_lock = threading.Lock()
+MAX_FILING_REFUSALS = 2000
+
+
+def first_filing_refusal(path, fingerprint=None):
+    """True the first time this file is refused, False on every repeat."""
+    key = (path, fingerprint)
+    with _filing_refusals_lock:
+        if key in _filing_refusals:
+            return False
+        if len(_filing_refusals) >= MAX_FILING_REFUSALS:
+            _filing_refusals.clear()
+        _filing_refusals.add(key)
+        return True
 
 
 # ── Operations Registry ──
@@ -216,7 +281,7 @@ def _visible(op_or_note, viewer_id, is_owner):
 
 
 def register_operation(op_type, label, total=0, op_id=None, user_id=None,
-                       status="running"):
+                       status="running", path=None):
     """Register a new long-running operation. Returns the operation ID.
 
     ``status="queued"`` registers an op that is waiting its turn in a job
@@ -227,6 +292,9 @@ def register_operation(op_type, label, total=0, op_id=None, user_id=None,
     token for synchronous endpoints that want polled progress). Defaults to a
     fresh uuid when omitted. The op is attributed to ``user_id`` (or the current
     request user / owner) so progress doesn't leak across accounts.
+
+    ``path`` names the one file the op is rewriting, when there is one. Pages
+    use it to mark that file as busy where it is listed.
     """
     if op_id is None:
         op_id = uuid.uuid4().hex
@@ -244,6 +312,7 @@ def register_operation(op_type, label, total=0, op_id=None, user_id=None,
             "updated_at": now,
             "completed_at": None,
             "user_id": _resolve_uid(user_id),
+            "path": path,
         }
     return op_id
 

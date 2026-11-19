@@ -162,6 +162,48 @@ it.
 Batch, bulk and the `app.py` auto-tag loops do not use this yet. The helpers
 are shared precisely so they can.
 
+### Matching a File by Its Cover (Metron)
+
+A file with no cvinfo used to be identified from its name alone: guess the
+series, then look up the number. Metron can search issues by the perceptual
+hash of the cover (`/api/issue/?cover_hash_near=`, Metron PR #683), which names
+the **issue** directly. `models.metron.match_issue_by_cover` is the one policy
+function; the single-file cascade (`_try_metron_single`), the batch route's
+`try_metron` and bulk one-shot folders (`_oneshot_cover_match`) call it, each
+only when there is no Metron series id. A miss returns `None` and the caller
+matches by name exactly as before. Auto-tag on move and bulk series folders do
+not use it yet.
+
+- **`core/cover_hash.py` is `imagehash.phash` on Pillow alone.** The real
+  library needs numpy, scipy and PyWavelets. `tests/unit/test_cover_hash.py`
+  pins the output against vectors the real library produced, so do not "tidy"
+  the resize filter, the 32x32 sample or the bit order.
+- **It hashes the full first page, not the cached thumbnail**, chosen with the
+  thumbnail's own `sorted_page_names`. A landscape page (wider than 1.2x its
+  height) is a wraparound cover: it is split exactly at the midpoint and the
+  right half is tried first, because Metron stores only the front cover.
+- **A close hash is evidence, not an answer.** Unrelated covers come within 8
+  bits, and a collected edition often carries an issue's cover exactly, so a
+  trade can sort ahead of the issue at 0 bits. A candidate is accepted only
+  when the filename agrees on two of series, number and year, a number the
+  filename gives never contradicts, and **exactly one** candidate qualifies.
+- **At most two requests per file** (`COVER_MATCH_MAX_CALLS`): distance 10,
+  then, only if that returned nothing and the filename has a year, distance 16
+  with `cover_year`. The wide search needs series **and** number; unfiltered at
+  16, Metron's own figures have every query returning strangers.
+- **`find_issues_by_cover` recomputes the distance from each row's
+  `cover_hash`** and drops rows outside the limit. A server that does not know
+  the filter ignores it and returns unfiltered issues. It returns `None` when
+  Metron could not be asked and `[]` for no match.
+- **A typed search term skips the cover** in `/api/search-metadata`: a manual
+  search is the user overruling the automatic answer.
+- **No cvinfo is written from a cover match.** It identifies one file.
+- `metron_cover_match` (default on) switches it off. It has no settings UI yet.
+
+Tests: `tests/unit/test_cover_hash.py`, `tests/mocked/test_metron_cover_match.py`,
+`TestMetronCoverMatch` in `tests/routes/test_metadata_routes.py`,
+`TestOneshotCoverMatch` in `tests/unit/test_bulk_metadata_oneshots.py`.
+
 ### Provider Provenance, Re-tag and Backfill
 
 Nothing recorded which provider tagged a file except the free text in
@@ -242,6 +284,38 @@ ComicVine one that had text, and the user could not ask for the other.
 
 Asserted in `tests/unit/test_series_json_builder.py`,
 `tests/routes/test_series_json_routes.py` and `tests/unit/test_series_json_wiring.py`.
+
+### Which Paths a Metadata Write May Touch
+
+Every route that writes metadata for a path from the request goes through
+`core.path_access` before it writes, asks a provider or queues anything:
+`routes.metadata.metadata_write_refusal` / `resolve_metadata_write_path`
+(single-file and batch routes), `write_paths_refusal` (bulk start/backfill),
+`grant_refusal` (rows read from the database, series map/subscribe — a no-op
+for owners) and `folder_art_write_refusal` (folder thumbnails, including
+app.py's route). Realpath containment in a library (WATCH/TARGET only where
+the File Manager uses the route), then a **full** grant for non-owners; one
+refused path refuses the whole request.
+
+- **Staging per route is deliberate.** The routes reached from the File
+  Manager that never had a check serve WATCH and TARGET; the ones that already
+  allowed TARGET only (`/cbz-update-comicinfo`, `/api/update-xml`,
+  `/api/save-cvinfo`, `/api/batch-metadata`) still do. `series.json` refresh
+  and bulk jobs are library-only.
+- **A background job never widens the request.** Bulk metadata and backfill
+  expand folders in the request and narrow the result with
+  `capture_write_scope()`, taken in the request because the queued runner has
+  no user, via `filter_buckets`. Listings of an authorised folder go through
+  `keep_writable`, which drops a symlinked entry into an ungranted folder.
+- `get_files_missing_comicinfo(root)` is a bare `LIKE 'root%'`, so
+  `_enumerate_folder_recursive` re-bounds its rows on a separator.
+- A route that opens the file itself (`/cbz-update-comicinfo`) works on the
+  realpath of the checked path, re-asserted under its root in the route;
+  database rows keep the byte-exact request path they are keyed on.
+
+Tests: `tests/routes/test_metadata_write_grants.py`. The provider-cascade tests
+in `test_metadata_routes.py` post made-up paths and switch the gate off unless
+they request `real_write_gate`.
 
 ### ComicInfo.xml Writes
 

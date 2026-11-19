@@ -70,7 +70,7 @@ def test_home_shelf_issue_cards_have_a_more_actions_menu():
     html = _read("templates/collection.html")
     gestures = _read("static/js/clu-gestures.js")
     # Every shelf card that opens the reader carries the button.
-    cards = js.count("onclick=\"openReaderForFile(")
+    cards = js.count('data-dash-action="open-reader"')
     assert cards >= 4 and js.count("${issueMoreButton()}") == cards
     # Capture phase, so the card's own onclick never opens the reader.
     assert "closest('.dashboard-card [data-clu-more]')" in js

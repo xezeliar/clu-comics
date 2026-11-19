@@ -407,6 +407,34 @@ def test_process_file_rar_pack_extracts_and_deletes(handler, monkeypatch):
     assert not os.path.exists(rpath), "archive removed once extraction succeeded"
 
 
+def test_partial_rar_extraction_keeps_the_archive_and_leaks_nothing(handler, monkeypatch):
+    """A pack that gives up only some of its comics is not extracted at all.
+
+    The extraction is staged: it used to run straight into WATCH, where a
+    half-extracted pack left comics for the sweep to move on every pass.
+    """
+    import monitor
+    h, watch, target = handler
+    rpath = os.path.join(watch, "Pack.rar")
+    _write(rpath)
+    recorded = []
+
+    monkeypatch.setattr(monitor, "classify_archive", lambda p: monitor.PACKED_COMICS)
+    monkeypatch.setattr(monitor, "record_problem",
+                        lambda *a, **k: recorded.append(k.get("error_class")))
+
+    def _extract(src, out_dir):
+        assert os.path.abspath(out_dir) != os.path.abspath(watch),             "must extract into a private staging dir, never WATCH itself"
+        _write(os.path.join(out_dir, "Batman 003.cbz"))
+        return False, 2
+    monkeypatch.setattr(monitor, "extract_rar_with_unar", _extract)
+
+    h._process_file(rpath)
+
+    assert os.listdir(watch) == ["Pack.rar"]
+    assert recorded == ["RarExtractPartial"]
+
+
 def test_failed_rar_extraction_keeps_the_archive(handler, monkeypatch):
     """A .rar that could not be opened stays put, so nothing is lost."""
     import monitor
@@ -420,6 +448,47 @@ def test_failed_rar_extraction_keeps_the_archive(handler, monkeypatch):
     h._process_file(rpath)
 
     assert os.path.exists(rpath)
+
+
+def test_a_rar_whose_tools_all_hang_fails_once_and_backs_off(handler, monkeypatch):
+    """A hanging unrar/7z/unar used to block the whole WATCH pipeline forever.
+
+    Every tool runs with a timeout now, so the attempt fails like any other:
+    nothing is left in WATCH but the archive, the failure is on the Library
+    Health page, and the backoff stops the next sweep from opening it again.
+    """
+    import subprocess
+    import helpers
+    import monitor
+
+    h, watch, target = handler
+    rpath = os.path.join(watch, "Hangs.rar")
+    _write(rpath, b"not really a rar")
+    recorded = []
+
+    monkeypatch.setattr("helpers.library.is_allowed_path", lambda p: True)
+    monkeypatch.setattr(monitor, "classify_archive", lambda p: monitor.PACKED_COMICS)
+    monkeypatch.setattr(monitor, "record_problem",
+                        lambda *a, **k: recorded.append((a, k.get("error_class"))))
+    monkeypatch.setattr(monitor, "clear_problem", lambda *a, **k: None)
+
+    def hang(cmd, **kwargs):
+        assert kwargs.get("timeout"), f"{cmd[0]} run without a timeout"
+        if cmd[0] == "lsar" or cmd[1] in ("lb", "l"):
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        dest = {"unrar": lambda: cmd[-1].rstrip("/"),
+                "7z": lambda: cmd[2][2:],
+                "unar": lambda: cmd[3]}[cmd[0]]()
+        _write(os.path.join(dest, "Batman 001.cbz"), b"half")
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+    monkeypatch.setattr(helpers.subprocess, "run", hang)
+
+    assert h._process_file(rpath) is False
+    assert os.listdir(watch) == ["Hangs.rar"], "no partial output, archive kept"
+    assert recorded == [((rpath, monitor.SOURCE_UNPACK), "RarExtractFailed")]
+
+    h._handle_file_if_complete(rpath)
+    assert os.path.abspath(rpath) in h._failed_files
 
 
 def test_rar_in_a_release_folder_defers_to_the_unwrapper(handler, monkeypatch):
@@ -736,6 +805,89 @@ def test_existing_cbz_in_target_skips_conversion(converting_handler):
     h.reconcile_directory()
 
     assert calls == [], "must not re-convert an existing CBZ"
+
+
+RAR_BYTES = b"Rar!\x1a\x07\x00" + b"\x00" * 64
+
+
+def test_rar_named_cbz_is_relabelled_and_converted(converting_handler):
+    """A RAR shipped as .cbz used to pass straight through on its name and
+    reach the library as a "CBZ" that nothing could open."""
+    h, watch, target, calls = converting_handler
+    _write(os.path.join(watch, "X-Force 001 (2004).cbz"), RAR_BYTES)
+
+    h.reconcile_directory()
+
+    assert [os.path.basename(c) for c in calls] == ["X-Force 001 (2004).cbr"]
+    with open(_moved_path(target, "X-Force 001 (2004).cbz"), "rb") as f:
+        assert f.read() == b"converted"
+
+
+def test_rar_named_cbz_becomes_cbr_when_autoconvert_is_off(handler):
+    """Without conversion it at least carries the extension CLU reads it by."""
+    h, watch, target = handler
+    _write(os.path.join(watch, "X-Force 002 (2004).cbz"), RAR_BYTES)
+
+    h.reconcile_directory()
+
+    assert os.path.exists(_moved_path(target, "X-Force 002 (2004).cbr"))
+    assert not os.path.exists(_moved_path(target, "X-Force 002 (2004).cbz"))
+
+
+def test_real_cbz_is_not_relabelled(converting_handler):
+    h, watch, target, calls = converting_handler
+    _write(os.path.join(watch, "X-Force 003 (2004).cbz"), b"PK\x03\x04zip")
+
+    h.reconcile_directory()
+
+    assert calls == []
+    assert os.path.exists(_moved_path(target, "X-Force 003 (2004).cbz"))
+
+
+SEVENZ_BYTES = b"7z\xbc\xaf\x27\x1c\x00\x04" + b"\x00" * 64
+
+
+def test_7z_named_cbz_is_converted(converting_handler):
+    """The reported case: a pack of 7-Zip archives named .cbz. The conversion
+    tools read content, so the CBR branch handles it."""
+    h, watch, target, calls = converting_handler
+    _write(os.path.join(watch, "X-Force 004 (2004).cbz"), SEVENZ_BYTES)
+
+    h.reconcile_directory()
+
+    assert [os.path.basename(c) for c in calls] == ["X-Force 004 (2004).cbr"]
+    with open(_moved_path(target, "X-Force 004 (2004).cbz"), "rb") as f:
+        assert f.read() == b"converted"
+
+
+def test_7z_named_cbz_keeps_its_name_when_autoconvert_is_off(handler):
+    """.cbr would be one more wrong label; it stays put for Rebuild."""
+    h, watch, target = handler
+    _write(os.path.join(watch, "X-Force 005 (2004).cbz"), SEVENZ_BYTES)
+
+    h.reconcile_directory()
+
+    assert os.path.exists(_moved_path(target, "X-Force 005 (2004).cbz"))
+
+
+def test_archive_format_is_read_from_the_bytes_not_the_name(tmp_path):
+    from helpers import sniff_archive_format, mislabelled_cbz_format
+
+    rar_as_cbz = tmp_path / "a.cbz"
+    rar_as_cbz.write_bytes(RAR_BYTES)
+    real_cbr = tmp_path / "b.cbr"
+    real_cbr.write_bytes(RAR_BYTES)
+    zip_cbz = tmp_path / "c.cbz"
+    zip_cbz.write_bytes(b"PK\x03\x04zip")
+    sevenz_as_cbz = tmp_path / "d.cbz"
+    sevenz_as_cbz.write_bytes(SEVENZ_BYTES)
+
+    assert mislabelled_cbz_format(str(rar_as_cbz)) == "rar"
+    assert mislabelled_cbz_format(str(sevenz_as_cbz)) == "7z"
+    assert sniff_archive_format(str(real_cbr)) == "rar"
+    assert mislabelled_cbz_format(str(real_cbr)) is None
+    assert sniff_archive_format(str(zip_cbz)) is None
+    assert sniff_archive_format(str(tmp_path / "missing.cbz")) is None
 
 
 def test_empty_cbr_not_converted(converting_handler):

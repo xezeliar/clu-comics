@@ -5,9 +5,9 @@
 {% block title %}Insights{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/insights.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/people-tiles.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/clu-accent.css') }}">
+<link rel="stylesheet" href="{{ asset('css/insights.css') }}">
+<link rel="stylesheet" href="{{ asset('css/people-tiles.css') }}">
+<link rel="stylesheet" href="{{ asset('css/clu-accent.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -157,7 +157,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/insights.js') }}"></script>
+<script src="{{ asset('js/insights.js') }}"></script>
 <script>
     // ==========================================
     // Wrapped Feature

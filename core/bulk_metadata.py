@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 import core.app_state as app_state
 from core.app_logging import app_logger
 from core.comicinfo import find_comicinfo_in_zip
+from core.path_access import filter_buckets
 from core.metadata_dates import (
     evaluate as evaluate_issue_date,
     evaluate_series as evaluate_series_year,
@@ -160,8 +161,15 @@ def _enumerate_folder_recursive(root: str, only_missing: bool) -> Dict[str, List
     if only_missing:
         try:
             rows = get_files_missing_comicinfo(root) or []
+            # That lookup is a bare LIKE 'root%' prefix, so /data/X also
+            # returned /data/X-Men. Keep it to root's own subtree (compared
+            # case-insensitively, as SQLite's LIKE matched).
+            norm_root = os.path.normpath(root)
+            prefix = (norm_root if norm_root.endswith(os.sep) else norm_root + os.sep).lower()
             for r in rows:
                 p = r["path"]
+                if not os.path.normpath(p).lower().startswith(prefix):
+                    continue
                 parent = os.path.dirname(p)
                 buckets.setdefault(parent, []).append(p)
             if buckets:
@@ -895,6 +903,50 @@ def _process_folder(
             update_bulk_job_counts(job_id, needs_review=1)
 
 
+def _oneshot_cover_match(
+    providers: List[str],
+    file_path: str,
+    file_series: str,
+    issue_text: str,
+    file_year: Optional[int],
+) -> Optional[Tuple[SearchResult, IssueResult]]:
+    """Identify a one-shot file from its cover, through Metron.
+
+    A one-shot folder has no cvinfo and every file is its own series, so the
+    filename is all the name search has. ``metron.match_issue_by_cover`` asks
+    Metron which issue carries this cover and accepts only an answer the
+    filename agrees with. Returns ``(series, issue)`` or None, in which case
+    the caller resolves the series by name as before.
+    """
+    if 'metron' not in providers:
+        return None
+    provider = _instantiate_provider('metron')
+    if provider is None:
+        return None
+    try:
+        from models import metron
+        from models.providers import ProviderType
+
+        hit = metron.match_issue_by_cover(
+            provider._get_api(), file_path, file_series, issue_text, file_year
+        )
+        if not hit:
+            return None
+        issue = provider.get_issue(str(hit["id"]))
+        if issue is None:
+            return None
+        series = SearchResult(
+            provider=ProviderType.METRON,
+            id=str(hit["series_id"]),
+            title=hit["series_name"],
+            year=hit["series_year"],
+        )
+        return series, issue
+    except Exception as e:
+        app_logger.warning(f"Cover match failed for {file_path}: {e}")
+        return None
+
+
 def _process_oneshot_folder(
     job_id: str,
     op_id: str,
@@ -931,6 +983,28 @@ def _process_oneshot_folder(
         file_year = extract_year_from_name(base)
         # One-shots are a single issue; default a missing issue number to #1.
         issue_text = extract_issue_number(base) or "1"
+
+        # The cover first: it names the issue directly, where the filename can
+        # only name a series to guess from. A per-file answer, so it never
+        # touches series_cache.
+        covered = _oneshot_cover_match(
+            providers, file_path, file_series, issue_text, file_year
+        )
+        if covered and not _date_conflicted(
+                file_path, covered[1], issue_text, covered[0].year):
+            ok = _write_metadata(
+                job_id=job_id,
+                folder_path=folder_path,
+                file_path=file_path,
+                provider_name='metron',
+                series=covered[0],
+                issue=covered[1],
+                matched_via='oneshot_cover',
+                parsed_year=file_year,
+                replace=bool((options or {}).get("replace")),
+            )
+            update_bulk_job_counts(job_id, **({"auto_accepted": 1} if ok else {"errors": 1}))
+            continue
 
         cache_key = (file_series, file_year)
         if cache_key in series_cache:
@@ -1135,8 +1209,15 @@ def start_bulk_job(
     provider: Optional[str] = None,
     replace: bool = False,
     only_from: Optional[List[str]] = None,
+    allowed=None,
 ) -> str:
     """Kick off a bulk metadata job in the background.
+
+    ``allowed`` is the requester's write scope captured in the request
+    (``core.path_access.capture_write_scope``; None = unrestricted). The scope
+    expansion runs here, before the job is queued, and is narrowed to it: a
+    folder outside the grants is dropped with its files, so the runner -- which
+    has no request user -- only ever sees paths the request was authorised for.
 
     ``provider`` forces a re-tag from that single provider (the library's
     order is ignored and there is no fallback to another source -- a miss goes
@@ -1157,6 +1238,11 @@ def start_bulk_job(
     if provider:
         overwrite_existing = True
     buckets = _expand_scope(scope, paths, overwrite_existing)
+    buckets, dropped = filter_buckets(buckets, allowed)
+    if dropped:
+        app_logger.info(
+            f"Bulk metadata job {job_id}: {dropped} file(s) outside the "
+            f"requester's folder grants left out")
     if provider:
         buckets = _filter_by_provider(buckets, only_from, provider)
     total_folders = len(buckets)

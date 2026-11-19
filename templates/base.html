@@ -19,7 +19,7 @@
   <title>{% block title %}Comic Library Utilities{% endblock %}</title>
   {% include 'partials/theme_css.html' %}
   {# In <head> so its pagereveal listener is up before the first render. #}
-  <script src="{{ url_for('static', filename='js/clu-motion.js') }}"></script>
+  <script src="{{ asset('js/clu-motion.js') }}"></script>
   <style>
     .list-group-item {
       display: flex;
@@ -95,14 +95,18 @@
     .ops-item-completed { opacity: 0.6; }
     .ops-item-error { border-left: 3px solid #dc3545; }
   </style>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/clu-page.css') }}">
+  <link rel="stylesheet" href="{{ asset('css/clu-page.css') }}">
   {% block extra_css %}{% endblock %}
   {# The list toolbar helpers (partials/filters.html's script twins and the
      page bar) load in the head, not the footer: several pages run inline
      scripts inside their content block that call them while the page parses.
-     Neither touches the DOM when it loads. #}
-  <script src="{{ url_for('static', filename='js/clu-filters.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/clu-pager.js') }}"></script>
+     Neither touches the DOM when it loads.
+     clu-utils.js (CLU.escapeHtml, CLU.safeUrl...) loads here too, once, for
+     every page: inline scripts and page scripts all escape through it, and a
+     second copy would install its document listeners twice. #}
+  <script src="{{ asset('js/clu-utils.js') }}"></script>
+  <script src="{{ asset('js/clu-filters.js') }}"></script>
+  <script src="{{ asset('js/clu-pager.js') }}"></script>
 </head>
 
 <body class="d-flex flex-column min-vh-100"{% if appearance_cover_tilt is defined and not appearance_cover_tilt %} data-cover-tilt="off"{% endif %}>
@@ -153,10 +157,10 @@
 
   <!-- Bootstrap JS (Required for Modal functionality) -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="{{ url_for('static', filename='js/clu-toast.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/clu-pull-refresh.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/clu-page.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/clu-gestures.js') }}" defer></script>
+  <script src="{{ asset('js/clu-toast.js') }}"></script>
+  <script src="{{ asset('js/clu-pull-refresh.js') }}" defer></script>
+  <script src="{{ asset('js/clu-page.js') }}"></script>
+  <script src="{{ asset('js/clu-gestures.js') }}" defer></script>
 
   <!-- Environment-based console logging -->
   <script>
@@ -258,6 +262,9 @@
           if (!indicator) return;
 
           const ops = data.operations || [];
+          // Pages mark the files being worked on (clu-streaming.js). Sent on
+          // every poll, an empty one included, so a finished file is unmarked.
+          document.dispatchEvent(new CustomEvent('clu:operations', { detail: ops }));
           if (ops.length === 0) {
             indicator.classList.add('d-none');
             return;
@@ -287,10 +294,9 @@
             return ra === 1 ? a.started_at - b.started_at : b.started_at - a.started_at;
           });
           // Labels and details carry file names; never inject them as HTML.
-          const esc = t => String(t ?? '').replace(/[&<>"']/g,
-            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+          const esc = CLU.escapeHtml;
 
-          const iconMap = { metadata: 'bi-tags', move: 'bi-arrows-move', convert: 'bi-arrow-repeat', rebuild: 'bi-hammer', import: 'bi-cloud-upload', upload: 'bi-cloud-arrow-up', match: 'bi-collection', repair: 'bi-wrench-adjustable', rename: 'bi-input-cursor-text', credit_backfill: 'bi-person-badge', search: 'bi-search', index: 'bi-card-list' };
+          const iconMap = { metadata: 'bi-tags', move: 'bi-arrows-move', convert: 'bi-arrow-repeat', rebuild: 'bi-hammer', import: 'bi-cloud-upload', upload: 'bi-cloud-arrow-up', match: 'bi-collection', repair: 'bi-wrench-adjustable', rename: 'bi-input-cursor-text', credit_backfill: 'bi-person-badge', search: 'bi-search', index: 'bi-card-list', crop: 'bi-crop', remove: 'bi-file-earmark-minus', enhance: 'bi-magic', add: 'bi-file-earmark-plus', delete: 'bi-trash' };
           let html = '';
           ops.forEach(op => {
             const isRunning = op.status === 'running';

@@ -24,9 +24,22 @@ TEMPLATE_DIR = os.path.join(
 )
 
 
+STATIC_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "static")
+
+
 @pytest.fixture
 def env():
     return Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+
+
+def _head_app():
+    """A bare Flask app that renders the head partial the way auth_bp does:
+    with the real static folder and the real ``asset()`` global."""
+    from flask import Flask
+    from routes.auth import _asset
+    app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
+    app.jinja_env.globals["asset"] = _asset
+    return app
 
 
 class TestThemeCatalog:
@@ -228,25 +241,23 @@ class TestLocalThemes:
         assert "css/themes/" not in html
 
     def test_head_partial_loads_bootstrap_then_the_local_sheet(self, env):
-        from flask import Flask
         from core.themes import theme_stylesheets
-        app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        app = _head_app()
         with app.test_request_context():
             html = app.jinja_env.get_template("partials/theme_css.html").render(
                 bootstrap_theme="gruvbox-dark", theme_stylesheets=theme_stylesheets)
-        assert html.index("bootstrap@5.3.8") < html.index("/static/css/themes/gruvbox-dark.css")
+        assert html.index("bootstrap@5.3.8") < html.index("/static/css/themes/gruvbox-dark.css?v=")
         assert "bootswatch" not in html
 
     def test_head_partial_loads_every_local_sheet_in_order(self, env):
-        from flask import Flask
         from core.themes import theme_stylesheets
-        app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        app = _head_app()
         with app.test_request_context():
             html = app.jinja_env.get_template("partials/theme_css.html").render(
                 bootstrap_theme="catppuccin-latte", theme_stylesheets=theme_stylesheets)
         assert (html.index("bootstrap@5.3.8")
                 < html.index("/static/css/themes/catppuccin-latte.css")
-                < html.index("/static/css/themes/catppuccin.css\""))
+                < html.index("/static/css/themes/catppuccin.css?v="))
 
 
 class TestCatppuccin:
@@ -556,6 +567,7 @@ class TestAppearance:
         from flask import Flask
         from core.themes import theme_stylesheets
         app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        app.add_template_global(lambda f: f"/static/{f}", "asset")
         with app.test_request_context():
             html = app.jinja_env.get_template("partials/theme_css.html").render(
                 theme_stylesheets=theme_stylesheets, theme_follow=True,
@@ -571,6 +583,7 @@ class TestAppearance:
         from flask import Flask
         from core.themes import APPEARANCE_DEFAULTS, appearance_catalog
         app = Flask(__name__, template_folder=TEMPLATE_DIR)
+        app.add_template_global(lambda f: f"/static/{f}", "asset")
         with app.test_request_context():
             return app.jinja_env.get_template("partials/appearance_panel.html").render(
                 ap_id="t", ap_state=dict(APPEARANCE_DEFAULTS, publisher_dots=True,
