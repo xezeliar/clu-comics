@@ -162,3 +162,20 @@ class TestApiWaitsForTheCompress:
         ignored = waiter.index("endswith(ext) for ext in ignored")
         assert archive < ignored
         assert "monitor_enabled()" in waiter
+
+
+class TestStalledPartialDoesNotBlockFiling:
+    """A failed mirror leaves `X.cbz.part` in WATCH; it is not in IGNORED_EXTENSIONS,
+    so counting it kept WATCH busy until the timeout and no filing pass ran."""
+
+    @pytest.fixture(scope="class")
+    def waiter(self):
+        src = (ROOT / "api.py").read_text(encoding="utf-8")
+        body = src.split("def check_wanted_after_watch_empty():")[1]
+        return body.split("threading.Thread(target=check_wanted_after_watch_empty")[0]
+
+    def test_a_partial_whose_size_stopped_changing_is_not_counted(self, waiter):
+        temp = waiter.index("is_temporary_download_file(f)")
+        stalled = waiter.index("stalled = last_sizes.get(p) == size")
+        count = waiter.index("total += 1", stalled)
+        assert temp < stalled < waiter.index("if stalled:") < count

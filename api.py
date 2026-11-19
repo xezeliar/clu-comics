@@ -642,6 +642,8 @@ def process_download(task):
                     # any comic arrived and the pack stayed in TARGET.
                     from core.download_utils import ARCHIVE_EXTS, monitor_enabled
                     count_archives = monitor_enabled()
+                    from core.download_utils import is_temporary_download_file
+                    last_sizes = {}  # partial-download path -> size at the previous poll
                     for _ in range(budget // 10):
                         time.sleep(10)
                         total = 0
@@ -659,6 +661,20 @@ def process_download(task):
                                     continue
                                 if any(f.lower().endswith(ext) for ext in ignored):
                                     continue
+                                if is_temporary_download_file(f):
+                                    # A live transfer's partial keeps growing. One whose
+                                    # size has not moved since the last poll is an orphan
+                                    # (a failed mirror's .part), and counting it kept WATCH
+                                    # "busy" until the timeout -- no filing pass ever ran.
+                                    p = os.path.join(root, f)
+                                    try:
+                                        size = os.path.getsize(p)
+                                    except OSError:
+                                        continue
+                                    stalled = last_sizes.get(p) == size
+                                    last_sizes[p] = size
+                                    if stalled:
+                                        continue
                                 total += 1
                         if total == 0:
                             # WATCH empties the moment the monitor moves the file
