@@ -5142,8 +5142,9 @@ def auto_fetch_metron_metadata(destination_path):
         from models.providers.base import extract_issue_number
         from models.comicvine import generate_comicinfo_xml, add_comicinfo_to_archive
         from core.comicinfo import (
-            read_comicinfo_from_zip, has_trusted_notes, is_zip_container,
+            read_comicinfo_from_zip, is_zip_container,
         )
+        from core.metadata_priority import should_skip_tagged, move_metadata_order
         from cbz_ops.rename import rename_comic_from_metadata
 
         # Check 1: Are Metron credentials configured?
@@ -5228,7 +5229,7 @@ def auto_fetch_metron_metadata(destination_path):
             # Skip if already tagged by a real provider. Notes written by the
             # scrapers in core.comicinfo.UNTRUSTED_NOTES_MARKERS don't count.
             existing = read_comicinfo_from_zip(file_path)
-            if has_trusted_notes(existing.get("Notes") if existing else None):
+            if should_skip_tagged(existing.get("Notes") if existing else None, "metron", move_metadata_order(file_path)):
                 app_logger.debug(f"Skipping {file_path} - already has metadata")
                 continue
 
@@ -5341,8 +5342,9 @@ def auto_fetch_comicvine_sqlite_metadata(destination_path):
         )
         from models.providers.base import extract_issue_number
         from core.comicinfo import (
-            read_comicinfo_from_zip, has_trusted_notes, is_zip_container,
+            read_comicinfo_from_zip, is_zip_container,
         )
+        from core.metadata_priority import should_skip_tagged, move_metadata_order
         from cbz_ops.rename import rename_comic_from_metadata
 
         # Check 1: Is the local ComicVine SQLite database configured and present?
@@ -5411,7 +5413,7 @@ def auto_fetch_comicvine_sqlite_metadata(destination_path):
             # Skip if already tagged by a real provider. Notes written by the
             # scrapers in core.comicinfo.UNTRUSTED_NOTES_MARKERS don't count.
             existing = read_comicinfo_from_zip(file_path)
-            if has_trusted_notes(existing.get("Notes") if existing else None):
+            if should_skip_tagged(existing.get("Notes") if existing else None, "comicvine_sqlite", move_metadata_order(file_path)):
                 app_logger.debug(f"Skipping {file_path} - already has metadata")
                 continue
 

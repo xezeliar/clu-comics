@@ -42,23 +42,9 @@ files_bp = Blueprint('files', __name__)
 # =============================================================================
 
 def _move_metadata_order(destination):
-    """Provider-type order for post-move auto-metadata, honoring the destination
-    library's configured priority; falls back to the legacy order when unconfigured.
-
-    Only providers whose metadata can be fetched from a cvinfo ID are considered
-    (cvinfo carries a ComicVine volume ID and, optionally, a Metron series ID).
-    """
-    from helpers.library import get_library_for_path
-    from core.database import get_library_providers
-    supported = ('metron', 'comicvine', 'comicvine_sqlite')
-    lib = get_library_for_path(destination)
-    if lib and lib.get('id'):
-        provs = get_library_providers(lib['id'])
-        order = [p['provider_type'] for p in provs
-                 if p.get('enabled', True) and p['provider_type'] in supported]
-        if order:
-            return order
-    return ['metron', 'comicvine']  # preserve legacy default when no library config
+    """Provider-type order for post-move auto-metadata (library priority, legacy default if unset)."""
+    from core.metadata_priority import move_metadata_order
+    return move_metadata_order(destination)
 
 
 def _validate_move(source, destination):
