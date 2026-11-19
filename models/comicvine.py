@@ -2196,7 +2196,8 @@ def auto_fetch_metadata_for_folder(folder_path: str, api_key: str, target_file: 
     Returns:
         Dict with 'processed', 'skipped', 'errors' counts and 'details' list
     """
-    from core.comicinfo import read_comicinfo_from_zip, has_trusted_notes, is_zip_container
+    from core.comicinfo import read_comicinfo_from_zip, is_zip_container
+    from core.metadata_priority import should_skip_tagged, move_metadata_order
     import time
 
     result = {'processed': 0, 'skipped': 0, 'errors': 0, 'details': []}
@@ -2271,7 +2272,7 @@ def auto_fetch_metadata_for_folder(folder_path: str, api_key: str, target_file: 
             # the scrapers in core.comicinfo.UNTRUSTED_NOTES_MARKERS don't count.
             existing = read_comicinfo_from_zip(file_path)
 
-            if has_trusted_notes(existing.get('Notes')):
+            if should_skip_tagged(existing.get("Notes"), "comicvine", move_metadata_order(file_path)):
                 app_logger.debug(f"Skipping {file_path} - already has metadata")
                 result['skipped'] += 1
                 result['details'].append({'file': file_path, 'status': 'skipped', 'reason': 'has metadata'})
