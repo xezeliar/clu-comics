@@ -167,7 +167,7 @@ function renderModalDirectoryListing(data, filter) {
         let leftDiv = document.createElement("div");
         leftDiv.className = "d-flex align-items-center";
         leftDiv.style.cursor = "pointer";
-        leftDiv.innerHTML = `<i class="bi bi-folder me-2" style="color: #bf9300"></i> ${dir}`;
+        leftDiv.innerHTML = `<i class="bi bi-folder me-2" style="color: #bf9300"></i> ${CLU.escapeHtml(dir)}`;
         leftDiv.onclick = () => loadDirectories(data.current_path + "/" + dir);
         // Right: clicking selects the directory and closes the modal
         let selectIcon = document.createElement("i");
@@ -211,7 +211,7 @@ function renderModalDirectoryListing(data, filter) {
                 iconClass = "bi bi-file-earmark-zip-fill";
                 iconStyle = ' style="color: purple;"';
             }
-            fileItem.innerHTML = `<i class="${iconClass} me-2"${iconStyle}></i> ${fileName}`;
+            fileItem.innerHTML = `<i class="${iconClass} me-2"${iconStyle}></i> ${CLU.escapeHtml(fileName)}`;
             fileItem.onclick = function() {
                 selectFile(data.current_path + "/" + fileName);
             };
@@ -290,7 +290,7 @@ function runScript(scriptType) {
             })
             .catch(error => {
                 logsContainer.innerHTML = `<div class="alert alert-danger" role="alert">
-                        <strong>Error:</strong> ${error.message}
+                        <strong>Error:</strong> ${CLU.escapeHtml(error.message)}
                     </div>`;
             });
         return;

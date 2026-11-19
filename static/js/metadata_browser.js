@@ -413,7 +413,7 @@
                         CLU.initEditModalReorder();
                     })
                     .catch(err => {
-                        container.innerHTML = `<div class="alert alert-danger"><strong>Error:</strong> ${err.message}</div>`;
+                        container.innerHTML = `<div class="alert alert-danger"><strong>Error:</strong> ${CLU.escapeHtml(err.message)}</div>`;
                     });
             });
             wire('.action-metadata', () => {

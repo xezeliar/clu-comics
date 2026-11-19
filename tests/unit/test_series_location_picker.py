@@ -38,7 +38,7 @@ global.document = {
   querySelector: () => null,
   createElement: () => ({ style: {}, setAttribute() {}, appendChild() {} }),
 };
-global.CLU = { letterBar() {} };
+global.CLU = { letterBar() {}, escapeHtml: s => String(s) };
 eval(src + ';globalThis.loadDirectories = loadDirectories;');
 const start = process.argv[2];
 loadDirectories(start);

@@ -691,7 +691,7 @@
             }
         }
 
-        headerTitle.innerHTML = `<i class="bi bi-collection-fill text-primary me-2"></i>${libraryName}`;
+        headerTitle.innerHTML = `<i class="bi bi-collection-fill text-primary me-2"></i>${CLU.escapeHtml(libraryName)}`;
     }
 
     async function loadSavedRecommendations() {
@@ -769,11 +769,11 @@
 
                 renderRecommendations(data, grid);
             } else {
-                grid.innerHTML = `<div class="col-12 text-center text-danger">Error: ${data.error || 'Failed to get recommendations'}</div>`;
+                grid.innerHTML = `<div class="col-12 text-center text-danger">Error: ${CLU.escapeHtml(data.error || 'Failed to get recommendations')}</div>`;
             }
         } catch (error) {
             if (loading) loading.style.display = 'none'; // Hide loading spinner on error
-            grid.innerHTML = `<div class="col-12 text-center text-danger">Network Error: ${error.message}</div>`;
+            grid.innerHTML = `<div class="col-12 text-center text-danger">Network Error: ${CLU.escapeHtml(error.message)}</div>`;
         }
     }
 

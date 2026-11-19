@@ -162,7 +162,7 @@ function renderDirectoryList(data, filter) {
         const leftDiv = document.createElement('div');
         leftDiv.className = 'd-flex align-items-center flex-grow-1';
         leftDiv.style.cursor = 'pointer';
-        leftDiv.innerHTML = `<i class="bi bi-folder-fill me-2 text-warning"></i><span>${dir}</span>`;
+        leftDiv.innerHTML = `<i class="bi bi-folder-fill me-2 text-warning"></i><span>${CLU.escapeHtml(dir)}</span>`;
         leftDiv.onclick = () => loadDirectories(data.current_path + '/' + dir);
 
         // Right side - select this directory
@@ -228,7 +228,7 @@ function selectDirectory(path) {
             if (data.success) {
                 // Update UI
                 document.getElementById('mapped-path-display').innerHTML =
-                    `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${path}</span>`;
+                    `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${CLU.escapeHtml(path)}</span>`;
 
                 // Now mapped: the button reads "Change", and the action and alias
                 // rows (rendered hidden while unmapped) appear.

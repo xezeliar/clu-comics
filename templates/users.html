@@ -145,7 +145,7 @@ const ROLE_BADGE = { reader: "bg-secondary", clerk: "bg-info text-dark", owner: 
 
 function alertMsg(msg, type = "danger") {
   document.getElementById("alert-area").innerHTML =
-    `<div class="alert alert-${type} alert-dismissible fade show" role="alert">${msg}
+    `<div class="alert alert-${type} alert-dismissible fade show" role="alert">${CLU.escapeHtml(msg)}
      <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
 }
 

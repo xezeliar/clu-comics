@@ -663,7 +663,7 @@ function applyFolderArt(headerImageUrl, overlayImageUrl) {
     const headerImageContainer = document.getElementById('collection-header-image');
     if (headerImageContainer) {
         if (headerImageUrl) {
-            headerImageContainer.innerHTML = `<img src="${headerImageUrl}" class="img-fluid rounded shadow-sm w-100" alt="Collection Header" style="max-height: 400px; object-fit: cover;">`;
+            headerImageContainer.innerHTML = `<img src="${CLU.escapeHtml(headerImageUrl)}" class="img-fluid rounded shadow-sm w-100" alt="Collection Header" style="max-height: 400px; object-fit: cover;">`;
             headerImageContainer.classList.remove('d-none');
         } else {
             headerImageContainer.classList.add('d-none');
@@ -1913,7 +1913,7 @@ function renderGrid(items) {
                         // one shows the link once the menu finds a sidecar.
                         const seriesHidden = item.seriesUrl ? '' : ' d-none folder-series-probe';
                         dropdownMenu.innerHTML = `
-                        <li class="${seriesHidden}"><a class="dropdown-item folder-action-series-page" href="${item.seriesUrl || '#'}"><i class="bi bi-collection"></i> Series Page</a></li>
+                        <li class="${seriesHidden}"><a class="dropdown-item folder-action-series-page" href="${CLU.escapeHtml(item.seriesUrl || '#')}"><i class="bi bi-collection"></i> Series Page</a></li>
                         <li class="${seriesHidden}"><hr class="dropdown-divider"></li>` + `
                         <li><a class="dropdown-item folder-action-thumbnail" href="#"><i class="bi bi-image"></i> Generate Thumbnail</a></li>
                         <li><a class="dropdown-item folder-action-custom-thumb" href="#"><i class="bi bi-upload"></i> Upload Custom Thumbnail</a></li>
@@ -2623,7 +2623,7 @@ function bulkCombineFiles() {
 
     const fileListEl = document.getElementById('collectionCombineFileList');
     fileListEl.innerHTML = '<strong>Files to combine:</strong><br>' +
-        cbzFiles.map(f => `&bull; ${f.split('/').pop()}`).join('<br>');
+        cbzFiles.map(f => `&bull; ${CLU.escapeHtml(f.split('/').pop())}`).join('<br>');
 
     const modal = new bootstrap.Modal(document.getElementById('collectionCombineModal'));
     modal.show();
@@ -4054,7 +4054,7 @@ function initEditMode(filePath) {
         })
         .catch(error => {
             container.innerHTML = `<div class="alert alert-danger" role="alert">
-                    <strong>Error:</strong> ${error.message}
+                    <strong>Error:</strong> ${CLU.escapeHtml(error.message)}
                 </div>`;
             CLU.showError(error.message);
         });
@@ -4191,7 +4191,7 @@ function initEditMode(filePath) {
         })
         .catch(error => {
             container.innerHTML = `<div class="alert alert-danger" role="alert">
-                    <strong>Error:</strong> ${error.message}
+                    <strong>Error:</strong> ${CLU.escapeHtml(error.message)}
                 </div>`;
             CLU.showError(error.message);
         });
@@ -6578,7 +6578,7 @@ function openTextFileViewer(filePath, fileName) {
         .catch(err => {
             content.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="bi bi-exclamation-triangle"></i> Error loading text file: ${err.message}
+                    <i class="bi bi-exclamation-triangle"></i> Error loading text file: ${CLU.escapeHtml(err.message)}
                 </div>
             `;
         });

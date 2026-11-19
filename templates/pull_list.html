@@ -668,7 +668,7 @@
                     const resp = await fetch('/api/pull-list/import', { method: 'POST', body: fd });
                     const data = await resp.json();
                     if (!data.success) {
-                        resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${data.error}</div>`;
+                        resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${CLU.escapeHtml(data.error)}</div>`;
                         importSubmit.disabled = false;
                         return;
                     }
@@ -685,7 +685,7 @@
                         </div>`;
                     if (data.errors.length) console.warn('Pull list import errors:', data.errors);
                 } catch (e) {
-                    resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${e.message}</div>`;
+                    resultDiv.innerHTML = `<div class="alert alert-danger mb-0">${CLU.escapeHtml(e.message)}</div>`;
                     importSubmit.disabled = false;
                 }
             });

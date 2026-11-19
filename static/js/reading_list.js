@@ -2531,7 +2531,7 @@ function _createFolderEl(folder) {
     header.innerHTML = `
         <i class="bi bi-chevron-down me-2 folder-chevron" style="transition: transform 0.2s; transform: rotate(-90deg);"></i>
         <i class="bi bi-folder-fill text-warning me-2"></i>
-        <span>${folder.path.split('/').pop()}</span>
+        <span>${CLU.escapeHtml(folder.path.split('/').pop())}</span>
     `;
     div.appendChild(header);
 
