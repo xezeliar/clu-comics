@@ -315,6 +315,10 @@ Detailed design notes for each subsystem live in path-scoped rule files that loa
 
 ## Project Rules
 
+- **Design with Impeccable:** every UI/design task (new page, component, redesign,
+  restyle) must be designed with the `impeccable` skill, and the result must be
+  audited with Impeccable (critique/audit) before the task is finished.
+
 - **Deleting directories:** any code that removes a directory it did not create must
   first consult `helpers.library.get_protected_roots()` (automated/background work) or
   `is_critical_path()` (user-initiated routes). A sweep that only checks its own root
