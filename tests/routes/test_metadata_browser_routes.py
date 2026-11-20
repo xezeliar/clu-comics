@@ -120,6 +120,15 @@ def test_browse_series_axis(client, seeded_library):
     assert names == {"Batman", "Amazing Spider-Man", "Saga"}
 
 
+def test_browse_series_cards_carry_series_id_when_folder_is_mapped(client, seeded_library):
+    seeded_library.execute(
+        "INSERT INTO series (id, name, mapped_path) VALUES (7, 'Batman', '/data/DC/Batman')")
+    seeded_library.commit()
+    items = {i["name"]: i for i in client.get("/api/metadata/browse?axis=series").get_json()["items"]}
+    assert items["Batman"]["series_id"] == 7
+    assert items["Saga"]["series_id"] is None
+
+
 def test_browse_series_filtered_by_publisher(client, seeded_library):
     r = client.get("/api/metadata/browse?axis=series&publisher=DC+Comics")
     data = r.get_json()

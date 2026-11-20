@@ -158,6 +158,53 @@
         }
     }
 
+    // Active drill-down as removable chips, so a tab that has drilled in
+    // (Publisher > Marvel) still reads as that tab and one tap steps back out.
+    function renderChips() {
+        const root = document.getElementById('mbChips');
+        if (!root) return;
+        root.replaceChildren();
+        const add = (label, onRemove) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn btn-sm btn-outline-secondary mb-chip';
+            b.setAttribute('aria-label', `Remove filter ${label}`);
+            const t = document.createElement('span');
+            t.textContent = label;
+            const x = document.createElement('i');
+            x.className = 'bi bi-x-lg ms-2';
+            x.setAttribute('aria-hidden', 'true');
+            b.append(t, x);
+            b.onclick = () => { onRemove(); state.page = 1; state.letter = ''; reload(); };
+            root.appendChild(b);
+        };
+        if (state.publisher) {
+            add(`Publisher: ${state.publisher}`, () => { clearDrilldown(); state.axis = 'publisher'; });
+        }
+        if (state.year_from != null) {
+            const y = state.year_to === state.year_from || state.year_to == null
+                ? String(state.year_from) : `${state.year_from}–${state.year_to}`;
+            add(`Year: ${y}`, () => { clearDrilldown(); state.axis = 'year'; });
+        }
+        if (state.series) {
+            add(`Series: ${state.series}`, () => { state.series = ''; });
+        }
+        root.hidden = !root.children.length;
+    }
+
+    // Each tab remembers where it had drilled to, so Publisher > Marvel
+    // survives a visit to Year and back.
+    const tabMemory = {};
+    const DRILL_KEYS = ['axis', 'publisher', 'series', 'year_from', 'year_to', 'letter', 'page'];
+
+    function switchTab(next) {
+        const cur = rootAxis();
+        if (next === cur) return;
+        tabMemory[cur] = Object.fromEntries(DRILL_KEYS.map(k => [k, state[k]]));
+        clearDrilldown();
+        Object.assign(state, { axis: next, page: 1, letter: '' }, tabMemory[next] || {});
+    }
+
     function clearDrilldown() {
         state.publisher = '';
         state.series = '';
@@ -322,6 +369,12 @@
         }
 
         gridItem.onclick = () => {
+            // Phones open the issue carousel for a series that has a folder.
+            if (level === 'series' && item.series_id && window.CLUSeriesSheet &&
+                window.matchMedia('(max-width: 767.98px)').matches) {
+                window.CLUSeriesSheet.open(item.series_id, gridItem);
+                return;
+            }
             if (level === 'publisher') {
                 state.publisher = label;
                 state.axis = 'series';
@@ -530,6 +583,8 @@
         document.getElementById('mbLoading').style.display = 'block';
         writeStateToUrl();
         renderBreadcrumb();
+        renderChips();
+        syncControlsFromState();
 
         const browse = await fetchBrowse();
 
@@ -552,9 +607,7 @@
         document.querySelectorAll('input[name="mbAxis"]').forEach(r => {
             r.addEventListener('change', () => {
                 if (!r.checked) return;
-                state.axis = r.value;
-                state.page = 1;
-                state.letter = '';
+                switchTab(r.value);
                 reload();
             });
         });
@@ -583,7 +636,7 @@
     }
 
     function syncControlsFromState() {
-        const axisInput = document.querySelector(`input[name="mbAxis"][value="${state.axis}"]`);
+        const axisInput = document.querySelector(`input[name="mbAxis"][value="${rootAxis()}"]`);
         if (axisInput) axisInput.checked = true;
         const sort = document.getElementById('mbSort');
         if (sort) sort.value = state.sort;
