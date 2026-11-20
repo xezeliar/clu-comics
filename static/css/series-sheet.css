@@ -282,3 +282,9 @@ body.series-sheet-open { overflow: hidden; }
     .ss-sl { transition: opacity 0.15s; }
     .ss-line i { transition: none; }
 }
+
+/* Swiping is the touch path: the arrows would sit on the peeking neighbours. */
+@media (pointer: coarse) { .ss-arrow { display: none; } }
+/* Three equal buttons on a 375px phone: keep each label on one line. */
+.ss-sec3 .btn { white-space: nowrap; gap: 0.3rem; }
+@media (max-width: 420px) { .ss-sec3 .btn i { display: none; } }

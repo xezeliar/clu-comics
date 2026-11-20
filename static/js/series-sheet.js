@@ -392,7 +392,7 @@
         document.body.appendChild(sheet);
 
         track.addEventListener('scroll', onScroll, { passive: true });
-        track.addEventListener('keydown', (e) => {
+        sheet.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowRight') { e.preventDefault(); go(Math.min(idx + 1, issues.length - 1)); }
             if (e.key === 'ArrowLeft') { e.preventDefault(); go(Math.max(idx - 1, 0)); }
         });
