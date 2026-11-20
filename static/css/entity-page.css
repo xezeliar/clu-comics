@@ -1,4 +1,4 @@
-/* The character page (templates/character.html). Theme variables only
+/* Character and team pages (templates/entity_page.html). Theme variables only
    (DESIGN.md); the layout follows the "Character page" Design Board entry. */
 
 .ch { display: flex; flex-direction: column; gap: 1.5rem; }
@@ -8,6 +8,7 @@
 .ch-pt { grid-row: 1 / span 3; position: relative; aspect-ratio: 2 / 3; border-radius: 8px; overflow: clip;
     background: var(--bs-tertiary-bg); box-shadow: 0 2px 5px rgb(0 0 0 / 10%); }
 .ch-pt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ch-ini { display: grid; place-items: center; height: 100%; font-size: 1.25rem; font-weight: 600; letter-spacing: .03em; color: var(--bs-secondary-color); }
 .ch-src { position: absolute; left: 8px; bottom: 8px; font-size: .7rem; font-weight: 700; line-height: 1.5;
     padding: 2px 6px; border-radius: 4px; background: rgb(0 0 0 / 60%); color: #fff; }
 .ch-main { display: flex; flex-direction: column; min-width: 0; }
@@ -83,10 +84,24 @@
 .ch-loading { font-style: italic; animation: ch-pulse 1.6s ease-in-out infinite; }
 @keyframes ch-pulse { 50% { opacity: .55; } }
 
+/* Team members (templates/team.html): photo tiles from people-tiles.css. A
+   member the library has no issue for has no page, so its tile is a dashed
+   outline with initials and is not a link. */
+.tm-sec + .tm-sec { margin-top: 2rem; }
+.tm-sec h2 small { font-size: .75rem; font-weight: 400; color: var(--bs-secondary-color); margin-left: .35rem; }
+.tm-out .pt { cursor: default; }
+.tm-out .pt:hover { transform: none; }
+.tm-out .pt-img { background: transparent; border-style: dashed; }
+.tm-out .pt-n { color: var(--bs-secondary-color); font-weight: 400; }
+.tm-strip { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.tm-strip > li:nth-child(n+8) { display: none; }
+
 @media (max-width: 767.98px) {
+    .tm-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .tm-strip > li:nth-child(n+5) { display: none; }
     .ch-body { grid-template-columns: minmax(0, 1fr); }
-    /* Information follows the Overview; Titles and Timeline are lists only. */
-    .ch[data-tab="titles"] .ch-aside, .ch[data-tab="timeline"] .ch-aside { display: none; }
+    /* Information follows the Overview; the other tabs are lists only. */
+    .ch:not([data-tab="overview"]) .ch-aside { display: none; }
 }
 @media (max-width: 575.98px) {
     .ch { gap: 1.25rem; }
@@ -99,7 +114,10 @@
     .ch-yr h3 small { display: inline; }
     .ch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem 1rem; }
     .ch-shelf { grid-auto-columns: 42%; }
+    .ch-tabs { gap: .5rem; }
+    .ch-tabs .nav-link { padding-inline: .5rem; }
     .ch-tabs .nav-link, .ch-more, .ch-inline { min-height: 2.75rem; }
+    .tm-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem .75rem; }
 }
 @media (prefers-reduced-motion: reduce) {
     .ch-cover { transition: none; }

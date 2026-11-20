@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state, no_matches %}
+{% from 'partials/filters.html' import toolbar, result_count, select_field, filter_bar, per_page_select, pager_nav %}
+{% from 'partials/publisher_dot.html' import publisher_dot with context %}
+{% from 'partials/entity_parts.html' import issue_label, issue_card, series_card, people, more_list, issue_ref, first_appearance, links %}
+
+{#- The character and team pages (docs/browse-hub.md). Library first: every
+    count, cover and list comes from the user's own files; the stored Metron
+    and ComicVine profile only fills the bio and Information.
+
+    A page extends this and sets, at the top level:
+      noun            'character' or 'team'
+      endpoint        its own route, for tab links
+      index_endpoint, index_label   the breadcrumb
+      refresh_grid    'characters' or 'teams' (POST .../refresh)
+      tabs            [(key, label, count or none)]
+      panel           what the body shows: 'overview', 'series', 'issues',
+                      or a name the page's {% block panel %} draws
+      series_href, issues_href      where the series and issues stats go
+      newest_href, newest_label     the link beside "Newest in your library"
+      clear_href      the issues list with no status filter
+      lead_stats      stats before issues · series · read (may be empty)
+    and fills {% block info_rows %} and, as needed, {% block view_row %}
+    (inside the series and issues toolbars), {% block overview_mid %},
+    {% block untagged %} and {% block panel %}. -#}
+{% set info = p.info %}
+{% set prof = p.profile or {} %}
+{% set nxt = p.issues[p.next_index] if p.next_index is not none else none %}
+{% set fmt = '{:,}' %}
+{% block title %}{{ p.name }} - {{ noun | capitalize }} - Comic Library{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+<link rel="stylesheet" href="{{ asset('css/reader.css') }}">
+<link rel="stylesheet" href="{{ asset('css/collection.css') }}">
+<link rel="stylesheet" href="{{ asset('css/people-tiles.css') }}">
+<link rel="stylesheet" href="{{ asset('css/entity-page.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="ch" data-tab="{{ st.tab }}">
+  <div class="ch-hd">
+    <div class="ch-pt">
+      {%- if p.art %}
+      <img src="{{ p.art }}" alt="{{ 'Portrait' if noun == 'character' else 'Image' }} of {{ p.name }}"
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+      {%- elif p.cover_fallback %}
+      <img src="{{ p.cover_fallback }}" alt="Cover of {{ issue_label(p.issues[0]) }}"
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+      <span class="ch-src">Cover</span>
+      {%- else %}
+      <span class="ch-ini" aria-hidden="true">{{ ((p.name | replace('The ', '', 1)).replace('-', ' ').split()[:2] | map('first') | join) | upper }}</span>
+      {%- endif %}
+    </div>
+    <div class="ch-main">
+      {% set stats = lead_stats + ([
+          {'value': p.issues | length, 'label': 'issue' if p.issues | length == 1 else 'issues', 'href': issues_href},
+          {'value': p.series | length, 'label': 'series', 'href': series_href},
+          {'value': p.read_total, 'label': 'read'},
+          {'value': (p.first_year ~ ('–' ~ p.last_year if p.last_year and p.last_year != p.first_year else '')) if p.first_year else none, 'label': ''}]
+          if p.issues else []) %}
+      {% set sub = [p.publisher, info.universe] | select | join(' · ') %}
+      {% call(slot) page_header(p.name, subtitle=((publisher_dot(p.publisher) if p.publisher else '') ~ sub) if sub else none, stats=stats) %}
+        {% if slot == 'crumbs' %}
+          <li class="breadcrumb-item"><a href="{{ url_for(index_endpoint) }}">{{ index_label }}</a></li>
+        {% elif slot == 'actions' and p.issues %}
+          <button type="button" class="btn btn-sm {{ 'btn-primary' if nxt else 'btn-outline-secondary' }}" id="readNextBtn" data-clu-keep
+                  {% if nxt %}title="{{ issue_label(nxt) }}"{% endif %}>
+            <i class="bi bi-book" aria-hidden="true"></i> {{ 'Read next' if nxt else 'Read again from the start' }}
+          </button>
+        {% elif slot == 'more' and can_refresh %}
+          <li><button type="button" class="dropdown-item" id="refreshProfileBtn">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh Metron and ComicVine</button></li>
+        {% endif %}
+      {% endcall %}
+    </div>
+    {% if info.bio %}
+    <p class="ch-bio" id="chBio">{{ info.bio }}</p>
+    <button type="button" class="btn btn-link btn-sm ch-more" aria-expanded="false" aria-controls="chBio" hidden>Show more</button>
+    {% endif %}
+  </div>
+
+  <nav aria-label="{{ noun | capitalize }} sections">
+  <ul class="nav nav-underline ch-tabs">
+    {% for key, label, n in tabs %}
+    <li class="nav-item">
+      <a class="nav-link{% if st.tab == key %} active{% endif %}" href="{{ url_for(endpoint, name=p.name, tab=key if key != 'overview' else none) }}"
+         {% if st.tab == key %}aria-current="page"{% endif %}>{{ label }}{% if n is not none %}<span class="visually-hidden">, </span><span class="ch-tab-n">{{ fmt.format(n) }}</span>{% endif %}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  </nav>
+
+  <div class="ch-body">
+    <div class="ch-col">
+    {% if panel == 'overview' %}
+      {% if not p.issues %}{% block untagged %}{% endblock %}{% endif %}
+      {% if p.most %}
+      <section aria-labelledby="chMostH">
+        <div class="ch-sh"><h2 id="chMostH">Appears most in</h2>
+          {% if p.series | length > p.most | length %}<a class="small" href="{{ series_href }}">All {{ p.series | length }} series</a>{% endif %}</div>
+        <ul class="ch-shelf">{% for s in p.most %}{{ series_card(s) }}{% endfor %}</ul>
+      </section>
+      {% endif %}
+      {% if p.newest %}
+      <section aria-labelledby="chNewH">
+        <div class="ch-sh"><h2 id="chNewH">Newest in your library</h2><a class="small" href="{{ newest_href }}">{{ newest_label }}</a></div>
+        <ul class="ch-shelf">{% for i in p.newest %}{{ issue_card(i, 'newest', loop.index0) }}{% endfor %}</ul>
+      </section>
+      {% endif %}
+      {% block overview_mid %}{% endblock %}
+      {% if p.creators %}
+      <section aria-labelledby="chCrH">
+        <div class="ch-sh"><h2 id="chCrH">Creators</h2><span class="ch-n">most credited on {{ "issues featuring " ~ p.name if noun == 'character' else "the team's issues" }}</span></div>
+        <ol class="ch-ppl">
+          {% for c in p.creators %}
+          <li><a href="{{ url_for('creators.creator_page', name=c.name, role=c.kind) }}">{{ c.name }}</a>
+            <span class="ch-n">{{ c.role }} · {{ fmt.format(c.n) }} issue{{ 's' if c.n != 1 }}</span></li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endif %}
+      {% if p.lists %}
+      <section aria-labelledby="chListH">
+        <div class="ch-sh"><h2 id="chListH">In your reading lists</h2></div>
+        <ul class="ch-lists">
+          {% for l in p.lists %}
+          <li>
+            <span class="ch-thumb">{% if l.cover %}<img src="{{ url_for('get_thumbnail', path=l.cover) }}" alt="" loading="lazy"
+                 onerror="this.remove()">{% endif %}</span>
+            <div><a href="{{ url_for('reading_lists.view_list', list_id=l.id) }}">{{ l.name }}</a>
+              <span class="ch-sub">{{ ('All ' ~ l.total ~ ' entries') if l.hits == l.total else (l.hits ~ ' of ' ~ l.total ~ ' entries') }} feature {{ p.name }}</span></div>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+    {% elif panel == 'series' %}
+      {% call toolbar('Series') %}
+        {{ self.view_row() }}
+        <div class="clu-toolbar-row">
+          {% call select_field('chTitleSort', 'Sort', attrs={'data-param': 'tsort'}) %}
+            {% for k, label in title_sorts.items() %}<option value="{{ k }}"{% if st.tsort == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% endcall %}
+          <div class="clu-toolbar-end">{{ result_count('chTitleCount', p.titles | length, 'series', 'series') }}</div>
+        </div>
+      {% endcall %}
+      <ul class="ch-grid">{% for s in p.titles %}{{ series_card(s) }}{% endfor %}</ul>
+
+    {% elif panel == 'issues' %}
+      {% set read_n = p.read_total %}
+      <h2 class="visually-hidden">Issues</h2>
+      {% call toolbar('Issues') %}
+        {{ self.view_row() }}
+        <div class="clu-toolbar-row">
+          {% call select_field('chSort', 'Sort', attrs={'data-param': 'sort'}) %}
+            {% for k, label in timeline_sorts.items() %}<option value="{{ k }}"{% if st.sort == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% endcall %}
+          <div class="clu-toolbar-end">
+            {{ result_count('chTimeCount', st.total, 'issues' if st.status == 'all' else st.status ~ ' issues', 'issue' if st.status == 'all' else st.status ~ ' issue', first=st.first, last=st.last) }}
+            {{ per_page_select('chPerPage', st.per_page) }}
+          </div>
+        </div>
+        <div class="clu-toolbar-row">
+          {{ filter_bar('chStatus', [
+              {'value': 'all', 'label': 'All'},
+              {'value': 'unread', 'label': 'Unread', 'count': fmt.format(p.issues | length - read_n)},
+              {'value': 'read', 'label': 'Read', 'count': fmt.format(read_n)}], st.status, label='Status') }}
+        </div>
+      {% endcall %}
+      {% if p.timeline %}
+        {% set ns = namespace(year=-1) %}
+        {% for i in p.timeline %}
+          {% if i.year != ns.year %}
+            {% if not loop.first %}</ul></div>{% endif %}
+            {% set ns.year = i.year %}
+            {% set n_year = p.timeline | selectattr('year', 'equalto', i.year) | list | length %}
+            <div class="ch-yr"><h3>{{ i.year or 'Undated' }}<small>{{ n_year }} issue{{ 's' if n_year != 1 }}</small></h3>
+            <ul class="ch-grid">
+          {% endif %}
+          {{ issue_card(i, 'timeline', loop.index0) }}
+          {% if loop.last %}</ul></div>{% endif %}
+        {% endfor %}
+        {{ pager_nav('chPager', 'Issue pages', attrs={'data-page': st.page, 'data-pages': st.pages}) }}
+      {% else %}
+        {{ no_matches('issues', filtered=True, clear_href=clear_href) }}
+      {% endif %}
+
+    {% else %}
+      {% block panel %}{% endblock %}
+    {% endif %}
+    </div>
+
+    <aside class="ch-aside" aria-labelledby="chInfoH">
+      <h2 id="chInfoH">Information</h2>
+      <dl class="ch-dl">
+        {% block info_rows %}{% endblock %}
+        {% if info.links %}<div><dt>Elsewhere</dt><dd class="ch-links">{{ links(info.links) }}</dd></div>{% endif %}
+      </dl>
+      {% set stored = (prof.metron_fetched_at or '')[:10] %}
+      {% if info.has_metron %}
+        <p class="ch-note">
+          {%- if info.has_cv %}Details from Metron and ComicVine, stored {{ stored }}.
+          {%- elif prof.cv_id %}From Metron, stored {{ stored }}. ComicVine details are not stored yet.
+          {%- else %}From Metron, stored {{ stored }}. Metron has no ComicVine id for this {{ noun }}, so ComicVine details are not shown.{% endif %}
+          {%- if can_refresh %} Refresh in More updates it.{% endif %}
+          {%- if prof.error %}<br>{{ 'ComicVine' if prof.error.startswith('ComicVine') else 'Metron' }} could not be reached last time; these are the last stored details.{% endif -%}
+        </p>
+      {% elif p.looking %}
+        <p class="ch-note ch-loading" role="status">Looking {{ p.name }} up on Metron. Reload the page in a moment to see the bio and details.</p>
+      {% elif prof.status == 'missing' %}
+        <p class="ch-note">Metron has no {{ noun }} named exactly “{{ p.name }}”, so there is no bio or ComicVine detail.</p>
+      {% elif prof.status == 'error' %}
+        <p class="ch-note">Metron could not be reached.{% if can_refresh %} Refresh in More tries again.{% endif %}</p>
+      {% elif has_token %}
+        <p class="ch-note">No Metron record yet. It is looked up the next time Metron is available.</p>
+      {% elif can_refresh %}
+        <p class="ch-note">No Metron record yet. Add a Metron API token in Settings to fill in the bio and ComicVine details.</p>
+      {% else %}
+        <p class="ch-note">No Metron record yet.</p>
+      {% endif %}
+    </aside>
+  </div>
+</div>
+
+{% include 'partials/reader_modal.html' %}
+{% endblock %}
+
+{% block view_row %}{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+<script src="{{ asset('js/clu-streaming.js') }}"></script>
+<script src="{{ asset('js/reader.js') }}"></script>
+<script>
+(function () {
+    const lists = {
+        run: {{ p.reader_run | tojson }},
+        newest: {{ p.newest | map(attribute='path') | list | tojson }},
+        timeline: {{ p.timeline | map(attribute='path') | list | tojson }}
+    };
+    const thumbs = {};
+    document.querySelectorAll('.ch-card[data-list] img').forEach(img => {
+        const b = img.closest('.ch-card');
+        thumbs[lists[b.dataset.list][b.dataset.index]] = img.getAttribute('src');
+    });
+    const nameOf = path => path.split('/').pop();
+    const asItems = paths => paths.map(path => ({ type: 'file', name: nameOf(path), path, thumbnailUrl: thumbs[path] }));
+
+    function read(run, path) {
+        if (typeof window.openComicReader !== 'function') { CLU.toast('Reader failed to load. Try refreshing the page.', 'error'); return; }
+        // The reader's Next button follows this list.
+        window._readerAllItems = run;
+        window.openComicReader(path);
+    }
+
+    const next = document.getElementById('readNextBtn');
+    if (next && lists.run.length) next.addEventListener('click', () => read(lists.run, lists.run[0].path));
+    document.addEventListener('click', e => {
+        const card = e.target.closest('.ch-card[data-list]');
+        if (card) { const run = lists[card.dataset.list]; read(asItems(run), run[card.dataset.index]); return; }
+        const inline = e.target.closest('.ch-inline[data-path]');
+        if (inline) read(asItems([inline.dataset.path]), inline.dataset.path);
+    });
+
+    // Show more only when the clamp actually hides text.
+    const bio = document.getElementById('chBio');
+    const more = document.querySelector('.ch-more');
+    if (bio && more) {
+        const check = () => { if (!bio.classList.contains('open')) more.hidden = bio.scrollHeight <= bio.clientHeight + 1; };
+        check();
+        window.addEventListener('resize', check);
+        more.addEventListener('click', () => {
+            const open = bio.classList.toggle('open');
+            more.setAttribute('aria-expanded', open);
+            more.textContent = open ? 'Show less' : 'Show more';
+        });
+    }
+
+    // Toolbar controls are links in disguise: each change reloads the page
+    // with the new query, so Back and reload keep the view.
+    function go(changes) {
+        const url = new URL(location.href);
+        Object.entries(changes).forEach(([k, v]) => v ? url.searchParams.set(k, v) : url.searchParams.delete(k));
+        if (!('page' in changes)) url.searchParams.delete('page');
+        location.assign(url);
+    }
+    document.querySelectorAll('select[data-param]').forEach(s => s.addEventListener('change', () => go({ [s.dataset.param]: s.value })));
+    const perPage = document.getElementById('chPerPage');
+    if (perPage) perPage.addEventListener('change', () => go({ per_page: perPage.value }));
+    const status = document.getElementById('chStatus');
+    if (status) CLU.filterBar(status, { onChange: v => go({ status: v === 'all' ? '' : v }) });
+    const view = document.getElementById('chView');
+    if (view) CLU.filterBar(view, { onChange: v => go({ view: v === 'series' ? '' : v }) });
+    const pager = document.getElementById('chPager');
+    if (pager) {
+        const pages = +pager.dataset.pages;
+        if (pages > 1) {
+            pager.style.display = '';
+            CLU.renderPageLinks(pager.querySelector('ul'), +pager.dataset.page, pages, p => go({ page: p > 1 ? p : '' }));
+        }
+    }
+
+    const refresh = document.getElementById('refreshProfileBtn');
+    if (refresh) refresh.addEventListener('click', async () => {
+        let res;
+        try { res = await fetch({{ url_for('creators.refresh_profile', grid=refresh_grid, name=p.name) | tojson }}, { method: 'POST' }); }
+        catch (e) { CLU.toast('Could not reach CLU. Try again.', 'error'); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) { CLU.toast(data.error || 'Refresh failed', 'error'); return; }
+        CLU.toast(data.started ? 'Refreshing from Metron. Reload in a moment to see it.' : 'A refresh is already running.', 'success');
+    });
+    {% block page_script %}{% endblock %}
+})();
+</script>
+{% endblock %}

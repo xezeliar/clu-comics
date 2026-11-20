@@ -227,8 +227,7 @@ class TestTeams:
     def test_team_page_and_members(self, teams):
         data = creators.team_page("justice league", prefixes=["/data"])
         assert data["name"] == "Justice League"
-        assert data["issues"] == 2
-        assert data["members"] == [{"name": "Batman", "n": 2}, {"name": "Superman", "n": 2}]
+        assert data["issues"] == 2 and "members" not in data
         assert {s["name"] for s in data["series"]} == {"Batman", "Superman"}
         assert sorted(o["name"] for o in data["often_with"]) == ["Batman", "Superman"]
         assert creators.team_page("Avengers", prefixes=["/data"]) is None
@@ -239,8 +238,21 @@ class TestTeams:
         teams.commit()
         data = creators.team_page("Justice League", prefixes=["/data"])
         assert data["issues"] == 0 and data["series"] == []
-        assert [m["name"] for m in data["members"]] == ["Batman", "Superman"]
         assert creators.list_teams(prefixes=["/data"]) == []
+        members = creators.team_members("Justice League", prefixes=["/data"])
+        assert [(m["name"], m["n"]) for m in members["in"]] == [("Batman", 0), ("Superman", 0)]
+
+    def test_members_merge_metron_and_comicvine(self, teams):
+        m = creators.team_members("Justice League", ["superman", "Wonder Woman"], prefixes=["/data"])
+        # Most issues together first: Superman is on both team issues, Batman on one.
+        assert [(x["name"], x["n"], x["total"]) for x in m["in"]] == [("Superman", 2, 2), ("Batman", 1, 2)]
+        assert m["out"] == ["Wonder Woman"]
+        az = creators.team_members("Justice League", ["Aquaman"], prefixes=["/data"], sort="az")
+        assert [x["name"] for x in az["in"]] == ["Batman", "Superman"] and az["out"] == ["Aquaman"]
+
+    def test_members_respect_folder_scope(self, teams):
+        assert creators.team_members("Justice League", prefixes=["/nowhere"]) == {
+            "in": [], "out": ["Batman", "Superman"]}
 
     def test_team_issues(self, teams):
         issues = creators.person_issues(("teams",), "Justice League", "/data/DC/Batman",

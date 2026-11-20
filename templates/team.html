@@ -1,0 +1,130 @@
+{% extends "entity_page.html" %}
+{% from 'partials/entity_parts.html' import people, issue_ref, first_appearance %}
+{% from 'partials/empty_state.html' import empty_state %}
+{% from 'partials/filters.html' import toolbar, result_count, select_field, filter_bar, search_input %}
+{% from 'partials/person_tile.html' import person_initials %}
+{#- The team page (docs/browse-hub.md, "Team page"). Where the team appears
+    comes only from ComicInfo <Teams>; who is on it from Metron and ComicVine. -#}
+{% set noun = 'team' %}
+{% set endpoint = 'creators.team_page' %}
+{% set index_endpoint, index_label = 'creators.teams_index', 'Teams' %}
+{% set refresh_grid = 'teams' %}
+{% set mem = p.members %}
+{% set n_members = mem['in'] | length + mem['out'] | length %}
+{% set tabs = [('overview', 'Overview', none), ('members', 'Members', n_members)]
+              + ([('comics', 'Comics', p.issues | length)] if p.issues else []) %}
+{% set panel = 'members' if st.tab == 'members' else (st.view if st.tab == 'comics' and p.issues else 'overview') %}
+{% set series_href = url_for(endpoint, name=p.name, tab='comics') %}
+{% set issues_href = url_for(endpoint, name=p.name, tab='comics', view='issues') %}
+{% set clear_href = issues_href %}
+{% set newest_href, newest_label = url_for(endpoint, name=p.name, tab='comics', view='issues', sort='new'), 'All issues' %}
+{% set members_href = url_for(endpoint, name=p.name, tab='members') %}
+{% set lead_stats = [{'value': n_members, 'label': 'member' if n_members == 1 else 'members', 'href': members_href}] if n_members else [] %}
+
+{% macro member_tile(m) -%}
+<li data-name="{{ m.name | lower }}">
+  <a class="pt" href="{{ url_for('creators.character_page', name=m.name) }}">
+    <span class="pt-img" aria-hidden="true">
+      {%- if m.art %}<img src="{{ m.art }}" alt="" loading="lazy" decoding="async">
+      {%- else %}<span class="pt-ini">{{ person_initials(m.name) }}</span>{% endif -%}
+    </span>
+    <span class="pt-n" title="{{ m.name }}">{{ m.name }}</span>
+    {% if m.n %}<span class="pt-c">{{ '{:,}'.format(m.n) }} with the team</span>{% endif %}
+  </a>
+</li>
+{%- endmacro %}
+
+{% block untagged %}
+{{ empty_state('No issues tagged with ' ~ p.name,
+    'Where a team appears comes from the <Teams> field in ComicInfo. Re-tag these comics with ComicVine or Metron to fill it in.'
+    ~ (' The members below come from Metron and ComicVine.' if n_members else ''),
+    icon='bi-tags', compact=True) }}
+{% endblock %}
+
+{% block overview_mid %}
+{% if mem['in'] %}
+<section aria-labelledby="tmMemH">
+  <div class="ch-sh"><h2 id="tmMemH">Members</h2><a class="small" href="{{ members_href }}">All {{ n_members }} member{{ 's' if n_members != 1 }}</a></div>
+  <ul class="pt-grid tm-strip">
+    {% for m in mem['in'] %}{{ member_tile(m) }}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block view_row %}
+<div class="clu-toolbar-row">
+  {{ filter_bar('chView', [{'value': 'series', 'label': 'Series'}, {'value': 'issues', 'label': 'Issues'}], st.view, label='View') }}
+</div>
+{% endblock %}
+
+{% block panel %}
+{% if n_members %}
+  {% call toolbar('Members') %}
+    <div class="clu-toolbar-row">
+      {{ search_input('tmSearch', 'Search members') }}
+      {% call select_field('tmSort', 'Sort', attrs={'data-param': 'msort'}) %}
+        {% for k, label in member_sorts.items() if p.issues or k != 'most' %}<option value="{{ k }}"{% if st.msort == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      {% endcall %}
+      <div class="clu-toolbar-end">{{ result_count('tmCount', n_members, 'members', 'member') }}</div>
+    </div>
+  {% endcall %}
+  {% if mem['in'] %}
+  <section class="tm-sec" aria-labelledby="tmInH">
+    <div class="ch-sh"><h2 id="tmInH">In your library <small>{{ mem['in'] | length }}</small></h2></div>
+    <ul class="pt-grid tm-grid">{% for m in mem['in'] %}{{ member_tile(m) }}{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if mem['out'] %}
+  <section class="tm-sec tm-out" aria-labelledby="tmOutH">
+    <div class="ch-sh"><h2 id="tmOutH">Not in your library <small>{{ mem['out'] | length }}</small></h2></div>
+    <p class="ch-note mb-3">Listed by {{ 'Metron and ComicVine' if info.has_cv else 'Metron' }}. None of these names matches a character in your library, so they have no page to open.</p>
+    <ul class="pt-grid tm-grid">
+      {% for name in mem['out'] %}
+      <li data-name="{{ name | lower }}"><div class="pt">
+        <span class="pt-img" aria-hidden="true"><span class="pt-ini">{{ person_initials(name) }}</span></span>
+        <span class="pt-n" title="{{ name }}">{{ name }}</span>
+      </div></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <div id="tmNone"></div>
+{% else %}
+  {{ empty_state('No members known yet',
+      'Members come from Metron and ComicVine. Refresh in More fetches them once Metron has this team.' if can_refresh
+      else 'Members come from Metron and ComicVine.', icon='bi-people', compact=True) }}
+{% endif %}
+{% endblock %}
+
+{% block info_rows %}
+{% set info = p.info %}
+{% if n_members %}<div><dt>Members</dt><dd>{{ n_members }}<span class="ch-sub">{{ mem['in'] | length }} in your library</span></dd></div>{% endif %}
+{% if info.created_by %}<div><dt>Created by</dt><dd>{{ people(info.created_by, 'creators.creator_page') }}</dd></div>{% endif %}
+{% if info.first_appearance %}<div><dt>First appearance</dt><dd>{{ first_appearance(info.first_appearance) }}</dd></div>{% endif %}
+{% if info.first_owned %}<div><dt>First in your library</dt><dd>{{ issue_ref(info.first_owned) }}</dd></div>{% endif %}
+{% if info.disbanded_in %}<div><dt>Disbanded in</dt><dd><ul>
+  {%- for d in info.disbanded_in %}<li>{% if d.issue %}{{ issue_ref(d.issue) }}{% else %}{{ d.name or 'An issue' }}<span class="ch-sub">Not in your library</span>{% endif %}</li>{% endfor -%}
+</ul></dd></div>{% endif %}
+{% if info.allies %}<div><dt>Allies</dt><dd>{{ people(info.allies, 'creators.character_page') }}</dd></div>{% endif %}
+{% if info.enemies %}<div><dt>Enemies</dt><dd>{{ people(info.enemies, 'creators.character_page') }}</dd></div>{% endif %}
+{% endblock %}
+
+{% block page_script %}
+    const search = document.getElementById('tmSearch');
+    if (search) {
+        const tiles = [...document.querySelectorAll('.tm-grid > li[data-name]')];
+        const count = document.getElementById('tmCount');
+        const none = document.getElementById('tmNone');
+        const apply = q => {
+            q = q.trim().toLowerCase();
+            let shown = 0;
+            tiles.forEach(li => { li.hidden = !!q && !li.dataset.name.includes(q); if (!li.hidden) shown++; });
+            document.querySelectorAll('.tm-sec').forEach(s => { s.hidden = !s.querySelector('li:not([hidden])'); });
+            CLU.setCount(count, { total: tiles.length, noun: 'members', one: 'member', shown: q ? shown : null });
+            none.replaceChildren(...(shown ? [] : [CLU.noMatches({ noun: 'members', query: q,
+                onClear: () => { search.value = ''; apply(''); search.focus(); } })]));
+        };
+        CLU.bindSearch(search, apply, { delay: 0 });
+    }
+{% endblock %}

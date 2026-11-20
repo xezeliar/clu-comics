@@ -3,11 +3,12 @@
 Status: index pages built; Gaps 1 and 3 done (Teams, Editor, Translator indexed;
 team counts from `<Teams>`; every credit links); stored profiles done
 (`entity_profiles`, `core/entity_profiles.py`, Refresh at
-`POST /api/<characters|teams|creators>/<name>/refresh`); the character page
-(`templates/character.html`, `character_details` / `character_info` in
-`core/creators.py`). Next: the team and creator page redesigns, then Change
-match / Unmatch. Design: the
-"Character page" entry on the CLU Design Board.
+`POST /api/<characters|teams|creators>/<name>/refresh`); the character and
+team pages (`templates/character.html` and `templates/team.html`, both
+extending `templates/entity_page.html`; `entity_details`, `character_info`,
+`team_info` and `team_members` in `core/creators.py`). Next: the creator page
+redesign, then Change match / Unmatch. Design: the "Character page" and
+"Team page" entries on the CLU Design Board.
 
 ## Origin and data policy
 

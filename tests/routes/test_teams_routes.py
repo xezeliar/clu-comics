@@ -67,9 +67,12 @@ class TestTeamPages:
         with patch("routes.creators.render_template", return_value="") as rt:
             assert client.get("/teams/" + quote("justice league")).status_code == 200
         p = rt.call_args.kwargs["p"]
-        assert rt.call_args.args[0] == "person.html" and rt.call_args.kwargs["kind"] == "teams"
-        assert p["name"] == "Justice League" and p["issues"] == 2
-        assert p["members"] == [{"name": "Batman", "n": 2}, {"name": "Superman", "n": 2}]
+        assert rt.call_args.args[0] == "team.html" and rt.call_args.kwargs["kind"] == "teams"
+        assert p["name"] == "Justice League" and len(p["issues"]) == 2
+        # Batman is in B1 (no team) and B2 (the team): one issue together of two.
+        assert [(m["name"], m["n"], m["total"]) for m in p["members"]["in"]] == [
+            ("Superman", 2, 2), ("Batman", 1, 2)]
+        assert p["members"]["out"] == []
 
     def test_character_detail_has_portrait(self, client, library):
         with patch("routes.creators.render_template", return_value="") as rt:
@@ -79,7 +82,30 @@ class TestTeamPages:
     def test_detail_portrait_renders_photo_or_initials(self, client, library):
         html = client.get("/characters/Batman").get_data(as_text=True)
         assert 'class="ch-pt"' in html and 'src="/api/person-art/character/Batman' in html
-        assert ">JL<" in client.get("/teams/" + quote("justice league")).get_data(as_text=True)
+        # No team image cached: the first owned cover stands in, labelled.
+        assert 'class="ch-src">Cover<' in client.get("/teams/" + quote("justice league")).get_data(as_text=True)
+
+    def test_team_tabs_render(self, client, library):
+        url = "/teams/" + quote("Justice League")
+        html = client.get(url).get_data(as_text=True)
+        assert ">Members<" in html and "2 members" in html and "All 2 members" in html
+        members = client.get(url + "?tab=members").get_data(as_text=True)
+        assert "In your library" in members and "2 with the team" in members
+        assert 'href="/characters/Superman"' in members and "Not in your library" not in members
+        issues = client.get(url + "?tab=comics&view=issues").get_data(as_text=True)
+        assert 'id="chView"' in issues and 'id="chStatus"' in issues and "class=\"ch-yr\"" in issues
+        series = client.get(url + "?tab=comics").get_data(as_text=True)
+        assert 'id="chTitleSort"' in series
+
+    def test_untagged_team_shows_empty_state_and_no_comics_tab(self, client, library):
+        library.execute("UPDATE file_index SET ci_teams = ''")
+        library.execute("DELETE FROM file_metadata_tags WHERE kind = 'teams'")
+        library.commit()
+        html = client.get("/teams/" + quote("Justice League")).get_data(as_text=True)
+        assert "No issues tagged with Justice League" in html
+        assert 'id="readNextBtn"' not in html and "tab=comics" not in html and "0 issues" not in html
+        members = client.get("/teams/" + quote("Justice League") + "?tab=members").get_data(as_text=True)
+        assert "with the team" not in members and "Most issues together" not in members
 
     def test_unknown_team_is_404(self, client, library):
         assert client.get("/teams/Avengers").status_code == 404

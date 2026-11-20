@@ -367,22 +367,43 @@ def list_teams(q="", prefixes=None, limit=300):
     return list_people(("teams",), q=q, prefixes=prefixes, limit=limit)
 
 
-def team_members(team, prefixes=None):
-    """``[{"name", "n"}]``: the team's member characters the library owns."""
-    scope_sql, scope_params = _scope(prefixes)
+def team_members(team, cv_members=(), prefixes=None, sort="most"):
+    """``{"in": [{"name", "n", "total"}], "out": [names]}``: who is on the team.
+
+    Members are Metron's (``character_teams``, reversed from each character's
+    ``teams``) and ComicVine's ``members``, merged by name. ``in`` is those the
+    library has, under the library's spelling, with ``n`` the issues tagged
+    with both the team and the character and ``total`` all their issues;
+    ``out`` is the rest, which have no page to link to.
+    """
     with db_conn() as conn:
         if not conn:
-            return []
-        rows = conn.execute(
-            "SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
-            " FROM character_teams ct"
-            " JOIN person_art pa ON pa.kind = 'character' AND pa.key = ct.character_key"
-            " JOIN file_metadata_tags t ON t.kind = 'characters' AND t.value = pa.name COLLATE NOCASE"
-            " JOIN file_index fi ON fi.path = t.file_path"
-            " WHERE " + _COMIC_FILE_CLAUSE_FI + " AND ct.team_key = ?" + scope_sql
-            + " GROUP BY t.value COLLATE NOCASE ORDER BY n DESC, name",
-            [(team or "").strip().casefold(), *scope_params]).fetchall()
-        return [dict(r) for r in rows]
+            return {"in": [], "out": []}
+        metron = [r[0] for r in conn.execute(
+            "SELECT COALESCE(pa.name, ct.character_key) FROM character_teams ct"
+            " LEFT JOIN person_art pa ON pa.kind = 'character' AND pa.key = ct.character_key"
+            " WHERE ct.team_key = ?", ((team or "").strip().casefold(),))]
+    names = _merge_names(metron, cv_members)
+    owned = tag_counts(("characters",), names, prefixes)
+    together = {}
+    if owned:
+        scope_sql, scope_params = _scope(prefixes)
+        found = [o["name"] for o in owned.values()]
+        with db_conn() as conn:
+            if conn:
+                together = {r["name"].casefold(): r["n"] for r in conn.execute(
+                    "SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
+                    + _person_from(("characters",), found).replace(
+                        "WHERE",
+                        "JOIN file_metadata_tags tt ON tt.file_path = t.file_path"
+                        " AND tt.kind = 'teams' AND tt.value = ? COLLATE NOCASE WHERE", 1)
+                    + scope_sql + " GROUP BY t.value COLLATE NOCASE",
+                    [team, "characters", *found, *scope_params])}
+    rows = [{"name": o["name"], "n": together.get(k, 0), "total": o["n"]} for k, o in owned.items()]
+    rows.sort(key=(lambda r: r["name"].casefold()) if sort == "az"
+              else (lambda r: (-r["n"], -r["total"], r["name"].casefold())))
+    out = sorted((n for n in names if n.casefold() not in owned), key=str.casefold)
+    return {"in": rows, "out": out}
 
 
 def team_name(team):
@@ -409,7 +430,6 @@ def team_page(team, prefixes=None, user_id=None, view="series"):
             return None
         data = {"name": name, "roles": [], "series": [], "often_with": [], "issues": 0,
                 "read": 0, "first_year": None, "last_read": None}
-    data["members"] = team_members(team, prefixes)
     return data
 
 
@@ -573,18 +593,19 @@ def character_teams(name):
     return [r["team_name"] for r in rows if r["team_name"]]
 
 
-def character_details(name, prefixes=None, user_id=None, top_creators=8):
-    """What a character page adds to ``person_page``, or None on a read failure.
+def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
+    """What a character or team page adds to ``person_page``, or None on a read failure.
 
-    ``issues`` is every owned issue in Timeline order (Timeline, Read next,
-    Newest, first in the library); ``creators`` the people credited most on
-    them, any role, with the role they hold most there; ``lists`` the reading
-    lists holding any of them, counted within the user's folder scope.
+    ``tag`` is the tag kind the name is looked up under (``characters`` or
+    ``teams``). ``issues`` is every owned issue in Timeline order (Timeline,
+    Read next, Newest, first in the library); ``creators`` the people credited
+    most on them, any role, with the role they hold most there; ``lists`` the
+    reading lists holding any of them, counted within the user's folder scope.
     """
     uid = _resolve_user_id(user_id)
     scope_sql, scope_params = _scope(prefixes)
-    base = _person_from(("characters",), [name]) + scope_sql
-    args = ["characters", name, *scope_params]
+    base = _person_from((tag,), [name]) + scope_sql
+    args = [tag, name, *scope_params]
 
     with db_conn() as conn:
         if not conn:
@@ -631,8 +652,8 @@ def character_details(name, prefixes=None, user_id=None, top_creators=8):
             " COALESCE(e.manual_override_path, e.matched_file_path) AS path"
             " FROM reading_list_entries e"
             " JOIN file_metadata_tags t ON t.file_path = COALESCE(e.manual_override_path, e.matched_file_path)"
-            " AND t.kind = 'characters' AND t.value = ? COLLATE NOCASE",
-            [name])
+            " AND t.kind = ? AND t.value = ? COLLATE NOCASE",
+            [tag, name])
         owned = {i["path"] for i in issues}
         hits = {}
         for r in c.fetchall():
@@ -689,11 +710,37 @@ def _linked(names, counts):
     return sorted(rows, key=lambda r: (-r["n"], r["name"].casefold()))
 
 
+def _profile_common(m, cv, issues, gcd_kind):
+    """Bio, universe, first appearance, first in your library and links: the
+    rows a character and a team page share."""
+    first = None
+    fi = cv.get("first_issue") or {}
+    if fi.get("id"):
+        owned = next((i for i in issues if i["cvid"] == fi["id"]), None)
+        first = {"issue": owned, "name": fi.get("name"), "number": fi.get("number")}
+    links = []
+    if m.get("url"):
+        links.append(("Metron", m["url"]))
+    if cv.get("url"):
+        links.append(("ComicVine", cv["url"]))
+    if str(m.get("gcd_id") or "").isdigit():
+        links.append(("GCD", f"https://www.comics.org/{gcd_kind}/{m['gcd_id']}/"))
+    return {
+        "bio": m.get("desc") or cv.get("summary"),
+        "universe": ", ".join(m.get("universes") or []),
+        "first_appearance": first,
+        "first_owned": issues[0] if issues else None,
+        "links": links,
+        "has_metron": bool(m),
+        "has_cv": bool(cv),
+    }
+
+
 def character_info(name, profile, issues, prefixes=None):
     """The Information column: one winner per field (docs/browse-hub.md).
 
     ``profile`` is ``entity_profiles.get_profile`` (or None); ``issues`` is
-    ``character_details``' Timeline list, for the first appearance and first
+    ``entity_details``' Timeline list, for the first appearance and first
     in your library. Allies, teams and creators carry an issue count when the
     library has them, which is what makes them links.
     """
@@ -704,35 +751,34 @@ def character_info(name, profile, issues, prefixes=None):
     friends = [f["name"] for f in cv.get("friends") or () if f.get("name")]
     enemies = [f["name"] for f in cv.get("enemies") or () if f.get("name")]
     chars = tag_counts(("characters",), friends + enemies, prefixes)
+    info = _profile_common(m, cv, issues, "character")
+    info.update(
+        real_name=cv.get("real_name"),
+        aliases=m.get("alias") or cv.get("aliases") or [],
+        created_by=_linked(creators, tag_counts(CREDIT_KINDS, creators, prefixes)),
+        origin=cv.get("origin"),
+        teams=_linked(teams, tag_counts(("teams",), teams, prefixes)),
+        powers=cv.get("powers") or [],
+        allies=_linked(friends, chars),
+        enemies=_linked(enemies, chars))
+    return info
 
-    first = None
-    fi = cv.get("first_issue") or {}
-    if fi.get("id"):
-        owned = next((i for i in issues if i["cvid"] == fi["id"]), None)
-        first = {"issue": owned, "name": fi.get("name"), "number": fi.get("number")}
 
-    links = []
-    if m.get("url"):
-        links.append(("Metron", m["url"]))
-    if cv.get("url"):
-        links.append(("ComicVine", cv["url"]))
-    if str(m.get("gcd_id") or "").isdigit():
-        links.append(("GCD", f"https://www.comics.org/character/{m['gcd_id']}/"))
-
-    return {
-        "bio": m.get("desc") or cv.get("summary"),
-        "universe": ", ".join(m.get("universes") or []),
-        "real_name": cv.get("real_name"),
-        "aliases": m.get("alias") or cv.get("aliases") or [],
-        "created_by": _linked(creators, tag_counts(CREDIT_KINDS, creators, prefixes)),
-        "first_appearance": first,
-        "first_owned": issues[0] if issues else None,
-        "origin": cv.get("origin"),
-        "teams": _linked(teams, tag_counts(("teams",), teams, prefixes)),
-        "powers": cv.get("powers") or [],
-        "allies": _linked(friends, chars),
-        "enemies": _linked(enemies, chars),
-        "links": links,
-        "has_metron": bool(m),
-        "has_cv": bool(cv),
-    }
+def team_info(name, profile, issues, prefixes=None):
+    """The team page's Information column (docs/browse-hub.md, "Team page")."""
+    m = (profile or {}).get("metron") or {}
+    cv = (profile or {}).get("cv") or {}
+    info = _profile_common(m, cv, issues, "group")  # GCD calls teams groups
+    creators = m.get("creators") or []
+    friends = [f["name"] for f in cv.get("friends") or () if f.get("name")]
+    enemies = [f["name"] for f in cv.get("enemies") or () if f.get("name")]
+    chars = tag_counts(("characters",), friends + enemies, prefixes)
+    by_cvid = {i["cvid"]: i for i in issues if i["cvid"]}
+    info.update(
+        created_by=_linked(creators, tag_counts(CREDIT_KINDS, creators, prefixes)),
+        disbanded_in=[{"name": d.get("name"), "issue": by_cvid.get(d.get("id"))}
+                      for d in cv.get("disbanded_in") or ()],
+        allies=_linked(friends, chars),
+        enemies=_linked(enemies, chars),
+        cv_members=[x["name"] for x in cv.get("members") or () if x.get("name")])
+    return info

@@ -136,18 +136,15 @@ def _can_refresh():
     return not user or role_at_least(user, "clerk")
 
 
-@creators_bp.route("/characters/<path:name>")
-def character_page(name):
-    name = strip_provider_ids(name) or name
-    prefixes = accessible_folder_prefixes(current_user())
-    data = creators.person_page(("characters",), name, prefixes=prefixes)
-    if data is None:
-        abort(404)
-    details = creators.character_details(data["name"], prefixes=prefixes)
+def _detail(data, tag, prefixes, tabs):
+    """Fill a character or team page's shared parts from the query string:
+    the tab, Titles (series) sort, the paged Timeline (issues), Read next."""
+    details = creators.entity_details(tag, data["name"], prefixes=prefixes)
     if details is None:
         abort(503)
     data.update(details)
-    st = {"tab": _arg("tab", CHARACTER_TABS, "overview"),
+    st = {"tab": _arg("tab", tabs, "overview"),
+          "view": _arg("view", ("series", "issues"), "series"),
           "tsort": _arg("tsort", TITLE_SORTS, "most"),
           "sort": _arg("sort", TIMELINE_SORTS, "old"),
           "status": _arg("status", TIMELINE_STATUS, "all"),
@@ -188,13 +185,30 @@ def character_page(name):
     data["newest"] = [i for i in issues if i["year"]][-6:][::-1]
     data["most"] = sorted(data["series"], key=lambda s: -s["issues"])[:6]
     data["cover_fallback"] = issues[0]["thumbnail_url"] if issues else None
+    return st
 
+
+def _detail_extra(st):
+    return {"st": st, "title_sorts": TITLE_SORTS, "timeline_sorts": TIMELINE_SORTS,
+            "can_refresh": _can_refresh(),
+            "has_token": bool((current_app.config.get("METRON_API_TOKEN") or "").strip())}
+
+
+@creators_bp.route("/characters/<path:name>")
+def character_page(name):
+    name = strip_provider_ids(name) or name
+    prefixes = accessible_folder_prefixes(current_user())
+    data = creators.person_page(("characters",), name, prefixes=prefixes)
+    if data is None:
+        abort(404)
+    st = _detail(data, "characters", prefixes, CHARACTER_TABS)
     profile = entity_profiles.get_profile("character", data["name"])
-    data["info"] = creators.character_info(data["name"], profile, issues, prefixes=prefixes)
-    return _render_page(data, "character.html", "series", kind="characters",
-                        st=st, title_sorts=TITLE_SORTS, timeline_sorts=TIMELINE_SORTS,
-                        can_refresh=_can_refresh(),
-                        has_token=bool((current_app.config.get("METRON_API_TOKEN") or "").strip()))
+    data["info"] = creators.character_info(data["name"], profile, data["issues"], prefixes=prefixes)
+    return _render_page(data, "character.html", "series", kind="characters", **_detail_extra(st))
+
+
+TEAM_TABS = ("overview", "members", "comics")
+MEMBER_SORTS = {"most": "Most issues together", "az": "A–Z"}
 
 
 @creators_bp.route("/teams")
@@ -206,12 +220,23 @@ def teams_index():
 
 @creators_bp.route("/teams/<path:name>")
 def team_page(name):
-    view = _view()
-    data = creators.team_page(
-        strip_provider_ids(name) or name,
-        prefixes=accessible_folder_prefixes(current_user()), view=view)
-    return _render_page(data, "person.html", view, kind="teams",
-                        follow=None, role=None, roles={}, scopes=())
+    prefixes = accessible_folder_prefixes(current_user())
+    data = creators.team_page(strip_provider_ids(name) or name, prefixes=prefixes)
+    if data is None:
+        abort(404)
+    st = _detail(data, "teams", prefixes, TEAM_TABS)
+    # With no tagged issues every member has 0 issues together: sort by name.
+    st["msort"] = _arg("msort", MEMBER_SORTS, "most") if data["issues"] else "az"
+    profile = entity_profiles.get_profile("team", data["name"])
+    data["info"] = creators.team_info(data["name"], profile, data["issues"], prefixes=prefixes)
+    data["members"] = creators.team_members(
+        data["name"], data["info"]["cv_members"], prefixes=prefixes, sort=st["msort"])
+    names = [m["name"] for m in data["members"]["in"]]
+    art = person_art.art_urls("character", names)
+    for m in data["members"]["in"]:
+        m["art"] = art.get(m["name"])
+    return _render_page(data, "team.html", "series", kind="teams",
+                        member_sorts=MEMBER_SORTS, **_detail_extra(st))
 
 
 @creators_bp.route("/api/teams/<path:name>/issues")

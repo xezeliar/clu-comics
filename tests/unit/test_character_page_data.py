@@ -34,20 +34,20 @@ def lib(db_connection, monkeypatch):
 
 
 def test_timeline_order_and_read_next(lib):
-    d = creators.character_details("Batman")
+    d = creators.entity_details("characters", "Batman")
     assert [i["name"] for i in d["issues"]] == ["S1.cbz", "D1.cbz", "B2.cbz", "B10.cbz", "U1.cbz"]
     assert d["issues"][d["next_index"]]["name"] == "S1.cbz"
     assert d["publisher"] == "DC"
 
 
 def test_folder_scope_hides_other_folders(lib):
-    d = creators.character_details("Batman", prefixes=["/data/B", "/data/D", "/data/U"])
+    d = creators.entity_details("characters", "Batman", prefixes=["/data/B", "/data/D", "/data/U"])
     assert "S1.cbz" not in [i["name"] for i in d["issues"]]
     assert d["issues"][d["next_index"]]["name"] == "B2.cbz"  # D1 is read
 
 
 def test_creators_ranked_with_main_role(lib):
-    d = creators.character_details("Batman")
+    d = creators.entity_details("characters", "Batman")
     # Ann: 3 issues; penciller on 2, writer on 1, inker on 1.
     assert d["creators"][0] == {"name": "Ann", "n": 3, "kind": "penciller", "role": "Penciller"}
     assert d["creators"][1]["name"] == "Lee" and d["creators"][1]["kind"] == "letterer"
@@ -59,14 +59,14 @@ def test_reading_lists_count_only_this_characters_issues(lib):
         lib.execute("INSERT INTO reading_list_entries (reading_list_id, matched_file_path) VALUES (1, ?)", (path,))
     lib.execute("INSERT INTO reading_list_entries (reading_list_id, manual_override_path) VALUES (2, '/data/S/S1.cbz')")
     lib.commit()
-    lists = creators.character_details("Batman", prefixes=["/data/B", "/data/D", "/data/U"])["lists"]
+    lists = creators.entity_details("characters", "Batman", prefixes=["/data/B", "/data/D", "/data/U"])["lists"]
     assert [(l["name"], l["hits"], l["total"]) for l in lists] == [("L", 2, 3)]
 
 
 def test_information_merges_and_links(lib):
     lib.execute("INSERT INTO character_teams VALUES ('batman', 'bat-family', 'Bat-Family', 1)")
     lib.commit()
-    issues = creators.character_details("Batman")["issues"]
+    issues = creators.entity_details("characters", "Batman")["issues"]
     profile = {"metron": {"desc": None, "gcd_id": "x", "creators": ["Ann", "Bob Kane"]},
                "cv": {"summary": "Short bio.", "teams": ["bat-family", "JLA"],
                       "friends": [{"id": 1, "name": "Robin"}, {"id": 2, "name": "Alfred"}],
@@ -84,3 +84,19 @@ def test_information_merges_and_links(lib):
 def test_information_without_profile(lib):
     info = creators.character_info("Batman", None, [])
     assert info["bio"] is None and info["first_appearance"] is None and not info["has_metron"]
+
+
+def test_team_information(lib):
+    issues = creators.entity_details("teams", "Bat-Family")["issues"]
+    profile = {"metron": {"desc": "Gotham's heroes.", "creators": ["Ann"]},
+               "cv": {"friends": [{"id": 1, "name": "Robin"}], "enemies": [{"id": 2, "name": "Bane"}],
+                      "members": [{"id": 3, "name": "Robin"}, {"id": 4, "name": "Oracle"}],
+                      "disbanded_in": [{"id": 9, "name": "Finale"}]}}
+    info = creators.team_info("Bat-Family", profile, issues)
+    assert info["bio"] == "Gotham's heroes."
+    assert info["created_by"] == [{"name": "Ann", "n": 3}]
+    assert info["allies"] == [{"name": "Robin", "n": 1}]
+    assert info["enemies"] == [{"name": "Bane", "n": 0}]
+    assert info["disbanded_in"] == [{"name": "Finale", "issue": None}]
+    assert info["cv_members"] == ["Robin", "Oracle"]
+    assert info["first_owned"]["name"] == "U1.cbz"

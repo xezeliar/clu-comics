@@ -1,0 +1,64 @@
+{#- Pieces the character and team pages share (templates/entity_page.html). -#}
+{% macro issue_label(i) -%}{{ i.series }}{% if i.number %} #{{ i.number }}{% endif %}{%- endmacro %}
+
+{% macro issue_card(i, list_name, idx) -%}
+<li>
+  <button type="button" class="ch-card" data-list="{{ list_name }}" data-index="{{ idx }}"
+          aria-label="Read {{ issue_label(i) }}{% if i.read %}, read{% endif %}">
+    <span class="ch-cover">
+      <img src="{{ i.thumbnail_url }}" alt="" loading="lazy"
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+      {% if i.read %}<span class="clu-prog clu-prog-tick" aria-hidden="true"><i class="bi bi-check2"></i></span>{% endif %}
+    </span>
+    <span class="ch-ct" title="{{ issue_label(i) }}{% if i.title %} · {{ i.title }}{% endif %}">{{ issue_label(i) }}</span>
+    <span class="ch-cm">{{ i.year or 'Undated' }}</span>
+  </button>
+</li>
+{%- endmacro %}
+
+{% macro series_card(s) -%}
+<li>
+  <a class="ch-card" href="{{ s.href }}">
+    <span class="ch-cover">
+      <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+      {% if s.issues and s.read == s.issues %}<span class="clu-prog clu-prog-tick" title="All read" aria-hidden="true"><i class="bi bi-check2"></i></span>{% endif %}
+    </span>
+    <span class="ch-ct" title="{{ s.name }}">{{ s.name }}</span>{% if s.issues and s.read == s.issues %}<span class="visually-hidden">, all read</span>{% endif %}
+    <span class="ch-cm">{{ s.issues }} issue{{ 's' if s.issues != 1 }}{% if s.year %} · {{ s.year }}{% endif %}</span>
+  </a>
+</li>
+{%- endmacro %}
+
+{#- Names that link to their CLU page when the library has them (n > 0). -#}
+{% macro people(rows, endpoint, unit='issue') -%}
+<ul>
+  {%- for r in rows %}
+  <li>
+    {%- if r.n %}<a href="{{ url_for(endpoint, name=r.name) }}">{{ r.name }}</a><span class="ch-n">{{ '{:,}'.format(r.n) }} {{ unit }}{{ 's' if r.n != 1 }}</span>
+    {%- else %}<span>{{ r.name }}</span>{% endif -%}
+  </li>
+  {%- endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro more_list(items, noun, shown=3) -%}
+{{ items[:shown] | join(', ') }}
+{%- if items | length > shown %}
+<details class="ch-al"><summary>{{ items | length - shown }} more {{ noun }}</summary>{{ items[shown:] | join(', ') }}</details>
+{%- endif %}
+{%- endmacro %}
+
+{#- An owned issue in the Information column: opens the reader. -#}
+{% macro issue_ref(i) -%}
+<button type="button" class="btn btn-link ch-inline" data-path="{{ i.path }}">{{ issue_label(i) }}</button>{% if i.year %} <span class="ch-n">({{ i.year }})</span>{% endif %}
+{%- endmacro %}
+
+{% macro first_appearance(fa) -%}
+{%- if fa.issue %}{{ issue_ref(fa.issue) }}
+{%- else %}Issue{% if fa.number %} #{{ fa.number }}{% endif %}{% if fa.name %} “{{ fa.name }}”{% endif %}<span class="ch-sub">Not in your library</span>{% endif -%}
+{%- endmacro %}
+
+{% macro links(items) -%}
+{% for label, href in items %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ label }} <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i><span class="visually-hidden"> (opens in a new tab)</span></a>{% endfor %}
+{%- endmacro %}
