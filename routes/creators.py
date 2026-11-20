@@ -4,7 +4,7 @@ and the cached Metron photos those grids show (core/person_art.py)."""
 from flask import (Blueprint, abort, current_app, jsonify, render_template, request,
                    send_file, url_for)
 
-from core import creators, person_art
+from core import creators, entity_profiles, person_art
 from core.auth import accessible_folder_prefixes, current_user
 from core.database import get_series_slugs_for_folders
 from core.metadata_normalize import strip_provider_ids
@@ -26,8 +26,10 @@ def _render_page(data, template, view, **extra):
     if extra.get("kind") in ART_KINDS:
         kind = ART_KINDS[extra["kind"]]
         data["art"] = person_art.art_urls(kind, [data["name"]]).get(data["name"])
-        # Opening a detail page is the only thing that asks Metron for a photo.
-        if not data["art"] and (current_app.config.get("METRON_API_TOKEN") or "").strip():
+        data["profile"] = entity_profiles.get_profile(kind, data["name"])
+        # Opening a detail page is the only thing that asks Metron for a photo
+        # or a profile; ensure() is a no-op once both are stored.
+        if (current_app.config.get("METRON_API_TOKEN") or "").strip():
             person_art.ensure(current_app._get_current_object(), kind, data["name"])
     return render_template(template, p=data, view=view, **extra)
 
@@ -138,6 +140,27 @@ def team_page(name):
 @creators_bp.route("/api/teams/<path:name>/issues")
 def api_team_issues(name):
     return _issues(("teams",), name)
+
+
+@creators_bp.route("/api/<any(characters, teams, creators):grid>/<path:name>/refresh",
+                   methods=["POST"])
+def refresh_profile(grid, name):
+    """Refetch one profile and photo from Metron and ComicVine (Clerk and up).
+
+    The only way a stored profile changes. Runs on a daemon thread; the answer
+    says whether it started, or why Metron cannot be asked right now.
+    """
+    from models import metron
+
+    if not (current_app.config.get("METRON_API_TOKEN") or "").strip():
+        return jsonify({"success": False, "error": "Add a Metron API token in Settings first"}), 409
+    reason = metron.paused_reason()
+    if reason:
+        return jsonify({"success": False, "error": reason}), 503
+    name = strip_provider_ids(name) or name
+    started = person_art.ensure(current_app._get_current_object(), ART_KINDS[grid], name,
+                                force=True)
+    return jsonify({"success": True, "started": started}), 202
 
 
 @creators_bp.route("/api/person-art/<kind>/<path:name>", endpoint="person_art")

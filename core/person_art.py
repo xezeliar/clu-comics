@@ -32,6 +32,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from core import entity_profiles
 from core.app_logging import app_logger
 from core.config import get_cache_dir
 from core.database import db_conn
@@ -148,11 +149,13 @@ def _fail(kind, name, metron_id, why):
     return "error"
 
 
-def resolve(kind, name, api, fetch_image):
+def resolve(kind, name, api, fetch_image, cv=None):
     """Look one name up on Metron and store what was found. Returns the status.
 
     ``api`` is a ``MetronClient`` (its methods return None on a failed request
     and ``[]`` for "no results"); ``fetch_image(url)`` returns bytes or None.
+    For characters, teams and creators the detail also becomes their stored
+    profile (``core/entity_profiles.py``), with ComicVine fetched through ``cv``.
     """
     if kind not in KINDS:
         raise ValueError(f"Unknown kind {kind!r}")
@@ -163,16 +166,20 @@ def resolve(kind, name, api, fetch_image):
     if metron_id is None:
         results = getattr(api, _LIST_METHOD[kind])({"name": name})
         if results is None:
+            entity_profiles.record_error(kind, name, "Metron search request failed")
             return _fail(kind, name, None, "Metron search request failed")
         match = next((r for r in results if key_for(getattr(r, "name", "")) == key), None)
         if match is None:
+            entity_profiles.record_missing(kind, name)
             _save(kind, name, None, "missing")
             return "missing"
         metron_id = match.id
 
     detail = getattr(api, _DETAIL_METHOD[kind])(metron_id)
     if detail is None:
+        entity_profiles.record_error(kind, name, "Metron detail request failed")
         return _fail(kind, name, metron_id, "Metron detail request failed")
+    entity_profiles.store(kind, name, detail, cv)
     if kind == "character":
         _save_teams(name, getattr(detail, "teams", None) or [])
 
@@ -227,6 +234,16 @@ _in_flight = set()
 _in_flight_lock = threading.Lock()
 
 
+def _cv_client(app):
+    """The guarded ComicVine client, or None when there is no key or it is paused."""
+    from models import comicvine
+
+    key = (getattr(app, "config", {}).get("COMICVINE_API_KEY") or "").strip()
+    if not key or comicvine.paused_reason():
+        return None
+    return comicvine.get_cv_client(key)
+
+
 def _run_one(app, kind, name):
     from models import metron
 
@@ -240,7 +257,8 @@ def _run_one(app, kind, name):
             app_logger.info(f"Person art: {kind} {name!r} skipped, no Metron token")
             return
         app_logger.info(f"Person art: fetching {kind} {name!r}")
-        status = resolve(kind, name, api, _default_fetch_image)
+        cv = _cv_client(app) if kind in entity_profiles.KINDS else None
+        status = resolve(kind, name, api, _default_fetch_image, cv)
         app_logger.info(f"Person art: {kind} {name!r} -> {status}")
     except Exception as e:
         app_logger.warning(f"Person art: {kind} {name!r} failed: {e}")
@@ -249,16 +267,20 @@ def _run_one(app, kind, name):
             _in_flight.discard((kind, key_for(name)))
 
 
-def ensure(app, kind, name):
+def ensure(app, kind, name, force=False):
     """Resolve one name on a daemon thread when its detail page is opened.
 
-    No-op when it is already cached, not yet due for a retry, or already in
-    flight. This is the only thing that talks to Metron: there is no sweep.
+    No-op when its photo and profile are already stored, not yet due for a
+    retry, or already in flight. ``force`` is the page's Refresh: fetch again
+    whatever is stored. This is the only thing that talks to Metron: there is
+    no sweep.
     """
     if kind not in KINDS or not name:
         return False
     key = key_for(name)
-    if not _is_due(_get_row(kind, key), _utcnow()):
+    now = _utcnow()
+    if not force and not _is_due(_get_row(kind, key), now) and not (
+            kind in entity_profiles.KINDS and entity_profiles.is_due(kind, name, now)):
         return False
     with _in_flight_lock:
         if (kind, key) in _in_flight:

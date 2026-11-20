@@ -612,6 +612,27 @@ def _init_db_locked():
         """)
         c.execute("CREATE INDEX IF NOT EXISTS idx_character_teams_team ON character_teams(team_key)")
 
+        # entity_profiles: Metron and ComicVine details for the character, team
+        # and creator pages (core/entity_profiles.py). Kept forever; only a
+        # manual refresh rewrites a row, and a failed refresh keeps the old data.
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS entity_profiles (
+                kind TEXT NOT NULL,
+                key TEXT NOT NULL,
+                name TEXT,
+                metron_id INTEGER,
+                cv_id INTEGER,
+                metron_json TEXT,
+                cv_json TEXT,
+                metron_fetched_at TEXT,
+                cv_fetched_at TEXT,
+                status TEXT,
+                error TEXT,
+                checked_at TEXT,
+                PRIMARY KEY (kind, key)
+            )
+        """)
+
         # Create rebuild_schedule table (store file index rebuild schedule)
         c.execute("""
             CREATE TABLE IF NOT EXISTS rebuild_schedule (

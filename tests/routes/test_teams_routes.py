@@ -163,3 +163,47 @@ class TestInsightsWho:
         assert get_reading_trends("characters", year=2023, user_id=1) == [
             {"name": "Spawn", "count": 1}]
         assert get_reading_trends("bogus") == []
+
+
+class TestRefreshProfile:
+    @pytest.fixture
+    def token(self, app):
+        app.config["METRON_API_TOKEN"] = "t"
+        yield
+        app.config["METRON_API_TOKEN"] = ""
+
+    def test_starts_a_forced_fetch(self, client, library, token):
+        with patch("models.metron.paused_reason", return_value=None), \
+                patch("core.person_art.ensure", return_value=True) as ensure:
+            r = client.post("/api/teams/" + quote("Justice League") + "/refresh")
+        assert r.status_code == 202 and r.get_json() == {"success": True, "started": True}
+        args, kwargs = ensure.call_args
+        assert args[1:] == ("team", "Justice League") and kwargs == {"force": True}
+
+    def test_kind_maps_to_art_kind(self, client, library, token):
+        with patch("models.metron.paused_reason", return_value=None), \
+                patch("core.person_art.ensure", return_value=False) as ensure:
+            assert client.post("/api/creators/Tom%20King%20%5B9%5D/refresh").status_code == 202
+        assert ensure.call_args.args[1:] == ("creator", "Tom King")
+
+    def test_paused_metron_is_503(self, client, library, token):
+        with patch("models.metron.paused_reason", return_value="Metron rejected the token"), \
+                patch("core.person_art.ensure") as ensure:
+            r = client.post("/api/characters/Batman/refresh")
+        assert r.status_code == 503 and r.get_json()["error"] == "Metron rejected the token"
+        ensure.assert_not_called()
+
+    def test_no_token_is_409(self, client, library):
+        assert client.post("/api/characters/Batman/refresh").status_code == 409
+
+    def test_unknown_grid_is_404(self, client, library, token):
+        assert client.post("/api/publishers/DC/refresh").status_code == 404
+
+    def test_reader_cannot_refresh(self, client, db_connection, monkeypatch, token):
+        from core.database import create_user
+        monkeypatch.delenv("CLU_USERNAME", raising=False)
+        monkeypatch.delenv("CLU_PASSWORD", raising=False)
+        create_user("owner", password="ownerpass", role="owner")
+        create_user("reader", password="readerpass", role="reader")
+        client.post("/login", data={"username": "reader", "password": "readerpass"})
+        assert client.post("/api/characters/Batman/refresh").status_code == 403
