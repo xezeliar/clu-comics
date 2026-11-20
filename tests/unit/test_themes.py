@@ -117,6 +117,7 @@ class TestDashboardEditorPartial:
 
         html = self._render(env)
         assert html.count("<li") == len(DEFAULT_DASHBOARD_ORDER)
+        assert 'data-section-id="series"' in html
         for section_id in DEFAULT_DASHBOARD_ORDER:
             assert f'data-section-id="{section_id}"' in html
 
