@@ -399,13 +399,31 @@ def _init_db_locked():
             "ci_publisher",  # Publisher name
             "ci_genre",  # Genre(s) - comma-separated
             "ci_characters",  # Characters - comma-separated
+            "ci_teams",  # Teams - comma-separated
+            "ci_editor",  # Editor(s) - comma-separated
+            "ci_translator",  # Translator(s) - comma-separated
             "metadata_scanned_at",  # Timestamp of last scan (REAL)
         ]
+        # Added after the library was first scanned: files tagged before then
+        # carry <Teams>/<Editor>/<Translator> the index never read, so the
+        # scanner re-reads every file that has a ComicInfo.xml, once.
+        _rescan_for_new_ci = (
+            "ci_teams" not in columns
+            and "ci_title" in columns and "has_comicinfo" in columns
+        )
         for col in metadata_columns:
             if col not in columns:
                 col_type = "REAL" if col == "metadata_scanned_at" else "TEXT"
                 c.execute(f"ALTER TABLE file_index ADD COLUMN {col} {col_type}")
                 app_logger.info(f"Migrating file_index: adding {col} column")
+        if _rescan_for_new_ci:
+            c.execute(
+                "UPDATE file_index SET metadata_scanned_at = NULL"
+                " WHERE type = 'file' AND has_comicinfo = 1"
+            )
+            app_logger.info(
+                "Queued files with ComicInfo.xml for a rescan (teams, editor, translator)"
+            )
 
         # Migration: Add first_indexed_at column to track when files were first added
         if "first_indexed_at" not in columns:
@@ -2225,14 +2243,9 @@ def _init_db_locked():
             " AND NOT EXISTS ("
             "   SELECT 1 FROM file_metadata_tags WHERE file_path = file_index.path"
             " ) AND ("
-            " ci_writer IS NOT NULL AND ci_writer != ''"
-            " OR ci_penciller IS NOT NULL AND ci_penciller != ''"
-            " OR ci_characters IS NOT NULL AND ci_characters != ''"
-            " OR ci_genre IS NOT NULL AND ci_genre != ''"
-            " OR ci_inker IS NOT NULL AND ci_inker != ''"
-            " OR ci_colorist IS NOT NULL AND ci_colorist != ''"
-            " OR ci_letterer IS NOT NULL AND ci_letterer != ''"
-            " OR ci_coverartist IS NOT NULL AND ci_coverartist != ''"
+            + " OR ".join(
+                f"{col} IS NOT NULL AND {col} != ''" for col in _NORMALIZED_LIST_COLUMNS
+            ) +
             " ) LIMIT 1"
         )
         _needs_tag_backfill = c.fetchone() is not None
@@ -5153,6 +5166,7 @@ def update_file_metadata(file_id, metadata_dict, scanned_at, has_comicinfo=None)
                     ci_volume = ?, ci_year = ?, ci_writer = ?, ci_penciller = ?,
                     ci_inker = ?, ci_colorist = ?, ci_letterer = ?, ci_coverartist = ?,
                     ci_publisher = ?, ci_genre = ?, ci_characters = ?,
+                    ci_teams = ?, ci_editor = ?, ci_translator = ?,
                     ci_metronid = ?, ci_provider = ?, ci_cvid = ?,
                     metadata_scanned_at = ?, has_comicinfo = ?
                 WHERE id = ?
@@ -5173,6 +5187,9 @@ def update_file_metadata(file_id, metadata_dict, scanned_at, has_comicinfo=None)
                     metadata_dict.get("ci_publisher", ""),
                     metadata_dict.get("ci_genre", ""),
                     metadata_dict.get("ci_characters", ""),
+                    metadata_dict.get("ci_teams", ""),
+                    metadata_dict.get("ci_editor", ""),
+                    metadata_dict.get("ci_translator", ""),
                     # This path has just read the XML, so it is the authority: 0
                     # records "read it, no MetronId there" and keeps the file out of
                     # the backfill queue.
@@ -5605,6 +5622,9 @@ def update_file_index_from_comicinfo(file_path, comicinfo_dict, authoritative=Fa
             ci_publisher = strip_provider_ids(comicinfo_dict.get("Publisher", ""))
             ci_genre = normalize_credit_list(comicinfo_dict.get("Genre", ""))
             ci_characters = normalize_credit_list(comicinfo_dict.get("Characters", ""))
+            ci_teams = normalize_credit_list(comicinfo_dict.get("Teams", ""))
+            ci_editor = normalize_credit_list(comicinfo_dict.get("Editor", ""))
+            ci_translator = normalize_credit_list(comicinfo_dict.get("Translator", ""))
             scanned_at = time.time()
 
             # Every caller reaches here immediately after rewriting the archive, and
@@ -5638,6 +5658,7 @@ def update_file_index_from_comicinfo(file_path, comicinfo_dict, authoritative=Fa
                     ci_volume = ?, ci_year = ?, ci_writer = ?, ci_penciller = ?,
                     ci_inker = ?, ci_colorist = ?, ci_letterer = ?, ci_coverartist = ?,
                     ci_publisher = ?, ci_genre = ?, ci_characters = ?,
+                    ci_teams = ?, ci_editor = ?, ci_translator = ?,
                     has_comicinfo = 1, metadata_scanned_at = ?,
                     modified_at = COALESCE(?, modified_at),
                     ci_metronid = COALESCE(?, ci_metronid),
@@ -5651,6 +5672,7 @@ def update_file_index_from_comicinfo(file_path, comicinfo_dict, authoritative=Fa
                     ci_volume, ci_year, ci_writer, ci_penciller,
                     ci_inker, ci_colorist, ci_letterer, ci_coverartist,
                     ci_publisher, ci_genre, ci_characters,
+                    ci_teams, ci_editor, ci_translator,
                     scanned_at,
                     file_mtime,
                     # COALESCE, not a plain write: a ComicVine re-tag of a
@@ -5678,6 +5700,9 @@ def update_file_index_from_comicinfo(file_path, comicinfo_dict, authoritative=Fa
                 "ci_coverartist": ci_coverartist,
                 "ci_characters": ci_characters,
                 "ci_genre": ci_genre,
+                "ci_teams": ci_teams,
+                "ci_editor": ci_editor,
+                "ci_translator": ci_translator,
             })
 
             conn.commit()
@@ -7569,26 +7594,34 @@ def get_reading_stats_by_year(year=None, user_id=None):
 
 
 def get_read_field_values(field_name, year=None, user_id=None):
-    """Each read issue's values for a field (writer, penciller, characters, publisher).
+    """Each read issue's values for a field (writer, penciller, characters, publisher, teams).
 
     One list per read issue, already split by ``split_credit_list`` (which strips
     "[3258]"-style provider IDs). ``year`` is the user's calendar year, as on the
     rest of Insights. Returns None on an invalid field or a failed read, so a
     caller can tell "could not read" from "read nothing".
+
+    ``teams`` is not snapshotted on ``issues_read``; it is read from the file's
+    current ``ci_teams``, so a read issue that left the library has no teams.
     """
     # Validate field name to prevent SQL injection
-    valid_fields = ["writer", "penciller", "characters", "publisher"]
+    valid_fields = {
+        "writer": "writer", "penciller": "penciller", "characters": "characters",
+        "publisher": "publisher", "teams": "fi.ci_teams",
+    }
     if field_name not in valid_fields:
         app_logger.warning(f"Invalid field name for reading trends: {field_name}")
         return None
 
     try:
         uid = _resolve_user_id(user_id)
-        # field_name is validated against valid_fields above
+        # col comes from valid_fields above, never from the caller
+        col = valid_fields[field_name]
+        join = " JOIN file_index fi ON fi.path = issues_read.issue_path" if field_name == "teams" else ""
         base = (
-            "SELECT " + field_name + " FROM issues_read"
+            "SELECT " + col + " FROM issues_read" + join +
             " WHERE user_id = ?"
-            " AND " + field_name + " != '' AND " + field_name + " IS NOT NULL"
+            " AND " + col + " != '' AND " + col + " IS NOT NULL"
         )
         with db_conn() as conn:
             if not conn:
@@ -7970,7 +8003,10 @@ _METADATA_FACET_COLUMNS = {
     "colorist":   ("ci_colorist",   True),
     "letterer":   ("ci_letterer",   True),
     "coverartist":("ci_coverartist",True),
+    "editor":     ("ci_editor",     True),
+    "translator": ("ci_translator", True),
     "characters": ("ci_characters", True),
+    "teams":      ("ci_teams",      True),
     "genre":      ("ci_genre",      True),
 }
 
@@ -7983,7 +8019,10 @@ _TAG_KINDS = [
     ("colorist",    "ci_colorist"),
     ("letterer",    "ci_letterer"),
     ("coverartist", "ci_coverartist"),
+    ("editor",      "ci_editor"),
+    ("translator",  "ci_translator"),
     ("characters",  "ci_characters"),
+    ("teams",       "ci_teams"),
     ("genre",       "ci_genre"),
 ]
 

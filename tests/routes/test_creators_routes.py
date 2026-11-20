@@ -35,7 +35,8 @@ def library(db_connection):
           ci_penciller="Mitch Gerads", ci_characters="Batman, Catwoman")
     _file(db_connection, b, "D1.cbz", "Detective", 1, year=2018, ci_writer="Tom King",
           ci_penciller="Clay Mann", ci_characters="Batman")
-    _file(db_connection, "/data/X", "X1.cbz", "Other", 1, ci_writer="Someone Else")
+    _file(db_connection, "/data/X", "X1.cbz", "Other", 1, ci_writer="Someone Else",
+          ci_editor="Jamie Rich", ci_translator="Ana Ruiz")
     _backfill_file_metadata_tags(db_connection)
     db_connection.execute(
         "INSERT INTO issues_read (issue_path, user_id) VALUES (?, 1)", (p1,))
@@ -64,6 +65,12 @@ class TestCreatorPage:
         body = client.get("/creators/Mitch%20Gerads?role=penciller").get_data(as_text=True)
         assert 'Penciller<span class="clu-filter-count">2</span>' in body
         assert client.get("/creators/Tom%20King?role=penciller").status_code == 404
+
+    def test_editor_and_translator_have_pages(self, client, library):
+        body = client.get("/creators/Jamie%20Rich?role=editor").get_data(as_text=True)
+        assert 'Editor<span class="clu-filter-count">1</span>' in body
+        assert client.get("/creators/Ana%20Ruiz").status_code == 200
+        assert client.get("/creators/Ana%20Ruiz?role=translator").status_code == 200
 
     def test_unread_view_hides_finished_series(self, client, library, db_connection):
         db_connection.execute(

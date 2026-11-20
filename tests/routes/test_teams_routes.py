@@ -12,13 +12,13 @@ from core import person_art
 from tests.unit.test_person_art import FakeMetron, _jpeg
 
 
-def _file(conn, path, chars, writer="Tom King", publisher="DC"):
+def _file(conn, path, chars, writer="Tom King", publisher="DC", teams=""):
     parent, name = path.rsplit("/", 1)
     conn.execute(
         "INSERT INTO file_index (name, path, type, size, parent, has_comicinfo,"
-        " ci_series, ci_number, ci_publisher, ci_characters, ci_writer)"
-        " VALUES (?, ?, 'file', 1, ?, 1, ?, '1', ?, ?, ?)",
-        (name, path, parent, parent.rsplit("/", 1)[-1], publisher, chars, writer))
+        " ci_series, ci_number, ci_publisher, ci_characters, ci_writer, ci_teams)"
+        " VALUES (?, ?, 'file', 1, ?, 1, ?, '1', ?, ?, ?, ?)",
+        (name, path, parent, parent.rsplit("/", 1)[-1], publisher, chars, writer, teams))
 
 
 @pytest.fixture
@@ -26,8 +26,8 @@ def library(db_connection, tmp_path):
     from core.database import _backfill_file_metadata_tags
 
     _file(db_connection, "/data/DC/Batman/B1.cbz", "Batman, Joker")
-    _file(db_connection, "/data/DC/Batman/B2.cbz", "Batman, Superman")
-    _file(db_connection, "/data/DC/Superman/S1.cbz", "Superman")
+    _file(db_connection, "/data/DC/Batman/B2.cbz", "Batman, Superman", teams="Justice League")
+    _file(db_connection, "/data/DC/Superman/S1.cbz", "Superman", teams="Justice League")
     db_connection.commit()
     _backfill_file_metadata_tags(db_connection)
     api = FakeMetron(
@@ -50,7 +50,7 @@ class TestTeamPages:
         kwargs = rt.call_args.kwargs
         assert kwargs["kind"] == "teams" and kwargs["title"] == "Teams"
         assert kwargs["icon"] == "bi-people-fill"
-        assert kwargs["people"] == [{"name": "Justice League", "n": 3, "art": None}]
+        assert kwargs["people"] == [{"name": "Justice League", "n": 2, "art": None}]
 
     def test_characters_index_attaches_art(self, client, library):
         with patch("routes.creators.render_template", return_value="") as rt:
@@ -68,7 +68,7 @@ class TestTeamPages:
             assert client.get("/teams/" + quote("justice league")).status_code == 200
         p = rt.call_args.kwargs["p"]
         assert rt.call_args.args[0] == "person.html" and rt.call_args.kwargs["kind"] == "teams"
-        assert p["name"] == "Justice League" and p["issues"] == 3
+        assert p["name"] == "Justice League" and p["issues"] == 2
         assert p["members"] == [{"name": "Batman", "n": 2}, {"name": "Superman", "n": 2}]
 
     def test_character_detail_has_portrait(self, client, library):
@@ -86,7 +86,7 @@ class TestTeamPages:
 
     def test_team_issues_api(self, client, library):
         r = client.get("/api/teams/Justice%20League/issues?folder=/data/DC/Batman")
-        assert [i["name"] for i in r.get_json()["issues"]] == ["B1.cbz", "B2.cbz"]
+        assert [i["name"] for i in r.get_json()["issues"]] == ["B2.cbz"]
         assert client.get("/api/teams/Justice%20League/issues").status_code == 400
 
 
@@ -126,7 +126,7 @@ class TestInsightsWho:
         d = client.get("/api/insights/who?year=all&limit=8").get_json()
         assert set(d) == {"teams", "characters", "writers", "publishers"}
         assert d["teams"] == {"total": 1, "items": [
-            {"name": "Justice League", "count": 2, "art": None,
+            {"name": "Justice League", "count": 1, "art": None,
              "href": "/teams/Justice%20League"}]}
         chars = d["characters"]
         assert chars["total"] == 4

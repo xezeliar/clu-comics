@@ -133,16 +133,17 @@ class TestResolve:
 def _seed_library(conn):
     from core.database import _backfill_file_metadata_tags
 
-    def f(path, chars, writer="W"):
+    def f(path, chars, writer="W", teams=""):
         parent, name = path.rsplit("/", 1)
         conn.execute(
             "INSERT INTO file_index (name, path, type, size, parent, has_comicinfo,"
-            " ci_series, ci_number, ci_publisher, ci_characters, ci_writer)"
-            " VALUES (?, ?, 'file', 1, ?, 1, ?, '1', 'DC', ?, ?)",
-            (name, path, parent, parent.rsplit("/", 1)[-1], chars, writer))
+            " ci_series, ci_number, ci_publisher, ci_characters, ci_writer, ci_teams)"
+            " VALUES (?, ?, 'file', 1, ?, 1, ?, '1', 'DC', ?, ?, ?)",
+            (name, path, parent, parent.rsplit("/", 1)[-1], chars, writer, teams))
+    # B1 has two members but is not a Justice League issue: <Teams> decides.
     f("/data/DC/Batman/B1.cbz", "Batman, Joker")
-    f("/data/DC/Batman/B2.cbz", "Batman, Superman")
-    f("/data/DC/Superman/S1.cbz", "Superman")
+    f("/data/DC/Batman/B2.cbz", "Batman, Superman", teams="Justice League")
+    f("/data/DC/Superman/S1.cbz", "Superman", teams="justice league")
     f("/data/DC/Flash/F1.cbz", "Flash")
     conn.commit()
     _backfill_file_metadata_tags(conn)
@@ -216,8 +217,8 @@ class TestTeams:
             person_art.resolve("character", n, api, lambda u: None)
         return db_connection
 
-    def test_list_teams_counts_distinct_issues(self, teams):
-        assert creators.list_teams(prefixes=["/data"]) == [{"name": "Justice League", "n": 3}]
+    def test_list_teams_counts_tagged_issues_only(self, teams):
+        assert creators.list_teams(prefixes=["/data"]) == [{"name": "Justice League", "n": 2}]
         assert creators.list_teams(q="xyz", prefixes=["/data"]) == []
 
     def test_character_on_no_team_is_not_refetched(self, teams):
@@ -226,19 +227,34 @@ class TestTeams:
     def test_team_page_and_members(self, teams):
         data = creators.team_page("justice league", prefixes=["/data"])
         assert data["name"] == "Justice League"
-        assert data["issues"] == 3
+        assert data["issues"] == 2
         assert data["members"] == [{"name": "Batman", "n": 2}, {"name": "Superman", "n": 2}]
         assert {s["name"] for s in data["series"]} == {"Batman", "Superman"}
-        assert [o["name"] for o in data["often_with"]] == ["Joker"]
+        assert sorted(o["name"] for o in data["often_with"]) == ["Batman", "Superman"]
         assert creators.team_page("Avengers", prefixes=["/data"]) is None
 
-    def test_team_issues(self, teams):
-        issues = creators.team_issues("Justice League", "/data/DC/Batman", prefixes=["/data"])
-        assert [i["name"] for i in issues] == ["B1.cbz", "B2.cbz"]
+    def test_team_known_only_by_members_has_an_empty_page(self, teams):
+        teams.execute("UPDATE file_index SET ci_teams = ''")
+        teams.execute("DELETE FROM file_metadata_tags WHERE kind = 'teams'")
+        teams.commit()
+        data = creators.team_page("Justice League", prefixes=["/data"])
+        assert data["issues"] == 0 and data["series"] == []
+        assert [m["name"] for m in data["members"]] == ["Batman", "Superman"]
+        assert creators.list_teams(prefixes=["/data"]) == []
 
-    def test_read_team_counts_once_per_issue(self, teams):
-        assert creators.read_team_counts([["Batman", "Superman"], ["Flash"], ["batman"]]) == [
-            ("Justice League", 2)]
+    def test_team_issues(self, teams):
+        issues = creators.person_issues(("teams",), "Justice League", "/data/DC/Batman",
+                                        prefixes=["/data"])
+        assert [i["name"] for i in issues] == ["B2.cbz"]
+
+    def test_read_teams_come_from_ci_teams(self, teams):
+        from core.database import get_read_field_values
+        for path in ("/data/DC/Batman/B1.cbz", "/data/DC/Batman/B2.cbz"):
+            teams.execute("INSERT INTO issues_read (issue_path, user_id, read_at)"
+                          " VALUES (?, 1, '2024-03-01 10:00:00')", (path,))
+        teams.commit()
+        assert [list(v) for v in get_read_field_values("teams", user_id=1)] == [["Justice League"]]
+        assert get_read_field_values("teams", year=2023, user_id=1) == []
 
 
 class TestArtUrls:

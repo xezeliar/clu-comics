@@ -150,7 +150,7 @@ def get_collection_overview(user_id=None):
 
 # ── "Who you read": Teams, Characters, Writers, Publishers ──
 
-WHO_SECTIONS = (("teams", "characters"), ("characters", "characters"),
+WHO_SECTIONS = (("teams", "teams"), ("characters", "characters"),
                 ("writers", "writer"), ("publishers", "publisher"))
 
 
@@ -158,10 +158,8 @@ def get_who_you_read(year=None, user_id=None):
     """``{section: [(name, issues read), ...]}`` most read first, empty sections omitted.
 
     Counts come from ``issues_read`` through the same reader as
-    ``get_reading_trends``. A team counts each read issue once, however many
-    of its members are in it (membership: ``character_teams``).
+    ``get_reading_trends``; a team counts the read issues tagged with it.
     """
-    from core.creators import read_team_counts
     from core.database import count_read_values, get_read_field_values
 
     values = {}
@@ -169,10 +167,7 @@ def get_who_you_read(year=None, user_id=None):
     for section, field in WHO_SECTIONS:
         if field not in values:
             values[field] = get_read_field_values(field, year=year, user_id=user_id)
-        if section == "teams":
-            ranked = read_team_counts(values[field])
-        else:
-            ranked = count_read_values(values[field])
+        ranked = count_read_values(values[field])
         if ranked:
             out[section] = ranked
     return out

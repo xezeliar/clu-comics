@@ -137,7 +137,7 @@ def team_page(name):
 
 @creators_bp.route("/api/teams/<path:name>/issues")
 def api_team_issues(name):
-    return _issues(("characters",), name, lookup=creators.team_issues)
+    return _issues(("teams",), name)
 
 
 @creators_bp.route("/api/person-art/<kind>/<path:name>", endpoint="person_art")

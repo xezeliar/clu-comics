@@ -175,6 +175,9 @@ def process_metadata_scan(task):
             'ci_publisher': metadata.get('Publisher', ''),
             'ci_genre': metadata.get('Genre', ''),
             'ci_characters': metadata.get('Characters', ''),
+            'ci_teams': metadata.get('Teams', ''),
+            'ci_editor': metadata.get('Editor', ''),
+            'ci_translator': metadata.get('Translator', ''),
             # Indexed so the credit backfill can join Metron's "issues modified
             # since X" feed against the library. Stored as 0 when the XML has no
             # <MetronId>, which is also what keeps this file out of

@@ -130,19 +130,19 @@
       fields: [
         { key: 'Writer', label: 'Writer', browse: 'writer' },
         { key: 'Penciller', label: 'Penciller', browse: 'penciller' },
-        { key: 'Inker', label: 'Inker', list: true },
-        { key: 'Colorist', label: 'Colorist', list: true },
-        { key: 'Letterer', label: 'Letterer', list: true },
-        { key: 'CoverArtist', label: 'Cover artists', list: true },
-        { key: 'Editor', label: 'Editors', list: true },
-        { key: 'Translator', label: 'Translator', list: true }
+        { key: 'Inker', label: 'Inker', browse: 'inker' },
+        { key: 'Colorist', label: 'Colorist', browse: 'colorist' },
+        { key: 'Letterer', label: 'Letterer', browse: 'letterer' },
+        { key: 'CoverArtist', label: 'Cover artists', browse: 'coverartist' },
+        { key: 'Editor', label: 'Editors', browse: 'editor' },
+        { key: 'Translator', label: 'Translator', browse: 'translator' }
       ]
     },
     {
       title: 'Story',
       fields: [
         { key: 'Characters', label: 'Characters', browse: 'characters' },
-        { key: 'Teams', label: 'Teams', list: true },
+        { key: 'Teams', label: 'Teams', browse: 'teams' },
         { key: 'Locations', label: 'Locations', list: true },
         { key: 'MainCharacterOrTeam', label: 'Main character' },
         { key: 'StoryArc', label: 'Story arc' },
@@ -499,7 +499,7 @@
     }
     // Comma-separated name lists: drop the tagger's "[3258]" provider IDs so a
     // 20-character cast reads as names rather than noise, link the ones
-    // /browse/<category>/<name> can resolve, and show three before "+N more".
+    // to their creator, character or team page, and show three before "+N more".
     if (field.browse || field.list) {
       var names = CLU.splitCreditList(value);
       // Nothing left once IDs were stripped: show the raw text so the field
@@ -508,9 +508,11 @@
       var cut = names.length > 3 && !_expanded[field.key];
       var html = (cut ? names.slice(0, 3) : names).map(function (nm) {
         if (!field.browse) return CLU.escapeHtml(nm);
-        var page = { writer: 'creators', penciller: 'creators', characters: 'characters' }[field.browse];
-        return '<a href="/' + (page || 'browse/' + field.browse) + '/' +
-          encodeURIComponent(nm) + '">' + CLU.escapeHtml(nm) + '</a>';
+        var page = { characters: 'characters', teams: 'teams' }[field.browse];
+        // Every credit opens the creator page on the role it was clicked from.
+        var href = page ? '/' + page + '/' + encodeURIComponent(nm)
+          : '/creators/' + encodeURIComponent(nm) + '?role=' + field.browse;
+        return '<a href="' + href + '">' + CLU.escapeHtml(nm) + '</a>';
       }).join(', ');
       return html + (cut ? _moreButton(field.key, '+' + (names.length - 3) + ' more') : '');
     }

@@ -28,7 +28,8 @@ from core.database import (
     set_series_monitored_bulk,
 )
 
-CREDIT_KINDS = ("writer", "penciller", "inker", "colorist", "letterer", "coverartist")
+CREDIT_KINDS = ("writer", "penciller", "inker", "colorist", "letterer", "coverartist",
+                "editor", "translator")
 ROLE_LABELS = {
     "writer": "Writer",
     "penciller": "Penciller",
@@ -36,6 +37,8 @@ ROLE_LABELS = {
     "colorist": "Colorist",
     "letterer": "Letterer",
     "coverartist": "Cover artist",
+    "editor": "Editor",
+    "translator": "Translator",
 }
 FOLLOW_SCOPES = ("both", "ongoing", "limited")
 CHARACTER_VIEWS = ("series", "year", "unread")
@@ -117,7 +120,7 @@ def person_page(kinds, name, prefixes=None, user_id=None, view="series",
         series = [dict(r) for r in c.fetchall()]
 
         # Co-credits: other credits for a creator, other characters for a character.
-        co_kinds = ("characters",) if kinds == ("characters",) else CREDIT_KINDS
+        co_kinds = CREDIT_KINDS if set(kinds) <= set(CREDIT_KINDS) else ("characters",)
         c.execute(
             "SELECT t2.value AS name, COUNT(DISTINCT t.file_path) AS n"
             + base.replace(
@@ -354,36 +357,14 @@ def list_people(kinds, q="", prefixes=None, limit=300):
 
 
 # --------------------------------------------------------------------------
-# Teams: Metron teams with a member character in the library (core/person_art.py)
+# Teams. Where a team appears comes only from ComicInfo <Teams> (the "teams"
+# tag kind): guessing from members counted a Batman solo issue as Justice
+# League. Who is on a team comes from character_teams (core/person_art.py).
 # --------------------------------------------------------------------------
 
-# A team's members, spelled as the library spells them (person_art.name is the
-# tag value the character was resolved from).
-_TEAM_TAGS = (
-    " FROM character_teams ct"
-    " JOIN person_art pa ON pa.kind = 'character' AND pa.key = ct.character_key"
-    " JOIN file_metadata_tags t ON t.kind = 'characters' AND t.value = pa.name COLLATE NOCASE"
-    " JOIN file_index fi ON fi.path = t.file_path"
-    " WHERE " + _COMIC_FILE_CLAUSE_FI
-)
-
-
 def list_teams(q="", prefixes=None, limit=300):
-    """Teams with owned-issue counts (distinct issues with any member), most first."""
-    scope_sql, scope_params = _scope(prefixes)
-    where, params = "", []
-    if (q or "").strip():
-        where = " AND instr(lower(ct.team_name), ?) > 0"
-        params.append(q.strip().lower())
-    with db_conn() as conn:
-        if not conn:
-            return []
-        rows = conn.execute(
-            "SELECT MIN(ct.team_name) AS name, COUNT(DISTINCT t.file_path) AS n"
-            + _TEAM_TAGS + where + scope_sql
-            + " GROUP BY ct.team_key ORDER BY n DESC, name LIMIT ?",
-            [*params, *scope_params, int(limit)]).fetchall()
-        return [dict(r) for r in rows]
+    """Teams tagged in owned issues, with issue counts, most first."""
+    return list_people(("teams",), q=q, prefixes=prefixes, limit=limit)
 
 
 def team_members(team, prefixes=None):
@@ -394,14 +375,18 @@ def team_members(team, prefixes=None):
             return []
         rows = conn.execute(
             "SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
-            + _TEAM_TAGS + " AND ct.team_key = ?" + scope_sql
+            " FROM character_teams ct"
+            " JOIN person_art pa ON pa.kind = 'character' AND pa.key = ct.character_key"
+            " JOIN file_metadata_tags t ON t.kind = 'characters' AND t.value = pa.name COLLATE NOCASE"
+            " JOIN file_index fi ON fi.path = t.file_path"
+            " WHERE " + _COMIC_FILE_CLAUSE_FI + " AND ct.team_key = ?" + scope_sql
             + " GROUP BY t.value COLLATE NOCASE ORDER BY n DESC, name",
             [(team or "").strip().casefold(), *scope_params]).fetchall()
         return [dict(r) for r in rows]
 
 
 def team_name(team):
-    """The team's stored spelling, or None when no character names it."""
+    """The team's spelling from Metron membership, or None when no character names it."""
     with db_conn() as conn:
         if not conn:
             return None
@@ -412,46 +397,20 @@ def team_name(team):
 
 
 def team_page(team, prefixes=None, user_id=None, view="series"):
-    """A team page: ``person_page`` over the member characters, plus ``members``."""
-    members = team_members(team, prefixes)
-    if not members:
-        return None
-    data = person_page(("characters",), [m["name"] for m in members],
-                       prefixes=prefixes, user_id=user_id, view=view)
+    """A team page: ``person_page`` over issues tagged with the team, plus ``members``.
+
+    A team known only through its members (no issue carries it in <Teams>) still
+    has a page, with no issues. None when neither source knows the name.
+    """
+    data = person_page(("teams",), team, prefixes=prefixes, user_id=user_id, view=view)
     if data is None:
-        return None
-    data["name"] = team_name(team) or team
-    data["members"] = members
+        name = team_name(team)
+        if name is None:
+            return None
+        data = {"name": name, "roles": [], "series": [], "often_with": [], "issues": 0,
+                "read": 0, "first_year": None, "last_read": None}
+    data["members"] = team_members(team, prefixes)
     return data
-
-
-def team_issues(team, folder, prefixes=None, user_id=None):
-    members = team_members(team, prefixes)
-    if not members:
-        return []
-    return person_issues(("characters",), [m["name"] for m in members], folder,
-                         prefixes=prefixes, user_id=user_id)
-
-
-def read_team_counts(character_lists):
-    """``[(team, issues read), ...]`` most first: each read issue counts once per team."""
-    with db_conn() as conn:
-        rows = conn.execute(
-            "SELECT character_key, team_key, team_name FROM character_teams").fetchall() if conn else []
-    by_char = {}
-    for r in rows:
-        by_char.setdefault(r["character_key"], []).append((r["team_key"], r["team_name"]))
-    counts, labels = {}, {}
-    for chars in character_lists or ():
-        teams = {}
-        for ch in chars:
-            for tkey, tname in by_char.get(ch.strip().casefold(), ()):
-                teams.setdefault(tkey, tname)
-        for tkey, tname in teams.items():
-            labels.setdefault(tkey, tname)
-            counts[tkey] = counts.get(tkey, 0) + 1
-    ranked = sorted(counts.items(), key=lambda x: (-x[1], labels[x[0]].casefold()))
-    return [(labels[k], n) for k, n in ranked]
 
 
 # --------------------------------------------------------------------------
