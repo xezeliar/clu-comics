@@ -143,9 +143,19 @@ DASHBOARD_SECTION_DEFS = {
         'title': 'Library',
         'icon': 'bi-collection-fill text-primary',
     },
+    'series': {
+        'id': 'series',
+        'title': 'Series',
+        'icon': 'bi-journals text-primary',
+        'swiper_id': 'seriesSwiper',
+        'section_html_id': 'seriesSection',
+        'view_all_type': 'button',
+        'view_all_onclick': "loadDirectory('')",
+        'view_all_text': 'View All',
+    },
 }
 
-DEFAULT_DASHBOARD_ORDER = ['favorites', 'want_to_read', 'continue_reading', 'new_this_week', 'on_the_stack', 'discover', 'recently_added', 'library']
+DEFAULT_DASHBOARD_ORDER = ['favorites', 'want_to_read', 'continue_reading', 'new_this_week', 'on_the_stack', 'discover', 'recently_added', 'library', 'series']
 
 VALID_DASHBOARD_IDS = frozenset(DASHBOARD_SECTION_DEFS)
 

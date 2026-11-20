@@ -370,6 +370,9 @@ app.register_blueprint(mylar_import_bp)
 from routes.setup import setup_bp
 
 app.register_blueprint(setup_bp)
+from routes.series_shelf import series_shelf_bp
+
+app.register_blueprint(series_shelf_bp)
 from routes.download_runs import download_runs_bp
 
 app.register_blueprint(download_runs_bp)

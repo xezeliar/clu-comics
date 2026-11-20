@@ -65,6 +65,14 @@ class TestHomeShelves:
         assert html.index("continueReadingSwiper") < html.index("newThisWeekSwiper") \
             < html.index("onTheStackSwiper")
 
+    def test_series_shelf_is_last_and_rendered(self, client):
+        from routes.collection import DEFAULT_DASHBOARD_ORDER
+        assert DEFAULT_DASHBOARD_ORDER[-1] == "series"
+        html = client.get("/collection").get_data(as_text=True)
+        assert 'id="seriesSwiper"' in html
+        assert 'id="seriesSheet"' in html
+        assert html.index("recentAddedSwiper") < html.index("seriesSwiper")
+
     def test_every_shelf_can_be_hidden_when_empty(self):
         from routes.collection import DASHBOARD_SECTION_DEFS
         for sid, d in DASHBOARD_SECTION_DEFS.items():

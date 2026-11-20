@@ -1,0 +1,27 @@
+{# Series issue sheet (phones only): opened from the dashboard Series shelf by
+   static/js/series-sheet.js. Immersive like the reader, so its text is fixed
+   white on the cover's own edge colour (static/css/series-sheet.css). #}
+<div class="series-sheet" id="seriesSheet" role="dialog" aria-modal="true" aria-labelledby="seriesSheetTitle">
+    <div class="ss-bar">
+        <button type="button" class="ss-ib" id="seriesSheetClose" aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        <div><b id="seriesSheetTitle"></b><small id="seriesSheetPos" aria-live="polite"></small></div>
+        <span></span>
+    </div>
+    <div class="ss-body">
+        <div class="ss-car">
+            <button type="button" class="ss-arrow ss-prev" id="seriesSheetPrev" aria-label="Previous issue"><i class="bi bi-chevron-left" aria-hidden="true"></i></button>
+            <button type="button" class="ss-arrow ss-next" id="seriesSheetNext" aria-label="Next issue"><i class="bi bi-chevron-right" aria-hidden="true"></i></button>
+            <div class="ss-track" id="seriesSheetTrack" tabindex="0" role="group" aria-roledescription="carousel" aria-label="Issues in this series"></div>
+            <div class="ss-line" aria-hidden="true"><i id="seriesSheetLine"></i></div>
+        </div>
+        <div class="ss-info" id="seriesSheetInfo"></div>
+        <div class="ss-acts">
+            <button type="button" class="btn ss-primary" id="seriesSheetRead"></button>
+            <div class="ss-sec3" id="seriesSheetSecondary">
+                <button type="button" class="btn ss-outline" id="seriesSheetUnread"><i class="bi bi-eye-slash" aria-hidden="true"></i>Mark Unread</button>
+                <button type="button" class="btn ss-outline" id="seriesSheetDownload"><i class="bi bi-download" aria-hidden="true"></i>Download</button>
+                <button type="button" class="btn ss-outline" id="seriesSheetSave" aria-pressed="false"><i class="bi bi-bookmark" aria-hidden="true"></i><span>Save</span></button>
+            </div>
+        </div>
+    </div>
+</div>

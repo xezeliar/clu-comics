@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadFeaturedHero();
         loadOnTheStackSwiper();
         loadRecentlyAddedSwiper();
+        loadSeriesSwiper();
     }
 
     // Fetch read issues for status icons (cached client-side for performance)
@@ -5016,6 +5017,108 @@ async function loadRecentlyAddedSwiper() {
     }
 }
 
+/**
+ * Series shelf: every series by last activity, 30 at a time (the next page on
+ * Swiper's reachEnd), then a "View all N" tile that opens the Collection root.
+ * The "N new" sticker is get_new_arrival_counts; nothing here marks the
+ * series visited (only opening its folder does, as on the grid).
+ */
+const SERIES_PAGE_SIZE = 30;
+const seriesShelf = { offset: 0, total: 0, loading: false };
+
+function seriesCardHtml(s) {
+    const name = CLU.escapeHtml(s.name || '');
+    const owned = Number(s.owned) || 0;
+    const total = Number(s.total) || 0;
+    const fresh = Number(s.new_count) || 0;
+    const count = total ? `${owned} of ${total}` : `${owned} issue${owned === 1 ? '' : 's'}`;
+    const label = `${name}, ${count}${fresh ? `, ${fresh} new issue${fresh === 1 ? '' : 's'}` : ''}`;
+    return `
+            <div class="swiper-slide">
+                <div class="dashboard-card has-thumbnail" role="button" tabindex="0" aria-label="${label}"
+                    data-dash-action="open-series" data-series-id="${CLU.escapeHtml(String(s.id))}" data-folder="${CLU.escapeHtml(s.folder || '')}">
+                    <div class="dashboard-card-img-container">
+                        <img src="/static/images/loading.svg" data-thumbnail="${CLU.escapeHtml(s.cover_url || '')}" alt="" class="thumbnail">
+                        ${fresh ? `<span class="new-badge" aria-hidden="true">${newIssuesLabel(fresh)}</span>` : ''}
+                    </div>
+                    <div class="dashboard-card-body">
+                        <div class="text-truncate item-name" title="${name}">${name}</div>
+                        <small class="text-muted">${count}</small>
+                    </div>
+                </div>
+            </div>`;
+}
+
+async function loadSeriesSwiper(append = false) {
+    const swiper = document.querySelector('#seriesSwiper .swiper-wrapper');
+    if (!swiper || seriesShelf.loading) return;
+    if (append && seriesShelf.offset >= seriesShelf.total) return;
+    seriesShelf.loading = true;
+
+    try {
+        const offset = append ? seriesShelf.offset : 0;
+        const response = await fetch(`/api/dashboard/series?offset=${offset}&limit=${SERIES_PAGE_SIZE}`);
+        const data = await response.json();
+        const list = (data.success && data.series) || [];
+
+        if (!append && !list.length) {
+            hideEmptyShelf(swiper);
+            return;
+        }
+
+        seriesShelf.total = Number(data.total) || 0;
+        seriesShelf.offset = offset + list.length;
+        const html = list.map(seriesCardHtml).join('');
+
+        if (append) {
+            const tile = swiper.querySelector('.series-view-all-slide');
+            if (tile) tile.insertAdjacentHTML('beforebegin', html);
+            else swiper.insertAdjacentHTML('beforeend', html);
+        } else {
+            swiper.innerHTML = html + `
+            <div class="swiper-slide series-view-all-slide">
+                <div class="dashboard-card series-view-all" role="button" tabindex="0" data-dash-action="open-folder" data-path="">
+                    <b>${seriesShelf.total.toLocaleString()}</b><span>View all series</span>
+                </div>
+            </div>`;
+        }
+
+        initSwiperThumbnails(swiper);
+        initNameTooltips(swiper);
+
+        const instance = swiper.parentElement.swiper;
+        if (instance) {
+            instance.update();
+            if (!append) instance.on('reachEnd', () => loadSeriesSwiper(true));
+        }
+    } catch (error) {
+        console.error('Error loading series shelf:', error);
+    } finally {
+        seriesShelf.loading = false;
+    }
+}
+
+/** Series cover: a phone gets the issue sheet, a wider screen the folder. */
+function openSeriesFromShelf(card) {
+    if (window.matchMedia('(max-width: 767.98px)').matches && window.CLUSeriesSheet) {
+        window.CLUSeriesSheet.open(card.dataset.seriesId, card);
+        return;
+    }
+    const badge = card.querySelector('.new-badge');
+    if (badge) badge.classList.add('gone');
+    loadDirectory(card.dataset.folder);
+}
+
+// Series cards are focusable (focus returns to them when the sheet closes), so
+// Enter and Space open them like a click.
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const card = event.target.closest && event.target.closest('#seriesSwiper [data-dash-action][role="button"]');
+    if (!card || card !== event.target) return;
+    event.preventDefault();
+    card.click();
+});
+
 /** Hide a home shelf with nothing in it (the layout editor still lists it). */
 function hideEmptyShelf(swiperEl) {
     const section = swiperEl.closest('.dashboard-section');
@@ -5776,6 +5879,9 @@ function onDashboardClick(event) {
             break;
         case 'open-reader':
             openReaderForFile(d.path);
+            break;
+        case 'open-series':
+            openSeriesFromShelf(el);
             break;
         case 'open-reading-list':
             window.location.href = '/reading-lists/' + encodeURIComponent(d.readingListId);
