@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="{{ asset('css/collection.css') }}">
 <link rel="stylesheet" href="{{ asset('css/metadata_browser.css') }}">
 <link rel="stylesheet" href="{{ asset('css/reader.css') }}">
+<link rel="stylesheet" href="{{ asset('css/series-sheet.css') }}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
 {% endblock %}
 {% block content %}
@@ -57,6 +58,9 @@
             <div class="btn-group btn-group-sm clu-letter-bar clu-filter-scroll" role="group" aria-label="Filter by first letter"></div>
         </div>
     {% endcall %}
+
+    {# Drawn by metadata_browser.js renderChips(): the active drill-down. #}
+    <div id="mbChips" class="mb-chips" hidden></div>
 
     <div id="mbGrid" class="file-grid"></div>
     {# Drawn by metadata_browser.js renderGrid(): no matches, or an empty library. #}
@@ -133,6 +137,7 @@
 
 <!-- Comic Reader Modal (shared with collection) -->
 {% include 'partials/reader_modal.html' %}
+{% include 'partials/series_sheet.html' %}
 {% endblock %}
 
 {% block scripts %}
@@ -147,5 +152,6 @@
 <script src="{{ asset('js/clu-delete.js') }}"></script>
 <script src="{{ asset('js/reader.js') }}"></script>
 <script src="{{ asset('js/reading_list_picker.js') }}"></script>
+<script src="{{ asset('js/series-sheet.js') }}"></script>
 <script src="{{ asset('js/metadata_browser.js') }}"></script>
 {% endblock %}

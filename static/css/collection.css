@@ -888,11 +888,22 @@ body.collection-select-mode .new-badge {
 
 .dashboard-swiper .swiper-slide {
     width: 165px;
+    will-change: transform;
+}
+
+.dashboard-swiper .swiper-wrapper {
+    /* Native-feeling momentum: let the browser own vertical page scroll. */
+    touch-action: pan-y;
 }
 
 .dashboard-card {
     width: 100%;
     cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dashboard-card { transition: none; }
 }
 
 .dashboard-card:hover {

@@ -604,6 +604,11 @@
         const swiperConfig = {
             slidesPerView: 'auto',
             spaceBetween: 15,
+            // Free-scroll with momentum instead of snapping slide to slide.
+            freeMode: { enabled: true, momentumRatio: 0.7, momentumVelocityRatio: 0.8 },
+            speed: 450,
+            resistanceRatio: 0.6,
+            grabCursor: true,
             navigation: {
                 nextEl: '.swiper-button-next',
                 prevEl: '.swiper-button-prev',

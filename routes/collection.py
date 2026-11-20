@@ -332,7 +332,7 @@ def _parse_metadata_filters(args):
 @collection_bp.route('/api/metadata/browse')
 def api_metadata_browse():
     """Return card grid payload for current axis + filters."""
-    from core.database import metadata_browse
+    from core.database import db_conn, metadata_browse
     axis = request.args.get('axis', 'publisher')
     if axis not in ('publisher', 'series', 'year', 'issue'):
         return jsonify({"error": "Invalid axis"}), 400
@@ -354,6 +354,22 @@ def api_metadata_browse():
         cover_path = item.get('cover_path') or item.get('path')
         if cover_path:
             item['thumbnail_url'] = url_for('get_thumbnail', path=cover_path)
+
+    # A series card can open the phone issue sheet when its cover file's folder
+    # is a mapped series folder; otherwise series_id stays null (card drills in).
+    if result.get('level') == 'series' and result.get('items'):
+        folders = {os.path.dirname(i['cover_path']) for i in result['items'] if i.get('cover_path')}
+        by_folder = {}
+        if folders:
+            marks = ",".join("?" * len(folders))
+            with db_conn() as conn:
+                if conn:
+                    for sid, mapped in conn.execute(
+                            f"SELECT id, mapped_path FROM series WHERE mapped_path IN ({marks}) "
+                            "ORDER BY id DESC", list(folders)):
+                        by_folder[mapped] = sid  # lowest id wins (DESC, last write)
+        for item in result['items']:
+            item['series_id'] = by_folder.get(os.path.dirname(item.get('cover_path') or ''))
 
     result['axis'] = axis
     result['offset'] = offset
