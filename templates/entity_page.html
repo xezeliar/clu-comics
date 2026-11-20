@@ -21,9 +21,13 @@
       newest_href, newest_label     the link beside "Newest in your library"
       clear_href      the issues list with no status filter
       lead_stats      stats before issues · series · read (may be empty)
-    and fills {% block info_rows %} and, as needed, {% block view_row %}
-    (inside the series and issues toolbars), {% block overview_mid %},
-    {% block untagged %} and {% block panel %}. -#}
+    and may set header_sub (the line under the name; default publisher ·
+    universe), most_label ("Appears most in"), creators_label and
+    creators_note (the Creators shelf). It fills {% block info_rows %} and, as
+    needed, {% block view_row %} (inside the series and issues toolbars),
+    {% block actions %} (after Read next), {% block overview_mid %},
+    {% block overview_end %}, {% block untagged %}, {% block panel %} and
+    {% block page_end %} (after the reader modal). -#}
 {% set info = p.info %}
 {% set prof = p.profile or {} %}
 {% set nxt = p.issues[p.next_index] if p.next_index is not none else none %}
@@ -61,7 +65,8 @@
           {'value': (p.first_year ~ ('–' ~ p.last_year if p.last_year and p.last_year != p.first_year else '')) if p.first_year else none, 'label': ''}]
           if p.issues else []) %}
       {% set sub = [p.publisher, info.universe] | select | join(' · ') %}
-      {% call(slot) page_header(p.name, subtitle=((publisher_dot(p.publisher) if p.publisher else '') ~ sub) if sub else none, stats=stats) %}
+      {% set subtitle = header_sub if header_sub is defined else (((publisher_dot(p.publisher) if p.publisher else '') ~ sub) if sub else none) %}
+      {% call(slot) page_header(p.name, subtitle=subtitle, stats=stats) %}
         {% if slot == 'crumbs' %}
           <li class="breadcrumb-item"><a href="{{ url_for(index_endpoint) }}">{{ index_label }}</a></li>
         {% elif slot == 'actions' and p.issues %}
@@ -69,6 +74,8 @@
                   {% if nxt %}title="{{ issue_label(nxt) }}"{% endif %}>
             <i class="bi bi-book" aria-hidden="true"></i> {{ 'Read next' if nxt else 'Read again from the start' }}
           </button>
+          {{ self.actions() }}
+        {% elif slot == 'actions' %}{{ self.actions() }}
         {% elif slot == 'more' and can_refresh %}
           <li><button type="button" class="dropdown-item" id="refreshProfileBtn">
             <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh Metron and ComicVine</button></li>
@@ -98,7 +105,7 @@
       {% if not p.issues %}{% block untagged %}{% endblock %}{% endif %}
       {% if p.most %}
       <section aria-labelledby="chMostH">
-        <div class="ch-sh"><h2 id="chMostH">Appears most in</h2>
+        <div class="ch-sh"><h2 id="chMostH">{{ most_label | default('Appears most in') }}</h2>
           {% if p.series | length > p.most | length %}<a class="small" href="{{ series_href }}">All {{ p.series | length }} series</a>{% endif %}</div>
         <ul class="ch-shelf">{% for s in p.most %}{{ series_card(s) }}{% endfor %}</ul>
       </section>
@@ -112,7 +119,7 @@
       {% block overview_mid %}{% endblock %}
       {% if p.creators %}
       <section aria-labelledby="chCrH">
-        <div class="ch-sh"><h2 id="chCrH">Creators</h2><span class="ch-n">most credited on {{ "issues featuring " ~ p.name if noun == 'character' else "the team's issues" }}</span></div>
+        <div class="ch-sh"><h2 id="chCrH">{{ creators_label | default('Creators') }}</h2><span class="ch-n">{{ creators_note | default("most credited on " ~ ("issues featuring " ~ p.name if noun == 'character' else "the team's issues")) }}</span></div>
         <ol class="ch-ppl">
           {% for c in p.creators %}
           <li><a href="{{ url_for('creators.creator_page', name=c.name, role=c.kind) }}">{{ c.name }}</a>
@@ -136,6 +143,7 @@
         </ul>
       </section>
       {% endif %}
+      {% block overview_end %}{% endblock %}
 
     {% elif panel == 'series' %}
       {% call toolbar('Series') %}
@@ -226,9 +234,11 @@
 </div>
 
 {% include 'partials/reader_modal.html' %}
+{% block page_end %}{% endblock %}
 {% endblock %}
 
 {% block view_row %}{% endblock %}
+{% block actions %}{% endblock %}
 
 {% block scripts %}
 {{ super() }}

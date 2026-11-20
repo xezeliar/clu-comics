@@ -13,11 +13,6 @@ from helpers.paging import snap_per_page
 creators_bp = Blueprint("creators", __name__)
 
 
-def _view():
-    view = request.args.get("view", "series")
-    return view if view in creators.CHARACTER_VIEWS else "series"
-
-
 def _render_page(data, template, view, **extra):
     if data is None:
         abort(404)
@@ -36,15 +31,6 @@ def _render_page(data, template, view, **extra):
                 current_app._get_current_object(), kind, data["name"]) or person_art.in_flight(
                 kind, data["name"])
     return render_template(template, p=data, view=view, **extra)
-
-
-def _page(kinds, name, template, role_kinds=None, **extra):
-    name = strip_provider_ids(name) or name
-    view = _view()
-    data = creators.person_page(
-        kinds, name, prefixes=accessible_folder_prefixes(current_user()), view=view,
-        role_kinds=role_kinds)
-    return _render_page(data, template, view, **extra)
 
 
 # Grid kind -> person_art kind.
@@ -88,14 +74,29 @@ def creators_index():
 
 @creators_bp.route("/creators/<path:name>")
 def creator_page(name):
-    kinds = creators.CREDIT_KINDS
-    role = request.args.get("role")
-    if role in creators.CREDIT_KINDS:
-        kinds = (role,)
-    follow = creators.get_follow(strip_provider_ids(name) or name)
-    return _page(kinds, name, "person.html", role_kinds=creators.CREDIT_KINDS,
-                 kind="creators", follow=follow,
-                 role=role, roles=creators.ROLE_LABELS, scopes=creators.FOLLOW_SCOPES)
+    name = strip_provider_ids(name) or name
+    prefixes = accessible_folder_prefixes(current_user())
+    data = creators.person_page(creators.CREDIT_KINDS, name, prefixes=prefixes)
+    if data is None:
+        abort(404)
+    owned = [r["kind"] for r in data["roles"]]
+    role = request.args.get("role") if request.args.get("role") in owned else None
+    st = _detail(data, creators.CREDIT_KINDS, prefixes, CREATOR_TABS, role=role,
+                 top_characters=12)
+    # ?role= alone (a credit link from the CBZ panel) opens Comics on that role.
+    if role and "tab" not in request.args:
+        st["tab"] = "comics"
+    st["role"] = role or "all"
+    data["cover_fallback"] = None  # a creator is not on the cover: initials instead
+    profile = entity_profiles.get_profile("creator", data["name"])
+    data["info"] = creators.creator_info(data["name"], profile, data["issues"])
+    art = person_art.art_urls("character", [c["name"] for c in data["characters"]])
+    for c in data["characters"]:
+        c["art"] = art.get(c["name"])
+    return _render_page(data, "creator.html", "series", kind="creators",
+                        follow=creators.get_follow(data["name"]),
+                        roles=creators.ROLE_LABELS, scopes=creators.FOLLOW_SCOPES,
+                        **_detail_extra(st))
 
 
 @creators_bp.route("/api/creators/<path:name>/issues")
@@ -136,10 +137,11 @@ def _can_refresh():
     return not user or role_at_least(user, "clerk")
 
 
-def _detail(data, tag, prefixes, tabs):
-    """Fill a character or team page's shared parts from the query string:
-    the tab, Titles (series) sort, the paged Timeline (issues), Read next."""
-    details = creators.entity_details(tag, data["name"], prefixes=prefixes)
+def _detail(data, tags, prefixes, tabs, role=None, **details_args):
+    """Fill a character, team or creator page's shared parts from the query
+    string: the tab, Titles (series) sort, the paged Timeline (issues), Read
+    next. ``role`` narrows the series and issues lists to one credit kind."""
+    details = creators.entity_details(tags, data["name"], prefixes=prefixes, **details_args)
     if details is None:
         abort(503)
     data.update(details)
@@ -153,14 +155,25 @@ def _detail(data, tag, prefixes, tabs):
     issues = data["issues"]
     for i in issues:
         i["thumbnail_url"] = url_for("get_thumbnail", path=i["path"])
-    titles = sorted(data["series"], key=lambda s: s["name"].casefold())
+    titles = data["series"]
+    if role:
+        # A role narrows each series to the issues credited under it.
+        mine = [i for i in issues if role in i.get("roles", ())]
+        counts = {}
+        for i in mine:
+            n, r = counts.get(i["parent"], (0, 0))
+            counts[i["parent"]] = (n + 1, r + i["read"])
+        titles = [{**t, "issues": counts[t["parent"]][0], "read": counts[t["parent"]][1]}
+                  for t in titles if t["parent"] in counts]
+    titles = sorted(titles, key=lambda s: s["name"].casefold())
     if st["tsort"] == "most":
         titles.sort(key=lambda s: -s["issues"])
     elif st["tsort"] == "year":
         titles.sort(key=lambda s: s["year"] or 9999)
     data["titles"] = titles
 
-    rows = [i for i in issues if st["status"] == "all" or i["read"] == (st["status"] == "read")]
+    rows = [i for i in issues if (st["status"] == "all" or i["read"] == (st["status"] == "read"))
+            and (not role or role in i.get("roles", ()))]
     if st["sort"] == "new":
         rows = rows[::-1]
     pages = max(1, -(-len(rows) // st["per_page"]))
@@ -208,6 +221,7 @@ def character_page(name):
 
 
 TEAM_TABS = ("overview", "members", "comics")
+CREATOR_TABS = ("overview", "comics")
 MEMBER_SORTS = {"most": "Most issues together", "az": "A–Z"}
 
 

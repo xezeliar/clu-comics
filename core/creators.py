@@ -19,6 +19,8 @@ Things that look arbitrary and are not:
   before the creator was followed.
 """
 
+import datetime
+
 from core.app_logging import app_logger
 from core.database import (
     _COMIC_FILE_CLAUSE_FI,
@@ -593,19 +595,24 @@ def character_teams(name):
     return [r["team_name"] for r in rows if r["team_name"]]
 
 
-def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
-    """What a character or team page adds to ``person_page``, or None on a read failure.
+def entity_details(tags, name, prefixes=None, user_id=None, top_creators=8, top_characters=0):
+    """What a character, team or creator page adds to ``person_page``, or None
+    on a read failure.
 
-    ``tag`` is the tag kind the name is looked up under (``characters`` or
-    ``teams``). ``issues`` is every owned issue in Timeline order (Timeline,
-    Read next, Newest, first in the library); ``creators`` the people credited
-    most on them, any role, with the role they hold most there; ``lists`` the
-    reading lists holding any of them, counted within the user's folder scope.
+    ``tags`` is the tag kind (or kinds: a creator is looked up under every
+    credit kind) the name is found under. ``issues`` is every owned issue in
+    Timeline order (Timeline, Read next, Newest, first in the library), with
+    ``roles``, the kinds it is credited under, when there are several;
+    ``creators`` the people credited most on them, any role, with the role they
+    hold most there (never the name itself); ``characters`` the
+    ``top_characters`` most frequent there; ``lists`` the reading lists holding
+    any of them, counted within the user's folder scope.
     """
+    tags = (tags,) if isinstance(tags, str) else tuple(tags)
     uid = _resolve_user_id(user_id)
     scope_sql, scope_params = _scope(prefixes)
-    base = _person_from((tag,), [name]) + scope_sql
-    args = [tag, name, *scope_params]
+    base = _person_from(tags, [name]) + scope_sql
+    args = [*tags, name, *scope_params]
 
     with db_conn() as conn:
         if not conn:
@@ -628,11 +635,28 @@ def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
             "WHERE",
             "JOIN file_metadata_tags t2 ON t2.file_path = t.file_path"
             f" AND t2.kind IN ({_in(CREDIT_KINDS)}) WHERE", 1)
+        roles_by_path = {}
+        if len(tags) > 1:
+            c.execute("SELECT t.file_path AS path, t.kind AS kind" + base, args)
+            for r in c.fetchall():
+                roles_by_path.setdefault(r["path"], set()).add(r["kind"])
+
         c.execute(
             "SELECT MIN(t2.value) AS name, COUNT(DISTINCT t.file_path) AS n" + credits
             + " GROUP BY t2.value COLLATE NOCASE ORDER BY n DESC, name LIMIT ?",
-            [*CREDIT_KINDS, *args, top_creators])
-        people = [dict(r) for r in c.fetchall()]
+            [*CREDIT_KINDS, *args, top_creators + 1])
+        people = [dict(r) for r in c.fetchall()
+                  if r["name"].casefold() != name.casefold()][:top_creators]
+
+        characters = []
+        if top_characters:
+            c.execute(
+                "SELECT MIN(t2.value) AS name, COUNT(DISTINCT t.file_path) AS n"
+                + base.replace("WHERE", "JOIN file_metadata_tags t2 ON t2.file_path = t.file_path"
+                               " AND t2.kind = 'characters' WHERE", 1)
+                + " GROUP BY t2.value COLLATE NOCASE ORDER BY n DESC, name LIMIT ?",
+                [*args, top_characters])
+            characters = [dict(r) for r in c.fetchall()]
         roles = {}
         if people:
             c.execute(
@@ -652,8 +676,8 @@ def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
             " COALESCE(e.manual_override_path, e.matched_file_path) AS path"
             " FROM reading_list_entries e"
             " JOIN file_metadata_tags t ON t.file_path = COALESCE(e.manual_override_path, e.matched_file_path)"
-            " AND t.kind = ? AND t.value = ? COLLATE NOCASE",
-            [tag, name])
+            f" AND t.kind IN ({_in(tags)}) AND t.value = ? COLLATE NOCASE",
+            [*tags, name])
         owned = {i["path"] for i in issues}
         hits = {}
         for r in c.fetchall():
@@ -674,6 +698,8 @@ def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
     for i in issues:
         i["read"] = bool(i["read"])
         i["series"] = i["series"] or (i["parent"] or "").rstrip("/").rsplit("/", 1)[-1]
+        if roles_by_path:
+            i["roles"] = [k for k in CREDIT_KINDS if k in roles_by_path.get(i["path"], ())]
     for p in people:
         r = roles.get(p["name"].casefold(), {})
         p["kind"] = r.get("kind", "writer")
@@ -686,6 +712,7 @@ def entity_details(tag, name, prefixes=None, user_id=None, top_creators=8):
     return {
         "issues": issues,
         "creators": people,
+        "characters": characters,
         "lists": lists,
         "publisher": max(publishers, key=publishers.get) if publishers else None,
         # Read next: the earliest unread issue; None once every issue is read.
@@ -781,4 +808,34 @@ def team_info(name, profile, issues, prefixes=None):
         allies=_linked(friends, chars),
         enemies=_linked(enemies, chars),
         cv_members=[x["name"] for x in cv.get("members") or () if x.get("name")])
+    return info
+
+
+def _long_date(iso):
+    """``1979-03-14`` -> ``14 March 1979``; anything else as it is."""
+    try:
+        d = datetime.date.fromisoformat((iso or "")[:10])
+    except ValueError:
+        return iso or None
+    return f"{d.day} {d:%B %Y}"
+
+
+def creator_info(name, profile, issues):
+    """The creator page's Information column and long bio (docs/browse-hub.md,
+    "Creator page"). Roles come from the library, not from here."""
+    from core.description_html import sanitize_description_html
+
+    m = (profile or {}).get("metron") or {}
+    cv = (profile or {}).get("cv") or {}
+    info = _profile_common(m, cv, issues, "creator")
+    website = cv.get("website") or ""
+    info.update(
+        aliases=m.get("alias") or cv.get("aliases") or [],
+        born=_long_date(m.get("birth")),
+        died=_long_date(m.get("death")),
+        hometown=cv.get("hometown"),
+        country=cv.get("country"),
+        website=website if website.startswith(("https://", "http://")) else None,
+        # Sanitized when stored; again here, since it is rendered as HTML.
+        description=sanitize_description_html(cv.get("description") or "") or None)
     return info

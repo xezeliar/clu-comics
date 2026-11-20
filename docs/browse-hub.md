@@ -3,12 +3,13 @@
 Status: index pages built; Gaps 1 and 3 done (Teams, Editor, Translator indexed;
 team counts from `<Teams>`; every credit links); stored profiles done
 (`entity_profiles`, `core/entity_profiles.py`, Refresh at
-`POST /api/<characters|teams|creators>/<name>/refresh`); the character and
-team pages (`templates/character.html` and `templates/team.html`, both
-extending `templates/entity_page.html`; `entity_details`, `character_info`,
-`team_info` and `team_members` in `core/creators.py`). Next: the creator page
-redesign, then Change match / Unmatch. Design: the "Character page" and
-"Team page" entries on the CLU Design Board.
+`POST /api/<characters|teams|creators>/<name>/refresh`); the character, team
+and creator pages (`templates/character.html`, `templates/team.html` and
+`templates/creator.html`, all extending `templates/entity_page.html`;
+`entity_details`, `character_info`, `team_info`, `team_members` and
+`creator_info` in `core/creators.py`). `person.html` is gone. Next: Change
+match / Unmatch. Design: the "Character page", "Team page" and "Creator page"
+entries on the CLU Design Board.
 
 ## Origin and data policy
 
@@ -22,7 +23,7 @@ lists), and cached Metron and ComicVine records.
 
 - Index and detail pages: `/characters`, `/creators`, `/teams` and their
   `/<name>` pages (`routes/creators.py`, `core/creators.py`), rendered by
-  `templates/people_index.html` and `templates/person.html`, respecting
+  `templates/people_index.html` and the detail templates above, respecting
   per-user folder grants.
 - Photos: `core/person_art.py` resolves a name on Metron (exact, casefolded
   name match) on a daemon thread when a detail page opens, and caches the image.
@@ -145,12 +146,15 @@ team page fetches `team(id)` directly; ComicVine again only through its `cv_id`.
 
 ## Creator page (redesign of `person.html` for creators)
 
-Header: photo, name, role summary (Writer · Artist, from the credits you
-own), stat line (issues · series · read · owned year range), bio, Follow (the
-existing follow, as today), More. Tabs: Overview, Comics, and the existing
-role filter as a Contributions menu (writer, penciller, inker, colorist,
-letterer, cover, editor, translator; only roles the creator has are listed,
-each with its issue count). No upcoming comics and no news: CLU has neither.
+Header: photo (initials when unmatched), name, role summary (Writer · Artist,
+from the credits you own), stat line (issues · series · read · owned year
+range), bio, Read next, Follow (outline; "Following" when on), More (Refresh).
+Tabs: Overview and Comics. Comics has View (Series/Issues) and a Role filter
+listing only the roles the creator has, each with its issue count; `?role=`
+alone opens Comics, and an unowned or unknown role is ignored. Overview:
+Credited most in, Newest in your library, Credited characters, Works most with
+(other creators on the same issues), then "More on <name>". No upcoming comics
+and no news: CLU has neither.
 
 ### Sources
 

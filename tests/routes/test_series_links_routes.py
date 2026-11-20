@@ -131,11 +131,6 @@ class TestCreatorIssues:
         d = client.get("/api/creators/Tom%20King/issues?folder=" + quote("/data/DC/Other")).get_json()
         assert d["series_href"] is None
 
-    def test_panel_shows_the_link(self):
-        path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "person.html")
-        with open(path, encoding="utf-8") as fh:
-            body = fh.read()
-        assert "if (d.series_href)" in body and "'Series page'" in body
 
 
 class TestSmartCollectionReader:

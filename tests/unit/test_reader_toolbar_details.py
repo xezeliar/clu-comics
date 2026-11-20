@@ -72,7 +72,7 @@ def test_fill_is_lightened_for_the_dark_capsule(css):
     assert supports and "--reader-accent: color-mix(" in supports.group(1)
 
 
-@pytest.mark.parametrize("name", ["person.html", "smart_collections.html"])
+@pytest.mark.parametrize("name", ["entity_page.html", "smart_collections.html"])
 def test_every_host_fetches_a_fresh_reader(name):
     html = read("templates", name)
     # asset() carries the file's content hash, so a change to the reader is always refetched.

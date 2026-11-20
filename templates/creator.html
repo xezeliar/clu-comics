@@ -1,0 +1,146 @@
+{% extends "entity_page.html" %}
+{% from 'partials/entity_parts.html' import links %}
+{% from 'partials/filters.html' import filter_bar %}
+{% from 'partials/person_tile.html' import person_tile %}
+{#- The creator page (docs/browse-hub.md, "Creator page"). Roles, comics,
+    credited characters and collaborators come from the user's files; Metron
+    and ComicVine fill the bio and Information. -#}
+{% set noun = 'creator' %}
+{% set endpoint = 'creators.creator_page' %}
+{% set index_endpoint, index_label = 'creators.creators_index', 'Creators' %}
+{% set refresh_grid = 'creators' %}
+{% set tabs = [('overview', 'Overview', none), ('comics', 'Comics', p.issues | length)] %}
+{% set panel = st.view if st.tab == 'comics' else 'overview' %}
+{% set role_arg = st.role if st.role != 'all' else none %}
+{% set series_href = url_for(endpoint, name=p.name, tab='comics') %}
+{% set issues_href = url_for(endpoint, name=p.name, tab='comics', view='issues') %}
+{% set clear_href = url_for(endpoint, name=p.name, tab='comics', view='issues', role=role_arg) %}
+{% set newest_href, newest_label = url_for(endpoint, name=p.name, tab='comics', view='issues', sort='new'), 'All issues' %}
+{% set lead_stats = [] %}
+{% set header_sub = p.roles | map(attribute='label') | join(' · ') or none %}
+{% set most_label = 'Credited most in' %}
+{% set creators_label, creators_note = 'Works most with', 'credited on the same issues' %}
+
+{% block actions %}
+<button type="button" class="btn btn-sm btn-outline-secondary" id="followBtn"
+        data-bs-toggle="modal" data-bs-target="#followModal">
+  {%- if follow %}<i class="bi bi-check2" aria-hidden="true"></i> Following{% else %}Follow{% endif -%}
+</button>
+{% endblock %}
+
+{% block view_row %}
+<div class="clu-toolbar-row">
+  {{ filter_bar('chView', [{'value': 'series', 'label': 'Series'}, {'value': 'issues', 'label': 'Issues'}], st.view, label='View') }}
+</div>
+{% if p.roles | length > 1 %}
+<div class="clu-toolbar-row">
+  {% set opts = [{'value': 'all', 'label': 'All', 'count': '{:,}'.format(p.issues | length)}] %}
+  {% for r in p.roles %}{% set _ = opts.append({'value': r.kind, 'label': r.label, 'count': '{:,}'.format(r.count)}) %}{% endfor %}
+  {{ filter_bar('chRole', opts, st.role, label='Role') }}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block overview_mid %}
+{% if p.characters %}
+<section aria-labelledby="crChH">
+  <div class="ch-sh"><h2 id="crChH">Credited characters</h2><span class="ch-n">in the issues {{ p.name }} is credited on</span></div>
+  <ul class="pt-grid tm-strip">
+    {% for c in p.characters %}{{ person_tile(c, url_for('creators.character_page', name=c.name)) }}{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block overview_end %}
+{% if info.description %}
+<section class="cr-long" aria-labelledby="crMoreH">
+  <div class="ch-sh"><h2 id="crMoreH">More on {{ p.name }}</h2></div>
+  <details>
+    <summary>ComicVine biography</summary>
+    <div class="cr-desc">{{ info.description | safe }}</div>
+    <p class="ch-note">From ComicVine.</p>
+  </details>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block info_rows %}
+{% set info = p.info %}
+<div><dt>Roles in your library</dt><dd><ul>
+  {%- for r in p.roles %}<li><a href="{{ url_for(endpoint, name=p.name, tab='comics', role=r.kind) }}">{{ r.label }}</a><span class="ch-n">{{ '{:,}'.format(r.count) }} issue{{ 's' if r.count != 1 }}</span></li>{% endfor -%}
+</ul></dd></div>
+{% if info.aliases %}<div><dt>Aliases</dt><dd>{{ info.aliases | join(', ') }}</dd></div>{% endif %}
+{% if info.born or info.hometown %}<div><dt>Born</dt><dd>{{ info.born or '' }}
+  {%- set place = [info.hometown, info.country] | select | join(', ') %}{% if place %}<span class="ch-sub">{{ place }}</span>{% endif %}</dd></div>{% endif %}
+{% if info.died %}<div><dt>Died</dt><dd>{{ info.died }}</dd></div>{% endif %}
+{% if info.website %}<div><dt>Website</dt><dd class="ch-links">{{ links([(info.website.split('//', 1)[1].rstrip('/'), info.website)]) }}</dd></div>{% endif %}
+{% endblock %}
+
+{% block page_end %}
+<div class="modal fade" id="followModal" tabindex="-1" aria-labelledby="followModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="followModalLabel">Follow {{ p.name }}</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-body-secondary small">
+          When the nightly sweep finds a new series by this creator on your Pull List that is not being
+          monitored, Monitor is switched on so it appears on Wanted. Existing series are left alone.
+          {% if follow and follow.added_count %}<br>Added so far: {{ follow.added_count }}{% if follow.last_added %} (latest: {{ follow.last_added }}){% endif %}.{% endif %}
+        </p>
+        <div class="mb-3">
+          <label class="form-label" for="followRole">As</label>
+          <select class="form-select" id="followRole">
+            {% set default_role = follow.role if follow else (role_arg or (p.roles[0].kind if p.roles else 'writer')) %}
+            {% for k, label in roles.items() %}<option value="{{ k }}"{% if default_role == k %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="followPublisher">Publisher (blank for all)</label>
+          <input class="form-control" id="followPublisher" value="{{ follow.publisher or '' if follow else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="followScope">Ongoing and limited</label>
+          <select class="form-select" id="followScope">
+            {% for sc in scopes %}<option value="{{ sc }}"{% if follow and follow.scope == sc %} selected{% endif %}>{{ sc | capitalize }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        {% if follow %}<button type="button" class="btn btn-outline-danger me-auto" id="unfollowBtn">Unfollow</button>{% endif %}
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="saveFollowBtn">{{ 'Save' if follow else 'Follow' }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_script %}
+    const followName = {{ p.name | tojson }};
+    async function sendFollow(method, body, okMessage) {
+        let res;
+        try {
+            res = await fetch({{ url_for('creators.api_follow') | tojson }}, {
+                method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+        } catch (e) { CLU.toast('Could not reach CLU. Try again.', 'error'); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) { CLU.toast(data.error || 'Request failed', 'error'); return; }
+        CLU.toast(okMessage, 'success');
+        setTimeout(() => location.reload(), 600);
+    }
+    document.getElementById('saveFollowBtn').addEventListener('click', () => sendFollow('POST', {
+        name: followName,
+        role: document.getElementById('followRole').value,
+        publisher: document.getElementById('followPublisher').value,
+        scope: document.getElementById('followScope').value
+    }, 'Following ' + followName));
+    const unfollow = document.getElementById('unfollowBtn');
+    if (unfollow) unfollow.addEventListener('click', () => sendFollow('DELETE', { name: followName }, 'Unfollowed ' + followName));
+    const roleBar = document.getElementById('chRole');
+    if (roleBar) CLU.filterBar(roleBar, { onChange: v => go({ role: v === 'all' ? '' : v }) });
+{% endblock %}

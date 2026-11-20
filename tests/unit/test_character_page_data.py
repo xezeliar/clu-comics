@@ -100,3 +100,24 @@ def test_team_information(lib):
     assert info["disbanded_in"] == [{"name": "Finale", "issue": None}]
     assert info["cv_members"] == ["Robin", "Oracle"]
     assert info["first_owned"]["name"] == "U1.cbz"
+
+
+def test_creator_details_roles_characters_and_coworkers(lib):
+    from core.creators import CREDIT_KINDS
+    d = creators.entity_details(CREDIT_KINDS, "Ann", top_characters=5)
+    roles = {i["name"]: i["roles"] for i in d["issues"]}
+    assert roles["B10.cbz"] == ["writer", "penciller"] and roles["D1.cbz"] == ["inker"]
+    assert {c["name"]: c["n"] for c in d["characters"]} == {"Batman": 3}
+    assert [p["name"] for p in d["creators"]] == ["Lee"]  # never Ann herself
+
+
+def test_creator_information():
+    profile = {"metron": {"alias": ["A."], "birth": "1979-03-14", "gcd_id": "12"},
+               "cv": {"hometown": "Port Avery", "country": "Canada", "website": "javascript:alert(1)",
+                      "description": '<p>Long <script>x()</script>bio</p>'}}
+    info = creators.creator_info("Ann", profile, [])
+    assert info["born"] == "14 March 1979" and info["died"] is None
+    assert info["aliases"] == ["A."] and info["hometown"] == "Port Avery"
+    assert info["website"] is None  # only http(s) becomes a link
+    assert "<script" not in info["description"] and "bio" in info["description"]
+    assert ("GCD", "https://www.comics.org/creator/12/") in info["links"]

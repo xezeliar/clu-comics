@@ -47,12 +47,16 @@ def library(db_connection):
 class TestCreatorPage:
     def test_page_shows_roles_series_and_coworkers(self, client, library):
         body = client.get("/creators/" + quote("Tom King")).get_data(as_text=True)
-        assert "Tom King" in body
-        assert 'Writer<span class="clu-filter-count">3</span>' in body
+        assert "Tom King" in body and "Credited most in" in body
+        assert '<span class="clu-stat-value">3</span> issues' in body
         assert "Batman" in body and "Detective" in body
-        assert 'Mitch Gerads<span class="clu-filter-count">2</span>' in body
-        assert 'Clay Mann<span class="clu-filter-count">1</span>' in body
-        assert "Someone Else" not in body
+        # Works most with: everyone credited on the same issues, never the creator.
+        assert "/creators/Mitch%20Gerads?role=penciller" in body and "Penciller · 2 issues" in body
+        assert "/creators/Clay%20Mann?role=penciller" in body
+        assert "Someone Else" not in body and "/creators/Tom%20King?role=writer" not in body
+        # Credited characters: from the files, each a link.
+        assert 'href="/characters/Batman"' in body and 'href="/characters/Catwoman"' in body
+        assert 'id="followBtn"' in body and "Read next" in body
 
     def test_lookup_is_case_and_provider_id_insensitive(self, client, library):
         assert client.get("/creators/tom%20king").status_code == 200
@@ -61,27 +65,43 @@ class TestCreatorPage:
     def test_unknown_creator_is_404(self, client, library):
         assert client.get("/creators/Nobody").status_code == 404
 
-    def test_role_filter_keeps_other_pills(self, client, library):
-        body = client.get("/creators/Mitch%20Gerads?role=penciller").get_data(as_text=True)
-        assert 'Penciller<span class="clu-filter-count">2</span>' in body
-        assert client.get("/creators/Tom%20King?role=penciller").status_code == 404
+    @pytest.fixture
+    def two_roles(self, library):
+        from core.database import _backfill_file_metadata_tags
+        _file(library, "/data/Y", "Y1.cbz", "Second", 1, ci_writer="Ana Ruiz")
+        _backfill_file_metadata_tags(library)
+        return library
+
+    def test_role_filter_lists_only_owned_roles(self, client, two_roles):
+        body = client.get("/creators/Ana%20Ruiz?tab=comics").get_data(as_text=True)
+        assert 'id="chRole"' in body
+        assert 'Writer<span class="clu-filter-count">1</span>' in body
+        assert 'Translator<span class="clu-filter-count">1</span>' in body
+        assert "Penciller<span" not in body
+        # One role only: no Role filter.
+        assert 'id="chRole"' not in client.get("/creators/Tom%20King?tab=comics").get_data(as_text=True)
+
+    def test_role_narrows_series_and_issues(self, client, two_roles):
+        series = client.get("/creators/Ana%20Ruiz?tab=comics&role=writer").get_data(as_text=True)
+        grid = series[series.index('class="ch-grid"'):]
+        assert ">Second<" in grid and ">Other<" not in grid
+        issues = client.get("/creators/Ana%20Ruiz?tab=comics&view=issues&role=translator").get_data(as_text=True)
+        assert 'aria-label="Read Other #1"' in issues and "Read Second #1" not in issues
+
+    def test_role_alone_opens_comics(self, client, two_roles):
+        body = client.get("/creators/Ana%20Ruiz?role=writer").get_data(as_text=True)
+        assert 'id="chRole"' in body
+        # A role the creator does not have is ignored, not a 404.
+        assert client.get("/creators/Tom%20King?role=penciller").status_code == 200
 
     def test_editor_and_translator_have_pages(self, client, library):
-        body = client.get("/creators/Jamie%20Rich?role=editor").get_data(as_text=True)
-        assert 'Editor<span class="clu-filter-count">1</span>' in body
+        body = client.get("/creators/Jamie%20Rich").get_data(as_text=True)
+        assert "Roles in your library" in body and "/creators/Jamie%20Rich?tab=comics&amp;role=editor" in body
         assert client.get("/creators/Ana%20Ruiz").status_code == 200
-        assert client.get("/creators/Ana%20Ruiz?role=translator").status_code == 200
 
-    def test_unread_view_hides_finished_series(self, client, library, db_connection):
-        db_connection.execute(
-            "INSERT INTO issues_read (issue_path, user_id) VALUES ('/data/DC/Detective/D1.cbz', 1)")
-        db_connection.commit()
-        body = client.get("/creators/Tom%20King?view=unread").get_data(as_text=True)
-        assert "Detective" not in body and "Batman" in body
-
-    def test_read_progress(self, client, library):
+    def test_header_shows_initials_not_a_cover(self, client, library):
         body = client.get("/creators/Tom%20King").get_data(as_text=True)
-        assert "3 issues owned · 1 read" in body
+        assert '<span class="ch-ini" aria-hidden="true">TK</span>' in body and 'class="ch-src"' not in body
 
     def test_index_lists_and_searches(self, client, library):
         body = client.get("/creators").get_data(as_text=True)
@@ -230,7 +250,6 @@ class TestExpandSeriesIssues:
     def test_folder_is_required(self, client, library):
         assert client.get("/api/creators/Tom%20King/issues").status_code == 400
 
-    def test_cards_expand_instead_of_linking(self, client, library):
+    def test_creator_page_has_the_reader(self, client, library):
         body = client.get("/creators/Tom%20King").get_data(as_text=True)
-        assert 'class="person-card"' in body and 'aria-expanded="false"' in body
         assert 'id="comicReaderModal"' in body
