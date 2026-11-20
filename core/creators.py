@@ -520,3 +520,219 @@ def apply_follows():
     except Exception as e:
         app_logger.error(f"Followed creators sweep failed: {e}")
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Character page
+# ---------------------------------------------------------------------------
+
+def _number_key(number):
+    """Issue numbers in reading order: 1, 2, 10, 10.5, then anything non-numeric."""
+    try:
+        return (0, float(number), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, str(number or ""))
+
+
+def timeline_key(issue):
+    """Timeline order: year, then series, then issue number. Undated issues last."""
+    return (issue["year"] or 9999, (issue["series"] or "").casefold(),
+            _number_key(issue["number"]), issue["path"])
+
+
+def tag_counts(kinds, names, prefixes=None):
+    """``{casefolded name: {"name", "n"}}`` for the names the library has under kinds.
+
+    How allies, teams and creators become links: a name in the result has a
+    CLU page and an issue count, any other stays plain text.
+    """
+    names = [n for n in dict.fromkeys(names or ()) if n]
+    if not names:
+        return {}
+    kinds = tuple(kinds)
+    scope_sql, scope_params = _scope(prefixes)
+    with db_conn() as conn:
+        if not conn:
+            return {}
+        rows = conn.execute(
+            "SELECT MIN(t.value) AS name, COUNT(DISTINCT t.file_path) AS n"
+            + _person_from(kinds, names) + scope_sql + " GROUP BY t.value COLLATE NOCASE",
+            [*kinds, *names, *scope_params]).fetchall()
+    return {r["name"].casefold(): dict(r) for r in rows}
+
+
+def character_teams(name):
+    """Team names Metron lists for the character (``character_teams``)."""
+    with db_conn() as conn:
+        if not conn:
+            return []
+        rows = conn.execute(
+            "SELECT team_name FROM character_teams WHERE character_key = ?"
+            " ORDER BY team_name COLLATE NOCASE",
+            ((name or "").strip().casefold(),)).fetchall()
+    return [r["team_name"] for r in rows if r["team_name"]]
+
+
+def character_details(name, prefixes=None, user_id=None, top_creators=8):
+    """What a character page adds to ``person_page``, or None on a read failure.
+
+    ``issues`` is every owned issue in Timeline order (Timeline, Read next,
+    Newest, first in the library); ``creators`` the people credited most on
+    them, any role, with the role they hold most there; ``lists`` the reading
+    lists holding any of them, counted within the user's folder scope.
+    """
+    uid = _resolve_user_id(user_id)
+    scope_sql, scope_params = _scope(prefixes)
+    base = _person_from(("characters",), [name]) + scope_sql
+    args = ["characters", name, *scope_params]
+
+    with db_conn() as conn:
+        if not conn:
+            return None
+        c = conn.cursor()
+        c.execute(
+            "SELECT DISTINCT fi.path AS path, fi.name AS name, fi.parent AS parent,"
+            " fi.ci_series AS series, fi.ci_number AS number,"
+            " NULLIF(CAST(fi.ci_year AS INTEGER), 0) AS year, fi.ci_title AS title,"
+            " fi.ci_publisher AS publisher, fi.ci_cvid AS cvid,"
+            " (r.issue_path IS NOT NULL) AS read"
+            + base.replace(
+                "WHERE",
+                "LEFT JOIN issues_read r ON r.issue_path = fi.path AND r.user_id = ?"
+                " WHERE", 1),
+            [uid, *args])
+        issues = [dict(r) for r in c.fetchall()]
+
+        credits = base.replace(
+            "WHERE",
+            "JOIN file_metadata_tags t2 ON t2.file_path = t.file_path"
+            f" AND t2.kind IN ({_in(CREDIT_KINDS)}) WHERE", 1)
+        c.execute(
+            "SELECT MIN(t2.value) AS name, COUNT(DISTINCT t.file_path) AS n" + credits
+            + " GROUP BY t2.value COLLATE NOCASE ORDER BY n DESC, name LIMIT ?",
+            [*CREDIT_KINDS, *args, top_creators])
+        people = [dict(r) for r in c.fetchall()]
+        roles = {}
+        if people:
+            c.execute(
+                "SELECT t2.value AS name, t2.kind AS kind, COUNT(DISTINCT t.file_path) AS n"
+                + credits + " AND " + _name_match("t2.value", [p["name"] for p in people])
+                + " GROUP BY t2.value COLLATE NOCASE, t2.kind",
+                [*CREDIT_KINDS, *args, *[p["name"] for p in people]])
+            for r in c.fetchall():
+                best = roles.get(r["name"].casefold())
+                # Ties go to the order of CREDIT_KINDS: writer before penciller...
+                if not best or (r["n"], -CREDIT_KINDS.index(r["kind"])) > (
+                        best["n"], -CREDIT_KINDS.index(best["kind"])):
+                    roles[r["name"].casefold()] = dict(r)
+
+        c.execute(
+            "SELECT e.reading_list_id AS id,"
+            " COALESCE(e.manual_override_path, e.matched_file_path) AS path"
+            " FROM reading_list_entries e"
+            " JOIN file_metadata_tags t ON t.file_path = COALESCE(e.manual_override_path, e.matched_file_path)"
+            " AND t.kind = 'characters' AND t.value = ? COLLATE NOCASE",
+            [name])
+        owned = {i["path"] for i in issues}
+        hits = {}
+        for r in c.fetchall():
+            if r["path"] in owned:
+                hits.setdefault(r["id"], set()).add(r["path"])
+        lists = []
+        if hits:
+            ids = list(hits)
+            c.execute(
+                "SELECT rl.id, rl.name, COUNT(e.id) AS total,"
+                " MIN(COALESCE(e.manual_override_path, e.matched_file_path)) AS cover"
+                " FROM reading_lists rl LEFT JOIN reading_list_entries e ON e.reading_list_id = rl.id"
+                f" WHERE rl.id IN ({_in(ids)}) GROUP BY rl.id", ids)
+            lists = [{**dict(r), "hits": len(hits[r["id"]])} for r in c.fetchall()]
+            lists.sort(key=lambda l: (-l["hits"], l["name"].casefold()))
+
+    issues.sort(key=timeline_key)
+    for i in issues:
+        i["read"] = bool(i["read"])
+        i["series"] = i["series"] or (i["parent"] or "").rstrip("/").rsplit("/", 1)[-1]
+    for p in people:
+        r = roles.get(p["name"].casefold(), {})
+        p["kind"] = r.get("kind", "writer")
+        p["role"] = ROLE_LABELS.get(p["kind"], p["kind"])
+    publishers = {}
+    for i in issues:
+        if i["publisher"]:
+            publishers[i["publisher"]] = publishers.get(i["publisher"], 0) + 1
+    unread = next((n for n, i in enumerate(issues) if not i["read"]), None)
+    return {
+        "issues": issues,
+        "creators": people,
+        "lists": lists,
+        "publisher": max(publishers, key=publishers.get) if publishers else None,
+        # Read next: the earliest unread issue; None once every issue is read.
+        "next_index": unread,
+    }
+
+
+def _merge_names(*lists):
+    """Names from several sources, one per casefolded spelling, first spelling wins."""
+    seen = {}
+    for names in lists:
+        for n in names or ():
+            if n and n.casefold() not in seen:
+                seen[n.casefold()] = n
+    return list(seen.values())
+
+
+def _linked(names, counts):
+    """``[{"name", "n"}]``: names the library has (with a count) first, then the rest."""
+    rows = [{"name": counts[n.casefold()]["name"], "n": counts[n.casefold()]["n"]}
+            if n.casefold() in counts else {"name": n, "n": 0} for n in names]
+    return sorted(rows, key=lambda r: (-r["n"], r["name"].casefold()))
+
+
+def character_info(name, profile, issues, prefixes=None):
+    """The Information column: one winner per field (docs/browse-hub.md).
+
+    ``profile`` is ``entity_profiles.get_profile`` (or None); ``issues`` is
+    ``character_details``' Timeline list, for the first appearance and first
+    in your library. Allies, teams and creators carry an issue count when the
+    library has them, which is what makes them links.
+    """
+    m = (profile or {}).get("metron") or {}
+    cv = (profile or {}).get("cv") or {}
+    teams = _merge_names(character_teams(name), cv.get("teams"))
+    creators = m.get("creators") or cv.get("creators") or []
+    friends = [f["name"] for f in cv.get("friends") or () if f.get("name")]
+    enemies = [f["name"] for f in cv.get("enemies") or () if f.get("name")]
+    chars = tag_counts(("characters",), friends + enemies, prefixes)
+
+    first = None
+    fi = cv.get("first_issue") or {}
+    if fi.get("id"):
+        owned = next((i for i in issues if i["cvid"] == fi["id"]), None)
+        first = {"issue": owned, "name": fi.get("name"), "number": fi.get("number")}
+
+    links = []
+    if m.get("url"):
+        links.append(("Metron", m["url"]))
+    if cv.get("url"):
+        links.append(("ComicVine", cv["url"]))
+    if str(m.get("gcd_id") or "").isdigit():
+        links.append(("GCD", f"https://www.comics.org/character/{m['gcd_id']}/"))
+
+    return {
+        "bio": m.get("desc") or cv.get("summary"),
+        "universe": ", ".join(m.get("universes") or []),
+        "real_name": cv.get("real_name"),
+        "aliases": m.get("alias") or cv.get("aliases") or [],
+        "created_by": _linked(creators, tag_counts(CREDIT_KINDS, creators, prefixes)),
+        "first_appearance": first,
+        "first_owned": issues[0] if issues else None,
+        "origin": cv.get("origin"),
+        "teams": _linked(teams, tag_counts(("teams",), teams, prefixes)),
+        "powers": cv.get("powers") or [],
+        "allies": _linked(friends, chars),
+        "enemies": _linked(enemies, chars),
+        "links": links,
+        "has_metron": bool(m),
+        "has_cv": bool(cv),
+    }

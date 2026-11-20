@@ -5,9 +5,10 @@ from flask import (Blueprint, abort, current_app, jsonify, render_template, requ
                    send_file, url_for)
 
 from core import creators, entity_profiles, person_art
-from core.auth import accessible_folder_prefixes, current_user
+from core.auth import accessible_folder_prefixes, current_user, role_at_least
 from core.database import get_series_slugs_for_folders
 from core.metadata_normalize import strip_provider_ids
+from helpers.paging import snap_per_page
 
 creators_bp = Blueprint("creators", __name__)
 
@@ -29,8 +30,11 @@ def _render_page(data, template, view, **extra):
         data["profile"] = entity_profiles.get_profile(kind, data["name"])
         # Opening a detail page is the only thing that asks Metron for a photo
         # or a profile; ensure() is a no-op once both are stored.
+        data["looking"] = False
         if (current_app.config.get("METRON_API_TOKEN") or "").strip():
-            person_art.ensure(current_app._get_current_object(), kind, data["name"])
+            data["looking"] = person_art.ensure(
+                current_app._get_current_object(), kind, data["name"]) or person_art.in_flight(
+                kind, data["name"])
     return render_template(template, p=data, view=view, **extra)
 
 
@@ -114,10 +118,83 @@ def characters_index():
     return _index(people, "characters", q, title="Characters", icon="bi-people")
 
 
+CHARACTER_TABS = ("overview", "titles", "timeline")
+TITLE_SORTS = {"most": "Most issues", "az": "A–Z", "year": "First year"}
+TIMELINE_SORTS = {"old": "Oldest first", "new": "Newest first"}
+TIMELINE_STATUS = ("all", "unread", "read")
+
+
+def _arg(key, allowed, default):
+    value = request.args.get(key, default)
+    return value if value in allowed else default
+
+
+def _can_refresh():
+    """Refresh is for Clerk and up. No user means no accounts (the implicit
+    owner), as in partials/tab_bar.html; the POST is checked again anyway."""
+    user = current_user()
+    return not user or role_at_least(user, "clerk")
+
+
 @creators_bp.route("/characters/<path:name>")
 def character_page(name):
-    return _page(("characters",), name, "person.html", kind="characters",
-                 follow=None, role=None, roles={}, scopes=())
+    name = strip_provider_ids(name) or name
+    prefixes = accessible_folder_prefixes(current_user())
+    data = creators.person_page(("characters",), name, prefixes=prefixes)
+    if data is None:
+        abort(404)
+    details = creators.character_details(data["name"], prefixes=prefixes)
+    if details is None:
+        abort(503)
+    data.update(details)
+    st = {"tab": _arg("tab", CHARACTER_TABS, "overview"),
+          "tsort": _arg("tsort", TITLE_SORTS, "most"),
+          "sort": _arg("sort", TIMELINE_SORTS, "old"),
+          "status": _arg("status", TIMELINE_STATUS, "all"),
+          "per_page": snap_per_page(request.args.get("per_page"))}
+
+    issues = data["issues"]
+    for i in issues:
+        i["thumbnail_url"] = url_for("get_thumbnail", path=i["path"])
+    titles = sorted(data["series"], key=lambda s: s["name"].casefold())
+    if st["tsort"] == "most":
+        titles.sort(key=lambda s: -s["issues"])
+    elif st["tsort"] == "year":
+        titles.sort(key=lambda s: s["year"] or 9999)
+    data["titles"] = titles
+
+    rows = [i for i in issues if st["status"] == "all" or i["read"] == (st["status"] == "read")]
+    if st["sort"] == "new":
+        rows = rows[::-1]
+    pages = max(1, -(-len(rows) // st["per_page"]))
+    try:
+        page = min(max(1, int(request.args.get("page", 1))), pages)
+    except ValueError:
+        page = 1
+    start = (page - 1) * st["per_page"]
+    st.update(page=page, pages=pages, total=len(rows), first=start + 1,
+              last=start + len(rows[start:start + st["per_page"]]))
+    data["timeline"] = rows[start:start + st["per_page"]]
+    data["read_total"] = sum(1 for i in issues if i["read"])
+
+    nxt = data["next_index"]
+    # Read next opens the reader on a run of issues, so its Next button keeps
+    # going in Timeline order without sending every issue to the browser.
+    run = issues[nxt:nxt + 100] if nxt is not None else issues[:100]
+    data["reader_run"] = [{"type": "file", "name": i["name"], "path": i["path"],
+                           "thumbnailUrl": i["thumbnail_url"]} for i in run]
+    years = [i["year"] for i in issues if i["year"]]
+    data["last_year"] = max(years) if years else None
+    data["newest"] = [i for i in issues if i["year"]][-6:][::-1]
+    data["most"] = sorted(data["series"], key=lambda s: -s["issues"])[:6]
+    data["cover_fallback"] = issues[0]["thumbnail_url"] if issues else None
+
+    profile = entity_profiles.get_profile("character", data["name"])
+    data["info"] = creators.character_info(data["name"], profile, issues, prefixes=prefixes)
+    return _render_page(data, "character.html", "series", kind="characters",
+                        st=st, title_sorts=TITLE_SORTS, timeline_sorts=TIMELINE_SORTS,
+                        can_refresh=_can_refresh(),
+                        has_token=bool((current_app.config.get("METRON_API_TOKEN") or "").strip()))
 
 
 @creators_bp.route("/teams")

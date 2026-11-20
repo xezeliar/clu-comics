@@ -38,13 +38,16 @@ class FakeCV:
 
 BATMAN = NS(id=1, name="Batman", image=None, teams=[], cv_id=1699, gcd_id=7,
             desc="The Dark Knight.", alias=["The Bat"],
+            resource_url="https://metron.cloud/character/batman/",
             universes=[NS(id=1, name="Earth 0")], creators=[NS(id=2, name="Bob Kane")])
 BATMAN_CV = NS(
     summary="Billionaire detective.", aliases="Matches Malone\nThe Bat-Man\n",
     image=NS(original_url="https://cv/b.jpg"), real_name="Bruce Wayne",
     first_issue=NS(id=5, name="The Case of the Chemical Syndicate", number="27"),
     origin=NS(name="Human"), powers=[NS(name="Genius Intellect")],
-    friends=[NS(id=9, name="Alfred")], enemies=[NS(id=8, name="Joker")])
+    friends=[NS(id=9, name="Alfred")], enemies=[NS(id=8, name="Joker")],
+    teams=[NS(id=3, name="Justice League")], creators=[NS(id=4, name="Bill Finger")],
+    site_url="javascript:alert(1)")
 
 
 def _api():
@@ -58,12 +61,15 @@ def test_resolve_stores_metron_and_comicvine(cache, db_connection):
     p = entity_profiles.get_profile("character", "batman")
     assert (p["status"], p["metron_id"], p["cv_id"], p["error"]) == ("ok", 1, 1699, None)
     assert p["metron"] == {"desc": "The Dark Knight.", "gcd_id": 7, "alias": ["The Bat"],
+                           "url": "https://metron.cloud/character/batman/",
                            "universes": ["Earth 0"], "creators": ["Bob Kane"]}
     assert p["cv"]["aliases"] == ["Matches Malone", "The Bat-Man"]
     assert p["cv"]["first_issue"] == {"id": 5, "name": "The Case of the Chemical Syndicate",
                                       "number": "27"}
     assert p["cv"]["enemies"] == [{"id": 8, "name": "Joker"}]
     assert p["cv"]["real_name"] == "Bruce Wayne" and p["cv"]["origin"] == "Human"
+    assert p["cv"]["teams"] == ["Justice League"] and p["cv"]["creators"] == ["Bill Finger"]
+    assert p["cv"]["url"] is None  # only http(s) becomes an href
     assert p["metron_fetched_at"] and p["cv_fetched_at"]
     assert cv.calls == [("character", 1699)]
 
@@ -107,7 +113,7 @@ def test_creator_fields_and_sanitized_description(cache, db_connection):
         website="https://mara.example", description='<p onclick="x()">Hi<script>bad()</script></p>')})
     person_art.resolve("creator", "Mara Quell", api, lambda u: None, cv)
     p = entity_profiles.get_profile("creator", "Mara Quell")
-    assert p["metron"] == {"desc": None, "gcd_id": None, "alias": [],
+    assert p["metron"] == {"desc": None, "gcd_id": None, "url": None, "alias": [],
                            "birth": "1970-01-02", "death": None}
     assert (p["cv"]["hometown"], p["cv"]["country"], p["cv"]["website"]) == (
         "Leeds", "UK", "https://mara.example")

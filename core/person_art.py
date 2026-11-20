@@ -234,6 +234,12 @@ _in_flight = set()
 _in_flight_lock = threading.Lock()
 
 
+def in_flight(kind, name):
+    """True while a fetch for this name is running (the page says "Looking it up")."""
+    with _in_flight_lock:
+        return (kind, key_for(name)) in _in_flight
+
+
 def _cv_client(app):
     """The guarded ComicVine client, or None when there is no key or it is paused."""
     from models import comicvine

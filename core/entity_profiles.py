@@ -41,6 +41,12 @@ def _date(value):
     return value.isoformat() if hasattr(value, "isoformat") else None
 
 
+def _url(value):
+    """A provider page URL, only when it is http(s): it becomes an href."""
+    text = str(value) if value else ""
+    return text if text.startswith(("https://", "http://")) else None
+
+
 def _aliases(text):
     """ComicVine keeps aliases as one newline-separated string."""
     return [a.strip() for a in (text or "").splitlines() if a.strip()]
@@ -49,7 +55,8 @@ def _aliases(text):
 def metron_fields(kind, detail):
     """The Metron fields a page shows, as plain JSON-able values."""
     out = {"desc": getattr(detail, "desc", None) or None,
-           "gcd_id": getattr(detail, "gcd_id", None)}
+           "gcd_id": getattr(detail, "gcd_id", None),
+           "url": _url(getattr(detail, "resource_url", None))}
     if kind in ("character", "creator"):
         out["alias"] = list(getattr(detail, "alias", None) or [])
     if kind in ("character", "team"):
@@ -66,7 +73,8 @@ def cv_fields(kind, record):
     image = getattr(record, "image", None)
     out = {"summary": getattr(record, "summary", None) or None,
            "aliases": _aliases(getattr(record, "aliases", None)),
-           "image": getattr(image, "original_url", None) and str(image.original_url)}
+           "image": getattr(image, "original_url", None) and str(image.original_url),
+           "url": _url(getattr(record, "site_url", None))}
     if kind in ("character", "team"):
         first = getattr(record, "first_issue", None)
         out["first_issue"] = ({"id": first.id, "name": getattr(first, "name", None),
@@ -78,6 +86,8 @@ def cv_fields(kind, record):
         out["real_name"] = getattr(record, "real_name", None) or None
         out["origin"] = getattr(origin, "name", None)
         out["powers"] = _names(getattr(record, "powers", None))
+        out["teams"] = _names(getattr(record, "teams", None))
+        out["creators"] = _names(getattr(record, "creators", None))
     if kind == "team":
         out["members"] = _entries(getattr(record, "members", None))
         out["disbanded_in"] = _entries(getattr(record, "issues_disbanded_in", None))

@@ -1,0 +1,108 @@
+/* The character page (templates/character.html). Theme variables only
+   (DESIGN.md); the layout follows the "Character page" Design Board entry. */
+
+.ch { display: flex; flex-direction: column; gap: 1.5rem; }
+
+/* Header: portrait beside the shared page_header, bio under it. */
+.ch-hd { display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 0 1.5rem; align-items: start; }
+.ch-pt { grid-row: 1 / span 3; position: relative; aspect-ratio: 2 / 3; border-radius: 8px; overflow: clip;
+    background: var(--bs-tertiary-bg); box-shadow: 0 2px 5px rgb(0 0 0 / 10%); }
+.ch-pt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ch-src { position: absolute; left: 8px; bottom: 8px; font-size: .7rem; font-weight: 700; line-height: 1.5;
+    padding: 2px 6px; border-radius: 4px; background: rgb(0 0 0 / 60%); color: #fff; }
+.ch-main { display: flex; flex-direction: column; min-width: 0; }
+.ch-main .clu-page-header { margin-bottom: 0; }
+.ch-main .clu-stat { display: inline-block; white-space: nowrap; }
+.ch-bio, .ch-more { grid-column: 2; }
+.ch-bio { margin: .6rem 0 0; max-width: 65ch; display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; white-space: pre-line; }
+.ch-bio.open { display: block; }
+.ch-more { justify-self: start; padding-inline: 0; }
+
+/* Tabs: links, so Back and reload keep the tab. */
+.ch-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--bs-border-color); gap: 1.5rem; }
+.ch-tabs .nav-link { white-space: nowrap; color: var(--bs-secondary-color); }
+.ch-tabs .nav-link.active { color: var(--bs-emphasis-color); border-bottom-color: var(--clu-select, var(--bs-primary)); }
+.ch-tab-n { margin-left: .35rem; font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+
+.ch-body { display: grid; grid-template-columns: minmax(0, 1fr) 16.5rem; gap: 2rem; align-items: start; }
+.ch-col { display: flex; flex-direction: column; gap: 2rem; min-width: 0; }
+.ch-sh { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.ch-sh h2, .ch-aside h2 { font-size: 1.25rem; font-weight: 500; margin: 0 auto 0 0; }
+.ch-n { font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ch-sub { display: block; font-size: .75rem; color: var(--bs-secondary-color); }
+
+/* Cover cards (DESIGN.md "Cover card", the Lift Rule). */
+.ch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1.5rem 1rem;
+    list-style: none; margin: 0; padding: 0; }
+.ch-shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 165px; gap: 1.25rem; overflow-x: auto;
+    list-style: none; margin: 0; padding: 6px 2px .75rem; scrollbar-width: thin; }
+.ch-card { display: flex; flex-direction: column; width: 100%; padding: 0; border: 0; background: none;
+    text-align: left; color: inherit; text-decoration: none; cursor: pointer; }
+.ch-card:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 4px; border-radius: 8px; }
+.ch-cover { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 8px; overflow: clip;
+    background: var(--bs-tertiary-bg); box-shadow: 0 2px 5px rgb(0 0 0 / 10%); transition: translate .2s, box-shadow .2s; }
+.ch-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ch-card:hover .ch-cover, .ch-card:focus-visible .ch-cover { translate: 0 -5px; box-shadow: 0 6px 14px rgb(0 0 0 / 18%); }
+.ch-ct { margin-top: .5rem; font-size: .9rem; font-weight: 500; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-cm { font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Creators: one ranked list in two columns where there is room. */
+.ch-ppl { list-style: none; margin: 0; padding: 0; columns: 2 14rem; column-gap: 2rem; }
+.ch-ppl li { display: flex; gap: .75rem; align-items: baseline; padding: .35rem 0;
+    border-top: 1px solid var(--bs-border-color); break-inside: avoid; }
+.ch-ppl a { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ch-lists { list-style: none; margin: 0; padding: 0; }
+.ch-lists li { display: flex; gap: .75rem; align-items: center; padding: .5rem 0; border-top: 1px solid var(--bs-border-color); }
+.ch-lists li > div { min-width: 0; }
+.ch-thumb { flex: none; width: 2rem; aspect-ratio: 2 / 3; border-radius: 4px; overflow: clip; background: var(--bs-tertiary-bg); }
+.ch-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Timeline: one row per year, the year sticky beside its covers. */
+.ch-yr { display: grid; grid-template-columns: 4rem minmax(0, 1fr); gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--bs-border-color); }
+.ch-yr h3 { font-size: 1.25rem; font-weight: 500; font-variant-numeric: tabular-nums; position: sticky; top: 4.5rem; align-self: start; margin: 0; }
+.ch-yr h3 small { display: block; font-size: .75rem; font-weight: 400; color: var(--bs-secondary-color); }
+.ch-col > .clu-toolbar { margin-bottom: -.5rem; }
+
+/* Information */
+.ch-aside { display: flex; flex-direction: column; gap: 1rem; font-size: .9rem; min-width: 0; }
+.ch-dl { margin: 0; display: flex; flex-direction: column; }
+.ch-dl > div { padding: .45rem 0; border-top: 1px solid var(--bs-border-color); }
+.ch-dl dt { font-size: .75rem; font-weight: 400; color: var(--bs-secondary-color); }
+.ch-dl dd { margin: 0; overflow-wrap: anywhere; }
+.ch-dl ul { list-style: none; margin: 0; padding: 0; }
+.ch-dl li { display: flex; gap: .5rem; align-items: baseline; }
+.ch-dl li > :first-child { margin-right: auto; }
+.ch-al summary { color: var(--bs-link-color); font-size: .875rem; width: fit-content; margin-top: .15rem; }
+.ch-links { display: flex; gap: .25rem 1rem; flex-wrap: wrap; }
+.ch-inline { padding: 0; border: 0; vertical-align: baseline; font-size: inherit; text-align: left; }
+.ch-note { font-size: .75rem; color: var(--bs-secondary-color); margin: 0; }
+.ch-loading { font-style: italic; animation: ch-pulse 1.6s ease-in-out infinite; }
+@keyframes ch-pulse { 50% { opacity: .55; } }
+
+@media (max-width: 767.98px) {
+    .ch-body { grid-template-columns: minmax(0, 1fr); }
+    /* Information follows the Overview; Titles and Timeline are lists only. */
+    .ch[data-tab="titles"] .ch-aside, .ch[data-tab="timeline"] .ch-aside { display: none; }
+}
+@media (max-width: 575.98px) {
+    .ch { gap: 1.25rem; }
+    .ch-hd { grid-template-columns: 5.25rem minmax(0, 1fr); gap: 0 .75rem; }
+    .ch-pt { grid-row: auto; }
+    .ch-bio, .ch-more { grid-column: 1 / -1; }
+    .ch-bio { -webkit-line-clamp: 4; line-clamp: 4; }
+    .ch-yr { grid-template-columns: minmax(0, 1fr); gap: .5rem; }
+    .ch-yr h3 { position: static; display: flex; gap: .5rem; align-items: baseline; }
+    .ch-yr h3 small { display: inline; }
+    .ch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem 1rem; }
+    .ch-shelf { grid-auto-columns: 42%; }
+    .ch-tabs .nav-link, .ch-more, .ch-inline { min-height: 2.75rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ch-cover { transition: none; }
+    .ch-card:hover .ch-cover, .ch-card:focus-visible .ch-cover { translate: none; }
+    .ch-loading { animation: none; }
+}

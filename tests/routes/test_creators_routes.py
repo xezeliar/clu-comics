@@ -93,9 +93,14 @@ class TestCreatorPage:
 class TestCharacterPage:
     def test_page(self, client, library):
         body = client.get("/characters/Batman").get_data(as_text=True)
-        assert "2 series · 3 issues owned · 1 read" in body
-        assert 'Joker<span class="clu-filter-count">1</span>' in body and 'Catwoman<span class="clu-filter-count">1</span>' in body
-        assert "first seen 2018" in body
+        assert "Batman" in body and "DC" in body
+        assert '<span class="clu-stat-value">3</span> issues' in body
+        assert '<span class="clu-stat-value">2</span> series' in body
+        assert '<span class="clu-stat-value">1</span> read' in body
+        assert "2018–2020" in body
+        # Creators: most credited, any role, with their main role and a role filter link.
+        assert "/creators/Tom%20King?role=writer" in body and "Writer · 3 issues" in body
+        assert "Read next" in body
 
     def test_unknown_is_404(self, client, library):
         assert client.get("/characters/Nobody").status_code == 404
@@ -106,6 +111,79 @@ class TestCharacterPage:
 
     def test_creator_names_are_not_characters(self, client, library):
         assert client.get("/characters/Tom%20King").status_code == 404
+
+    def test_titles_tab_sorts(self, client, library):
+        body = client.get("/characters/Batman?tab=titles&tsort=az").get_data(as_text=True)
+        grid = body[body.index('class="ch-grid"'):]
+        assert grid.index(">Batman<") < grid.index(">Detective<")
+        grid = client.get("/characters/Batman?tab=titles").get_data(as_text=True)
+        grid = grid[grid.index('class="ch-grid"'):]
+        assert grid.index(">Batman<") < grid.index(">Detective<")  # 2 issues before 1
+        grid = client.get("/characters/Batman?tab=titles&tsort=year").get_data(as_text=True)
+        grid = grid[grid.index('class="ch-grid"'):]
+        assert grid.index(">Detective<") < grid.index(">Batman<")  # 2018 before 2020
+
+    def test_timeline_groups_by_year_and_filters(self, client, library):
+        body = client.get("/characters/Batman?tab=timeline").get_data(as_text=True)
+        assert body.index("<h3>2018") < body.index("<h3>2020")
+        assert "3 issues</span>" in body
+        unread = client.get("/characters/Batman?tab=timeline&status=unread").get_data(as_text=True)
+        assert 'aria-label="Read Batman #1' not in unread and 'aria-label="Read Batman #2"' in unread
+        read = client.get("/characters/Batman?tab=timeline&status=read").get_data(as_text=True)
+        assert 'aria-label="Read Batman #1, read"' in read and "Detective #1" not in read.split('class="ch-body"')[1].split('<aside')[0]
+
+    def test_timeline_page_size_snaps_and_page_clamps(self, client, library):
+        body = client.get("/characters/Batman?tab=timeline&per_page=1&page=9").get_data(as_text=True)
+        assert '<option value="24" selected>' in body  # 1 snaps to the nearest size
+        assert 'data-page="1"' in body and 'data-pages="1"' in body
+
+    def test_bad_query_values_fall_back(self, client, library):
+        assert client.get("/characters/Batman?tab=x&sort=y&status=z&page=abc&per_page=-4").status_code == 200
+
+    def test_read_next_is_earliest_unread(self, client, library):
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        # D1 (2018) is unread and earliest; B1 is read.
+        assert 'title="Detective #1"' in body
+
+    def test_all_read_offers_read_again(self, client, library):
+        for p in ("/data/DC/Batman/B2.cbz", "/data/DC/Detective/D1.cbz"):
+            library.execute("INSERT INTO issues_read (issue_path, user_id) VALUES (?, 1)", (p,))
+        library.commit()
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "Read again from the start" in body and "btn-primary\" id=\"readNextBtn" not in body
+
+    def test_information_from_stored_profile(self, client, library):
+        import json
+        library.execute(
+            "INSERT INTO entity_profiles (kind, key, name, metron_id, cv_id, metron_json, cv_json,"
+            " metron_fetched_at, status) VALUES ('character', 'batman', 'Batman', 1, 2, ?, ?, '2026-11-01 00:00:00', 'ok')",
+            (json.dumps({"desc": "The Dark Knight.", "gcd_id": 7, "url": "https://metron.cloud/character/batman/",
+                         "alias": ["Bruce"], "universes": ["DC Universe"], "creators": ["Bob Kane"]}),
+             json.dumps({"summary": "x", "real_name": "Bruce Wayne", "origin": "Human",
+                         "url": "https://comicvine.gamespot.com/batman/4005-1699/",
+                         "friends": [{"id": 1, "name": "Catwoman"}], "enemies": [{"id": 2, "name": "Bane"}],
+                         "first_issue": {"id": 99, "name": "Chemical Syndicate", "number": "27"},
+                         "powers": [], "teams": ["Justice League"]})))
+        library.commit()
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "The Dark Knight." in body and "DC Universe" in body and "Bruce Wayne" in body
+        assert '<a href="/characters/Catwoman">Catwoman</a>' in body  # in the library: a link
+        assert "<span>Bane</span>" in body  # not in the library: plain text
+        assert "Not in your library" in body
+        assert "https://www.comics.org/character/7/" in body and "metron.cloud" in body
+        assert "Details from Metron and ComicVine, stored 2026-11-01." in body
+
+    def test_no_profile_says_so(self, client, library):
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "No Metron record yet." in body
+
+    def test_reading_lists_featuring(self, client, library):
+        library.execute("INSERT INTO reading_lists (id, name, source) VALUES (5, 'Year One', 'manual')")
+        for p in ("/data/DC/Batman/B1.cbz", "/data/X/X1.cbz"):
+            library.execute("INSERT INTO reading_list_entries (reading_list_id, matched_file_path) VALUES (5, ?)", (p,))
+        library.commit()
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "/reading-lists/5" in body and "1 of 2 entries feature Batman" in body
 
 
 class TestFollowApi:
