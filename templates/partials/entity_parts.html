@@ -7,7 +7,7 @@
           aria-label="Read {{ issue_label(i) }}{% if i.read %}, read{% endif %}">
     <span class="ch-cover">
       <img src="{{ i.thumbnail_url }}" alt="" loading="lazy"
-           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/error.svg') }}'">
       {% if i.read %}<span class="clu-prog clu-prog-tick" aria-hidden="true"><i class="bi bi-check2"></i></span>{% endif %}
     </span>
     <span class="ch-ct" title="{{ issue_label(i) }}{% if i.title %} · {{ i.title }}{% endif %}">{{ issue_label(i) }}</span>
@@ -21,7 +21,7 @@
   <a class="ch-card" href="{{ s.href }}">
     <span class="ch-cover">
       <img src="{{ s.thumbnail_url }}" alt="" loading="lazy"
-           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/error.svg') }}'">
       {% if s.issues and s.read == s.issues %}<span class="clu-prog clu-prog-tick" title="All read" aria-hidden="true"><i class="bi bi-check2"></i></span>{% endif %}
     </span>
     <span class="ch-ct" title="{{ s.name }}">{{ s.name }}</span>{% if s.issues and s.read == s.issues %}<span class="visually-hidden">, all read</span>{% endif %}
