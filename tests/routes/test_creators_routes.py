@@ -154,16 +154,16 @@ class TestCharacterPage:
 
     def test_series_card_opens_the_folder_credited_to_this_entity(self, client, library):
         titles = client.get("/characters/Joker?tab=titles").get_data(as_text=True)
-        assert 'href="/collection?path=/data/DC/Batman&amp;credited=character:Joker"' in titles
+        assert 'href="/collection?path=/data/DC/Batman&amp;character=Joker"' in titles
         # The Overview shelves open the same way.
         overview = client.get("/characters/Joker").get_data(as_text=True)
-        assert "/collection?path=/data/DC/Batman&amp;credited=character:Joker" in overview
+        assert "/collection?path=/data/DC/Batman&amp;character=Joker" in overview
         team = client.get("/creators/Tom%20King").get_data(as_text=True)
-        assert "credited=creator:Tom+King" in team and "?series=" not in team
+        assert "creator=Tom+King" in team and "?series=" not in team
 
     def test_creator_series_card_keeps_role(self, client, library):
         body = client.get("/creators/Tom%20King?tab=comics&role=writer").get_data(as_text=True)
-        assert "/collection?path=/data/DC/Batman&amp;credited=creator:Tom+King&amp;role=writer" in body
+        assert "/collection?path=/data/DC/Batman&amp;writer=Tom+King" in body
         # A role narrows titles to copies of the series: they keep their cover.
         grid = body[body.index('class="ch-grid"'):]
         assert '<img src="/api/thumbnail?path=/data/DC/Batman/B1.cbz"' in grid

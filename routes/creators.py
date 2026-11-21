@@ -45,10 +45,13 @@ ART_KINDS = {"creators": "creator", "characters": "character", "teams": "team"}
 
 def _credited_args(kind, name, role=None):
     """The Collection query that sets the Credited filter to one entity."""
-    args = {"credited": f"{kind}:{name}"} if kind else {}
-    if kind and role and role != "all":
-        args["role"] = role
-    return args
+    if not kind:
+        return {}
+    # One param per Credited filter (clu-credited.js): a creator page's Role
+    # becomes that role's filter; with no Role, "creator" means any role.
+    if kind == "creator" and role in creators.CREDIT_KINDS:
+        return {role: name}
+    return {kind: name}
 
 
 def _index(people, kind, q, **extra):
