@@ -5526,6 +5526,42 @@ async function loadFeaturedHero() {
             if (i !== current) show(i);
         });
     }, { passive: true });
+    // A mouse cannot swipe: drag the track instead. Snap is off while dragging (it
+    // fights scrollLeft), then a 40px pull moves one slide and less springs back.
+    let drag = null;
+    track.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        drag = { x: e.clientX, left: track.scrollLeft, moved: false };
+    });
+    track.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.x;
+        if (!drag.moved && Math.abs(dx) < 5) return;
+        if (!drag.moved) {
+            drag.moved = true;
+            track.setPointerCapture(e.pointerId);
+            track.classList.add('dragging');
+        }
+        track.scrollLeft = drag.left - dx;
+    });
+    const endDrag = (e) => {
+        if (!drag) return;
+        const { moved, x } = drag;
+        drag = null;
+        if (!moved) return;
+        track.classList.remove('dragging');
+        const dx = e.clientX - x;
+        goTo(Math.abs(dx) > 40 ? current + (dx < 0 ? 1 : -1) : current);
+        // The release lands on a slide's link or button: that is not a click.
+        swallowClickUntil = performance.now() + 100;
+    };
+    let swallowClickUntil = 0;
+    track.addEventListener('click', (c) => {
+        if (performance.now() < swallowClickUntil) { c.preventDefault(); c.stopPropagation(); }
+    }, { capture: true });
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+    track.addEventListener('dragstart', (e) => e.preventDefault());
     track.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowRight') { e.preventDefault(); goTo(current + 1); }
         else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }

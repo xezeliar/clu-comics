@@ -111,3 +111,14 @@ def test_hero_css_blurs_the_cover_behind_a_sharp_one():
     css = read("static", "css", "collection.css")
     assert ".featured-hero-bg" in css and "filter: blur(" in css
     assert ".featured-hero-cover" in css
+
+
+def test_a_mouse_can_drag_the_carousel():
+    # Desktop has no swipe: a mouse drag moves the track, and the release over a
+    # slide's link or button must not count as a click on it.
+    body = _hero_js()
+    assert "e.pointerType !== 'mouse'" in body
+    assert "track.scrollLeft = drag.left - dx" in body
+    assert "swallowClickUntil" in body and "capture: true" in body
+    css = read("static", "css", "collection.css")
+    assert re.search(r"\.featured-hero-track\.dragging \{[^}]*scroll-snap-type: none", css)

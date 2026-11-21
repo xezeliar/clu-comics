@@ -1297,6 +1297,7 @@ body.collection-select-mode .grid-item.file {
 .featured-hero-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
     overscroll-behavior-x: contain; scrollbar-width: none; }
 .featured-hero-track::-webkit-scrollbar { display: none; }
+.featured-hero-track.dragging { scroll-snap-type: none; cursor: grabbing; user-select: none; }
 .featured-hero-track:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
 .featured-hero-track > .featured-hero-card { flex: 0 0 100%; min-width: 0;
     scroll-snap-align: start; scroll-snap-stop: always; border-radius: 0; box-shadow: none;
