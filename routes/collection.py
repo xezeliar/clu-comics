@@ -642,6 +642,10 @@ def api_browse():
             # indexed lookup, not one per file.
             "pinned_cover": get_folder_pin(path),
         }
+        # The toolbar's Series page button, when this folder is mapped to a series.
+        own_slug = get_series_slugs_for_folders([path]).get(path)
+        if own_slug:
+            result['series_url'] = url_for('series.series_view', slug=own_slug)
 
         # Header banner and page overlay: cached first, legacy header.* /
         # overlay.png in the folder otherwise (core.folder_art).

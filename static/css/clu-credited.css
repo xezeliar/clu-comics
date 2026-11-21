@@ -1,0 +1,61 @@
+/* The Credited picker (static/js/clu-credited.js): a filter button with a
+   searchable menu; a bottom sheet on phones. Page-scoped to the Collection
+   folder view and the series page. */
+.clu-cred { position: relative; display: inline-flex; min-width: 0; max-width: 100%; }
+/* Pill like the toolbar's own buttons (clu-page.css), which only reach direct children. */
+.clu-cred .btn { --bs-btn-border-radius: var(--bs-border-radius-pill); }
+.clu-cred .clu-cred-btn { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; max-width: 100%; }
+.clu-cred .clu-cred-btn .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.clu-cred .clu-cred-btn .v b { font-weight: 600; color: var(--bs-emphasis-color); }
+.clu-cred .bi-chevron-down { font-size: .75em; }
+.clu-cred.on .clu-cred-btn,
+.clu-cred.on .clu-cred-x {
+    border-color: var(--clu-select);
+    background: color-mix(in srgb, var(--clu-select) 12%, var(--bs-body-bg));
+    color: var(--bs-emphasis-color);
+}
+.clu-cred.on .clu-cred-btn { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.clu-cred.on .clu-cred-x { border-left: 0; padding-inline: .45rem .6rem; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+
+.clu-cred-pop {
+    position: absolute; z-index: 1060; top: calc(100% + 6px); left: 0;
+    width: min(22rem, calc(100vw - 2rem));
+    background: var(--bs-body-bg); color: var(--bs-body-color);
+    border: 1px solid var(--bs-border-color); border-radius: var(--bs-border-radius-lg);
+    box-shadow: var(--bs-box-shadow-lg);
+    display: flex; flex-direction: column; overflow: hidden;
+}
+.clu-cred-q { margin: .6rem .6rem .25rem; width: auto; }
+.clu-cred-list { max-height: 19rem; overflow: auto; padding: .25rem .35rem .45rem; overscroll-behavior: contain; }
+.clu-cred-list h3 { font-size: .75rem; font-weight: 600; color: var(--bs-secondary-color); margin: .6rem .5rem .2rem; }
+.clu-cred-opt {
+    font: inherit; color: inherit; background: none; border: 0; width: 100%; text-align: left;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 .75rem; align-items: center;
+    padding: .4rem .5rem; border-radius: var(--bs-border-radius);
+}
+.clu-cred-opt:hover, .clu-cred-opt:focus-visible { background: var(--bs-tertiary-bg); }
+.clu-cred-opt[aria-pressed="true"] { background: color-mix(in srgb, var(--clu-select) 12%, var(--bs-body-bg)); }
+.clu-cred-opt[aria-pressed="true"] .n::before {
+    content: ""; display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+    background: var(--clu-select); margin-right: .4rem; vertical-align: .05em;
+}
+.clu-cred-opt .n { color: var(--bs-emphasis-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clu-cred-opt small { grid-column: 1; font-size: .8125rem; color: var(--bs-secondary-color); }
+.clu-cred-opt .c { grid-row: 1 / 3; grid-column: 2; font-size: .8125rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+.clu-cred-none { padding: .75rem .5rem; margin: 0; font-size: .875rem; color: var(--bs-secondary-color); }
+.clu-cred-sh, .clu-cred-scrim { display: none; }
+
+@media (max-width: 575.98px) {
+    .clu-cred-pop {
+        position: fixed; inset: auto 0 0; width: auto; max-height: 75vh;
+        border-radius: 1rem 1rem 0 0;
+    }
+    .clu-cred-scrim { display: block; position: fixed; inset: 0; z-index: 1059; background: rgba(0, 0, 0, .45); }
+    .clu-cred-sh {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: .5rem .5rem .25rem 1rem; font-weight: 600; color: var(--bs-emphasis-color);
+    }
+    .clu-cred-sh .btn { min-width: 2.75rem; min-height: 2.75rem; }
+    .clu-cred-list { max-height: none; flex: 1; }
+    .clu-cred-opt { min-height: 2.75rem; }
+}

@@ -59,6 +59,29 @@ class TestBrowse:
         assert by_name["Batman"]["series_url"] == "/series/batman-v1-7"
         assert "series_url" not in by_name["Other"]
 
+    @patch("routes.collection.get_directory_children")
+    def test_mapped_folder_names_its_own_series_page(self, mock_children, client, db_connection, tmp_path):
+        # The folder toolbar's Series page button; absent for an unmapped folder.
+        root = str(tmp_path / "data")
+        mapped = os.path.join(root, "Batman")
+        os.makedirs(mapped, exist_ok=True)
+        _series(db_connection, 7, "Batman", 1, mapped)
+        mock_children.return_value = ([], [])
+        with patch.dict("sys.modules", {"app": MagicMock(DATA_DIR=root)}):
+            got = client.get(f"/api/browse?path={mapped}").get_json()
+            plain = client.get(f"/api/browse?path={root}").get_json()
+        assert got["series_url"] == "/series/batman-v1-7"
+        assert "series_url" not in plain
+
+    def test_issue_menus_drop_go_to_series_page(self):
+        # The folder toolbar's Series page button replaces the per-issue entries.
+        here = os.path.dirname(__file__)
+        with open(os.path.join(here, "..", "..", "templates", "collection.html"), encoding="utf-8") as fh:
+            html = fh.read()
+        assert "Go to series page" not in html and 'id="seriesPageBtn"' in html
+        with open(os.path.join(here, "..", "..", "static", "js", "collection.js"), encoding="utf-8") as fh:
+            assert "openIssueSeriesPage" not in fh.read()
+
     def test_browse_never_looks_for_sidecars(self):
         # Sidecars are not indexed; a listing must not stat every folder.
         # The folder menu asks /api/series/for-folder?check=1 when it opens.
