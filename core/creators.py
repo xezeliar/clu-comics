@@ -195,6 +195,60 @@ def person_issues(kinds, name, folder, prefixes=None, user_id=None):
     return issues
 
 
+CREDITED_KINDS = {"characters": "character", "teams": "team"}
+
+
+def folder_credited(folder, prefixes=None):
+    """Everyone tagged in one series folder, for the Credited picker.
+
+    ``{"total": owned files, "people": [...]}``; each person is ``{"key":
+    "creator:Name", "kind", "name", "paths", "roles"}``, where a creator's
+    ``roles`` holds each credit kind with its own paths (characters and teams
+    have none). Creators come first, then characters, then teams, each by
+    issue count. Same per-user folder scope as ``series_credits``; None when
+    unreadable.
+    """
+    folder = (folder or "").rstrip("/\\")
+    if not folder:
+        return None
+    kinds = (*CREDIT_KINDS, *CREDITED_KINDS)
+    scope_sql, scope_params = _scope(prefixes)
+    where = " WHERE fi.parent = ? AND " + _COMIC_FILE_CLAUSE_FI + scope_sql
+    try:
+        with db_conn() as conn:
+            if not conn:
+                return None
+            total = conn.execute(
+                "SELECT COUNT(*) FROM file_index fi" + where,
+                [folder, *scope_params]).fetchone()[0]
+            rows = conn.execute(
+                "SELECT DISTINCT t.kind AS kind, t.value AS name, fi.path AS path"
+                " FROM file_metadata_tags t JOIN file_index fi ON fi.path = t.file_path"
+                + where + f" AND t.kind IN ({_in(kinds)})",
+                [folder, *scope_params, *kinds]).fetchall()
+    except Exception as e:
+        app_logger.error(f"Failed to read who is credited in {folder}: {e}")
+        return None
+
+    people = {}
+    for r in rows:
+        kind = CREDITED_KINDS.get(r["kind"], "creator")
+        p = people.setdefault((kind, r["name"].casefold()), {
+            "kind": kind, "name": r["name"], "paths": set(), "roles": {}})
+        p["paths"].add(r["path"])
+        if kind == "creator":
+            p["roles"].setdefault(r["kind"], set()).add(r["path"])
+    order = {"creator": 0, "character": 1, "team": 2}
+    out = []
+    for p in people.values():
+        roles = [{"kind": k, "label": ROLE_LABELS[k], "paths": sorted(p["roles"][k])}
+                 for k in CREDIT_KINDS if k in p["roles"]]
+        out.append({"key": f"{p['kind']}:{p['name']}", "kind": p["kind"], "name": p["name"],
+                    "paths": sorted(p["paths"]), "roles": roles})
+    out.sort(key=lambda p: (order[p["kind"]], -len(p["paths"]), p["name"].casefold()))
+    return {"total": total, "people": out}
+
+
 HEADER_ROLES = ("writer", "penciller", "coverartist")
 
 

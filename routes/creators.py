@@ -17,9 +17,14 @@ creators_bp = Blueprint("creators", __name__)
 def _render_page(data, template, view, **extra):
     if data is None:
         abort(404)
-    for s in data["series"]:
+    # A series card opens its folder narrowed to the issues this entity is on
+    # (the Credited filter); a creator page passes its Role filter along.
+    credited = _credited_args(ART_KINDS.get(extra.get("kind")), data["name"],
+                              (extra.get("st") or {}).get("role"))
+    # titles holds copies of series when a role narrows them: fill both.
+    for s in data["series"] + data.get("titles", []):
         s["thumbnail_url"] = url_for("get_thumbnail", path=s["cover"])
-        s["href"] = url_for("collection.collection", path=s["parent"])
+        s["href"] = url_for("collection.collection", path=s["parent"], **credited)
     if extra.get("kind") in ART_KINDS:
         kind = ART_KINDS[extra["kind"]]
         data["art"] = person_art.art_urls(kind, [data["name"]]).get(data["name"])
@@ -36,6 +41,14 @@ def _render_page(data, template, view, **extra):
 
 # Grid kind -> person_art kind.
 ART_KINDS = {"creators": "creator", "characters": "character", "teams": "team"}
+
+
+def _credited_args(kind, name, role=None):
+    """The Collection query that sets the Credited filter to one entity."""
+    args = {"credited": f"{kind}:{name}"} if kind else {}
+    if kind and role and role != "all":
+        args["role"] = role
+    return args
 
 
 def _index(people, kind, q, **extra):
@@ -63,6 +76,19 @@ def _issues(kinds, name, lookup=None):
     return jsonify({"success": True, "issues": issues,
                     "folder_href": url_for("collection.collection", path=folder),
                     "series_href": url_for("series.series_view", slug=slug) if slug else None})
+
+
+@creators_bp.route("/api/credited")
+def api_credited():
+    """Everyone tagged in one series folder, for the Credited picker on the
+    Collection folder view and the series page."""
+    folder = request.args.get("folder", "")
+    if not folder:
+        return jsonify({"success": False, "error": "Missing folder"}), 400
+    data = creators.folder_credited(folder, prefixes=accessible_folder_prefixes(current_user()))
+    if data is None:
+        return jsonify({"success": False, "error": "Could not read credits"}), 500
+    return jsonify({"success": True, **data})
 
 
 @creators_bp.route("/creators")

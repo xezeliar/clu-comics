@@ -152,6 +152,43 @@ class TestCharacterPage:
         read = client.get("/characters/Batman?tab=timeline&status=read").get_data(as_text=True)
         assert 'aria-label="Read Batman #1, read"' in read and "Detective #1" not in read.split('class="ch-body"')[1].split('<aside')[0]
 
+    def test_series_card_opens_the_folder_credited_to_this_entity(self, client, library):
+        titles = client.get("/characters/Joker?tab=titles").get_data(as_text=True)
+        assert 'href="/collection?path=/data/DC/Batman&amp;credited=character:Joker"' in titles
+        # The Overview shelves open the same way.
+        overview = client.get("/characters/Joker").get_data(as_text=True)
+        assert "/collection?path=/data/DC/Batman&amp;credited=character:Joker" in overview
+        team = client.get("/creators/Tom%20King").get_data(as_text=True)
+        assert "credited=creator:Tom+King" in team and "?series=" not in team
+
+    def test_creator_series_card_keeps_role(self, client, library):
+        body = client.get("/creators/Tom%20King?tab=comics&role=writer").get_data(as_text=True)
+        assert "/collection?path=/data/DC/Batman&amp;credited=creator:Tom+King&amp;role=writer" in body
+        # A role narrows titles to copies of the series: they keep their cover.
+        grid = body[body.index('class="ch-grid"'):]
+        assert '<img src="/api/thumbnail?path=/data/DC/Batman/B1.cbz"' in grid
+        assert '<img src=""' not in grid and "no-cover.svg" not in body
+
+
+class TestCreditedApi:
+    def test_lists_everyone_tagged_in_the_folder(self, client, library):
+        data = client.get("/api/credited?folder=/data/DC/Batman/").get_json()
+        assert data["success"] and data["total"] == 2
+        keys = [p["key"] for p in data["people"]]
+        # Creators, then characters, then teams; each by issue count.
+        assert keys == ["creator:Mitch Gerads", "creator:Tom King",
+                        "character:Batman", "character:Catwoman", "character:Joker"]
+        tom = data["people"][1]
+        assert tom["paths"] == ["/data/DC/Batman/B1.cbz", "/data/DC/Batman/B2.cbz"]
+        assert [(r["kind"], r["label"]) for r in tom["roles"]] == [("writer", "Writer")]
+        joker = data["people"][-1]
+        assert joker["paths"] == ["/data/DC/Batman/B1.cbz"] and joker["roles"] == []
+
+    def test_needs_a_folder(self, client, library):
+        assert client.get("/api/credited").status_code == 400
+        data = client.get("/api/credited?folder=/data/Nope").get_json()
+        assert data["total"] == 0 and data["people"] == []
+
     def test_timeline_page_size_snaps_and_page_clamps(self, client, library):
         body = client.get("/characters/Batman?tab=timeline&per_page=1&page=9").get_data(as_text=True)
         assert '<option value="24" selected>' in body  # 1 snaps to the nearest size

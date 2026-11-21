@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar %}
+{% from 'partials/filters.html' import toolbar, result_count %}
 {% from 'partials/publisher_dot.html' import publisher_dot with context %}
 
 {% block title %}{{ series.name }} - Series{% endblock %}
@@ -9,6 +9,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{{ asset('css/files.css') }}">
 <link rel="stylesheet" href="{{ asset('css/series-header.css') }}">
+<link rel="stylesheet" href="{{ asset('css/clu-credited.css') }}">
 {% endblock %}
 
 {% block content %}
@@ -52,6 +53,13 @@
                             title="Search the configured sources for this series' missing issues">
                             <i class="bi bi-search me-1" aria-hidden="true"></i>Search missing
                         </button>
+                        {% endif %}
+                        {% if mapped_path %}
+                        {# series.js carries the Credited filter onto this link. #}
+                        <a class="btn btn-sm btn-outline-secondary" id="seriesFolderBtn"
+                           href="{{ url_for('collection.collection', path=mapped_path) }}">
+                            <i class="bi bi-folder2-open me-1" aria-hidden="true"></i>Series folder
+                        </a>
                         {% endif %}
                         <button onclick="forceRefresh()" class="btn btn-sm btn-outline-secondary" title="Force refresh from Metron API">
                             <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
@@ -327,6 +335,18 @@
 
     <!-- Issues -->
     {% if issues %}
+    {% if mapped_path %}
+    {# The Credited filter (clu-credited.js), wired in series.js: narrows the
+       rows to owned issues a creator, character or team is tagged on. #}
+    {% call toolbar('Issues', id='issuesToolbar') %}
+        <div class="clu-toolbar-row">
+            <div id="creditedSlot" class="clu-cred" data-folder="{{ mapped_path }}" data-total="{{ issues|length }}"></div>
+            <div class="clu-toolbar-end">
+                {{ result_count('issuesCount', issues|length, 'issues', one='issue') }}
+            </div>
+        </div>
+    {% endcall %}
+    {% endif %}
     <div class="card shadow-sm border-0" id="issues">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -521,7 +541,8 @@
             {% endif %}
             {% endfor %}
             {% endif %}
-            <small>
+            {# Counts the whole run; series.js hides it while Credited narrows the rows. #}
+            <small id="issuesSummary">
                 <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>{{ found_count }} found</span>
                 {% if manual_count > 0 %}
                 <span class="mx-2">|</span>
@@ -1663,5 +1684,6 @@ document.getElementById('providerCreditsLoad')?.addEventListener('click', async 
 <script src="{{ asset('js/clu-cbz-info.js') }}"></script>
 <script src="{{ asset('js/clu-delete.js') }}"></script>
 <script src="{{ asset('js/files.js') }}"></script>
+<script src="{{ asset('js/clu-credited.js') }}"></script>
 <script src="{{ asset('js/series.js') }}"></script>
 {% endblock %}

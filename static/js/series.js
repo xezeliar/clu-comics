@@ -938,7 +938,7 @@ function handleIssueCheckboxClick(event, checkbox) {
 function toggleSelectAllIssues(selectAllCheckbox) {
     if (selectAllCheckbox.checked) {
         // Select all wanted (table-danger) rows
-        document.querySelectorAll('#issues tbody tr.table-danger').forEach(row => {
+        document.querySelectorAll('#issues tbody tr.table-danger:not([hidden])').forEach(row => {
             const cb = row.querySelector('.issue-checkbox');
             if (cb) {
                 cb.checked = true;
@@ -1182,3 +1182,50 @@ async function bulkClearManualStatus() {
         buttons.forEach(btn => btn.disabled = false);
     }
 }
+
+/*
+ * The Credited filter on the issue list (clu-credited.js). While it is set,
+ * only owned issues the chosen creator, character or team is tagged on show:
+ * nobody is credited on a file you don't have, so missing issues hide. The
+ * choice lives in the URL (replaceState) and rides onto Series folder.
+ */
+(function initCreditedFilter() {
+    const slot = document.getElementById('creditedSlot');
+    if (!slot || typeof CLU === 'undefined' || !CLU.credited) return;
+    const count = document.getElementById('issuesCount');
+    const folderBtn = document.getElementById('seriesFolderBtn');
+    const rows = Array.from(document.querySelectorAll('#issues tbody tr'));
+    const total = rows.length;
+
+    function apply(value, paths) {
+        let shown = 0;
+        rows.forEach(row => {
+            const owner = row.querySelector('[data-issue-path]');
+            const keep = !paths || (!!owner && paths.has(owner.dataset.issuePath));
+            row.hidden = !keep;
+            if (keep) shown++;
+        });
+        const summary = document.getElementById('issuesSummary');
+        if (summary) summary.hidden = !!paths;
+        CLU.setCount(count, paths ? { total, shown, noun: 'issues', one: 'issue' }
+            : { total, noun: 'issues', one: 'issue' });
+        for (const target of [window.location, folderBtn]) {
+            if (!target) continue;
+            const url = new URL(target.href, window.location.origin);
+            CLU.credited.write(url.searchParams, value);
+            if (target === folderBtn) folderBtn.href = url.pathname + url.search;
+            else {
+                try { history.replaceState(history.state, '', url.pathname + url.search + url.hash); } catch (e) { /* throttled */ }
+            }
+        }
+    }
+
+    const value = CLU.credited.parse(new URLSearchParams(window.location.search));
+    if (value && folderBtn) apply(value, null);  // the link carries it before the data arrives
+    CLU.credited.picker(slot, {
+        folder: slot.dataset.folder,
+        total,
+        value,
+        onChange: apply,
+    });
+})();

@@ -86,16 +86,84 @@ let currentIsLibraryRoot = true;
 let isLoading = false;
 let allItems = []; // Stores all files and folders for the current directory
 
-// An issue's folder is its series folder; the server resolves that to the page.
-function openIssueSeriesPage(filePath) {
-    const folder = filePath.substring(0, filePath.lastIndexOf('/'));
-    fetch('/api/series/for-folder?path=' + encodeURIComponent(folder))
-        .then(r => r.json())
-        .then(d => {
-            if (d.success && d.url) window.location.href = d.url;
-            else CLU.toast(d.error || 'No series page for this issue', 'warning');
-        })
-        .catch(() => CLU.toast('Could not open the series page', 'error'));
+// The Credited filter (clu-credited.js): only in a folder's own view, and only
+// for the folder it was set in. creditedPaths is null for Anyone.
+let creditedValue = null;
+let creditedFolder = null;
+let creditedPaths = null;
+let creditedFromUrl = CLU.credited.parse(new URLSearchParams(window.location.search));
+let folderSeriesUrl = null;
+
+function inSpecialView() {
+    return isAllBooksMode || isRecentlyAddedMode || isContinueReadingMode ||
+        isOnTheStackMode || isMissingXmlMode;
+}
+
+function creditedActive() {
+    return !!creditedValue && creditedFolder === currentPath && !inSpecialView();
+}
+
+/** The Series page button's link, carrying the Credited filter across. */
+function seriesPageHref() {
+    const url = new URL(folderSeriesUrl, window.location.origin);
+    CLU.credited.write(url.searchParams, creditedActive() ? creditedValue : null);
+    return url.pathname + url.search;
+}
+
+/**
+ * Draw the Credited picker and the Series page button for the folder just
+ * loaded. The filter survives a refresh of the same folder and is dropped on
+ * any other; the first load takes it from the URL (an entity page's card).
+ */
+function updateCreditedControls(path, data) {
+    const slot = document.getElementById('creditedSlot');
+    const seriesBtn = document.getElementById('seriesPageBtn');
+    if (creditedFromUrl) {
+        creditedValue = creditedFromUrl;
+        creditedFolder = path;
+        creditedFromUrl = null;
+    } else if (creditedFolder !== path) {
+        creditedValue = null;
+        creditedPaths = null;
+        creditedFolder = path;
+    }
+    folderSeriesUrl = data.series_url || null;
+    if (seriesBtn) {
+        seriesBtn.hidden = !folderSeriesUrl;
+        if (folderSeriesUrl) seriesBtn.href = seriesPageHref();
+    }
+    if (!slot) return;
+    const files = allItems.filter(item => item.type === 'file').length;
+    slot.hidden = !files;
+    if (!files) {
+        slot.innerHTML = '';
+        return;
+    }
+    // A fresh element drops the old picker's listeners and any late fetch.
+    const fresh = slot.cloneNode(false);
+    slot.replaceWith(fresh);
+    CLU.credited.picker(fresh, {
+        folder: path,
+        total: files,
+        value: creditedValue,
+        onChange: (value, paths) => {
+            creditedValue = value;
+            creditedPaths = paths;
+            currentPage = 1;
+            if (folderSeriesUrl) document.getElementById('seriesPageBtn').href = seriesPageHref();
+            renderPage();
+            loadVisiblePageData();
+            syncNavUrl();
+        },
+    });
+}
+
+/** Hide the folder-only controls in the views that are not a folder. */
+function hideCreditedControls() {
+    const slot = document.getElementById('creditedSlot');
+    const seriesBtn = document.getElementById('seriesPageBtn');
+    if (slot) slot.hidden = true;
+    if (seriesBtn) seriesBtn.hidden = true;
 }
 
 // Comic pinned as the current folder's cover, or null. Comes from /api/browse
@@ -246,6 +314,7 @@ function buildCollectionUrl(path) {
     if (currentFilter && currentFilter !== 'all') params.set('letter', currentFilter);
     if (gridSearchRaw.trim()) params.set('q', gridSearchRaw);
     if (currentPage > 1) params.set('page', String(currentPage));
+    if (creditedValue && path === creditedFolder && !view) CLU.credited.write(params, creditedValue);
     const qs = params.toString();
     return qs ? `${base}?${qs}` : base;
 }
@@ -421,6 +490,10 @@ function onGridSearch(value) {
  */
 function getFilteredItems() {
     let filtered = allItems;
+
+    if (creditedActive() && creditedPaths) {
+        filtered = filtered.filter(item => item.type === 'file' && creditedPaths.has(item.path));
+    }
 
     // Apply search filter first
     if (gridSearchTerm) {
@@ -609,6 +682,8 @@ async function loadDirectory(path, preservePage = false, forceRefresh = false) {
 
         // Update button visibility
         updateViewButtons(path);
+
+        updateCreditedControls(path, data);
 
         // A kept page (refresh, or a restored URL) may now be past the end.
         if (preservePage) clampCurrentPage();
@@ -1611,6 +1686,7 @@ function newIssuesLabel(n) {
 }
 
 function renderPage() {
+    if (inSpecialView()) hideCreditedControls();
     // While a search or letter narrows the grid, the dashboard shelves above
     // it (Recently Added, Discover...) step aside so the results, or the
     // no-matches state, are what you see first.
@@ -2256,7 +2332,6 @@ function renderGrid(items) {
                     '.action-mark-unread': () => markIssueAsUnread(item.path),
                     '.action-hide-history': () => hideFromHistory(item.path),
                     '.action-add-to-list': () => openAddToReadingListModal(item.path),
-                    '.action-go-to-series': () => openIssueSeriesPage(item.path),
                     '.action-delete': () => showDeleteConfirmation(item)
                 };
 
@@ -4541,7 +4616,6 @@ document.addEventListener('click', (e) => {
         'read-date': () => openSetReadDateModal(path, readIssuesSet.has(path)),
         'unread': () => markIssueAsUnread(path),
         'list': () => openAddToReadingListModal(path),
-        'series': () => openIssueSeriesPage(path),
     }[act.dataset.act];
     // The next modal (or the reader) opens once this one has gone.
     modal.addEventListener('hidden.bs.modal', run, { once: true });

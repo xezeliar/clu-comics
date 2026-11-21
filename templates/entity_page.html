@@ -48,10 +48,10 @@
     <div class="ch-pt">
       {%- if p.art %}
       <img src="{{ p.art }}" alt="{{ 'Portrait' if noun == 'character' else 'Image' }} of {{ p.name }}"
-           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/error.svg') }}'">
       {%- elif p.cover_fallback %}
       <img src="{{ p.cover_fallback }}" alt="Cover of {{ issue_label(p.issues[0]) }}"
-           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/no-cover.svg') }}'">
+           onerror="this.onerror=null;this.src='{{ url_for('static', filename='images/error.svg') }}'">
       <span class="ch-src">Cover</span>
       {%- else %}
       <span class="ch-ini" aria-hidden="true">{{ ((p.name | replace('The ', '', 1)).replace('-', ' ').split()[:2] | map('first') | join) | upper }}</span>

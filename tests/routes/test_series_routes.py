@@ -1054,6 +1054,12 @@ class TestSeriesPageHeader:
         assert html.count('<li class="miss"') == 2
         assert 'class="sh-ring"' in html and 'aria-hidden="true"' in html
 
+    def test_series_folder_button_and_credited_picker(self, app, client_with_data):
+        html = self._page(app, client_with_data)
+        assert 'id="seriesFolderBtn"' in html and "/collection?path=/data/DC+Comics/Batman" in html
+        assert 'id="creditedSlot"' in html and 'data-folder="/data/DC Comics/Batman"' in html
+        assert 'id="issuesCount"' in html and "js/clu-credited.js" in html
+
     def test_complete_run(self, app, client_with_data):
         html = self._page(app, client_with_data, found=(1, 2, 3))
         assert "<b>Complete</b> · 3 issues" in html
