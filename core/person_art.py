@@ -163,8 +163,10 @@ def resolve(kind, name, api, fetch_image, cv=None):
     row = _get_row(kind, key)
     metron_id = row["metron_id"] if row else None
     if metron_id is None and row and row["status"] == "unmatched":
+        app_logger.info(f"Person art: {kind} {name!r} not looked up: unmatched by hand")
         return "unmatched"
 
+    how = "stored id" if metron_id is not None else "exact name"
     if metron_id is None:
         results = getattr(api, _LIST_METHOD[kind])({"name": name})
         if results is None:
@@ -174,6 +176,8 @@ def resolve(kind, name, api, fetch_image, cv=None):
         if match is None:
             entity_profiles.record_missing(kind, name)
             _save(kind, name, None, "missing")
+            app_logger.info(f"Person art: {kind} {name!r}: Metron has no exact-name match"
+                            f" ({len(results)} results)")
             return "missing"
         metron_id = match.id
 
@@ -185,9 +189,16 @@ def resolve(kind, name, api, fetch_image, cv=None):
     if kind == "character":
         _save_teams(name, getattr(detail, "teams", None) or [])
 
-    url = getattr(detail, "image", None) or _cv_image(kind, name)
+    url = getattr(detail, "image", None)
+    source = "Metron"
+    if not url:
+        url, source = _cv_image(kind, name), "ComicVine"
+    cv_id = getattr(detail, "cv_id", None)
+    found = (f"Person art: {kind} {name!r}: Metron {metron_id} (by {how}),"
+             f" ComicVine {cv_id or 'none'}")
     if not url:
         _save(kind, name, metron_id, "missing")
+        app_logger.info(f"{found}, no photo")
         return "missing"
     data = fetch_image(str(url))
     if not data:
@@ -197,6 +208,7 @@ def resolve(kind, name, api, fetch_image, cv=None):
     except Exception as e:
         return _fail(kind, name, metron_id, f"could not store image: {e}")
     _save(kind, name, metron_id, "ok", image_file)
+    app_logger.info(f"{found}, photo from {source}")
     return "ok"
 
 
@@ -388,8 +400,7 @@ def _run_one(app, kind, name):
             return
         app_logger.info(f"Person art: fetching {kind} {name!r}")
         cv = _cv_client(app) if kind in entity_profiles.KINDS else None
-        status = resolve(kind, name, api, _default_fetch_image, cv)
-        app_logger.info(f"Person art: {kind} {name!r} -> {status}")
+        resolve(kind, name, api, _default_fetch_image, cv)
     except Exception as e:
         app_logger.warning(f"Person art: {kind} {name!r} failed: {e}")
     finally:

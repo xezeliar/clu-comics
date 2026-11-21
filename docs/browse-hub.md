@@ -228,6 +228,10 @@ Store Owner fixes a wrong one from More on the detail page
   Change match is the only way back.
 - Errors carry `reason`: `quota` (Metron paused, no Retry), `token` (link to
   Settings) or `failed` (Retry). The stored match is kept in every case.
+- **Logged in `app.log`** (INFO, one line per action): Change match, Unmatch
+  and Refresh name the user and the Metron id before the change; each lookup
+  names the Metron id and how it was found (stored id or exact name), the
+  ComicVine id, and whether the photo came from Metron or ComicVine.
 
 ## Out of scope
 

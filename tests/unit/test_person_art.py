@@ -392,3 +392,23 @@ class TestComicVineImageFallback:
             assert person_art._default_fetch_image("https://comicvine.gamespot.com/a/x.jpg") == b"img"
             assert person_art._default_fetch_image("https://static.metron.cloud/media/x.jpg") == b"img"
         assert [c.args[0] for c in shared.call_args_list] == ["comicvine-images", "metron-images"]
+
+
+class TestResolveLogs:
+    """One INFO line per lookup says which records and which photo were used."""
+
+    def test_ok_line_names_records_and_photo_source(self, cache, db_connection):
+        with patch("core.person_art.app_logger") as log:
+            person_art.resolve("character", "Batman", FakeMetron(**BATMAN_API), lambda u: _jpeg())
+        lines = [c.args[0] for c in log.info.call_args_list]
+        assert lines == ["Person art: character 'Batman': Metron 1 (by exact name),"
+                         " ComicVine none, photo from Metron"]
+
+    def test_missing_and_unmatched_are_logged(self, cache, db_connection):
+        with patch("core.person_art.app_logger") as log:
+            person_art.resolve("creator", "Tom King", FakeMetron(), lambda u: _jpeg())
+            person_art.unmatch("creator", "Tom King")
+            person_art.resolve("creator", "Tom King", FakeMetron(), lambda u: _jpeg())
+        lines = [c.args[0] for c in log.info.call_args_list]
+        assert lines == ["Person art: creator 'Tom King': Metron has no exact-name match (0 results)",
+                         "Person art: creator 'Tom King' not looked up: unmatched by hand"]

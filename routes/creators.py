@@ -5,6 +5,7 @@ from flask import (Blueprint, abort, current_app, jsonify, render_template, requ
                    send_file, url_for)
 
 from core import creators, entity_profiles, person_art
+from core.app_logging import app_logger
 from core.auth import accessible_folder_prefixes, current_user, role_at_least
 from core.database import get_series_slugs_for_folders
 from core.metadata_normalize import strip_provider_ids
@@ -274,12 +275,19 @@ def refresh_profile(grid, name):
     if reason:
         return jsonify({"success": False, "error": reason}), 503
     name = strip_provider_ids(name) or name
+    app_logger.info(f"Person art: {ART_KINDS[grid]} {name!r} refresh asked by {_who()}")
     started = person_art.ensure(current_app._get_current_object(), ART_KINDS[grid], name,
                                 force=True)
     return jsonify({"success": True, "started": started}), 202
 
 
 # --- Change match / Unmatch (Clerk and up) ---
+
+def _who():
+    """The acting user's name for the log; no accounts means the implicit owner."""
+    user = current_user()
+    return (user["username"] if user else None) or "owner"
+
 
 def _match_api():
     """``(api, None)``, or ``(None, error response)`` naming why Metron cannot be asked."""
@@ -352,7 +360,9 @@ def set_match(grid, name):
     if request.method == "DELETE":
         if not _can_refresh():
             return jsonify({"success": False, "error": "Clerk or Store Owner only"}), 403
+        old, _ = person_art.current_match(kind, name)
         person_art.unmatch(kind, name)
+        app_logger.info(f"Person art: {kind} {name!r} unmatched by {_who()} (was Metron {old or 'none'})")
         return jsonify({"success": True})
     api, err = _match_api()
     if err:
@@ -361,7 +371,10 @@ def set_match(grid, name):
         metron_id = int((request.get_json(silent=True) or {}).get("metron_id"))
     except (TypeError, ValueError):
         return jsonify({"success": False, "error": "metron_id must be a number"}), 400
+    old, _ = person_art.current_match(kind, name)
     person_art.set_match(kind, name, metron_id)
+    app_logger.info(f"Person art: {kind} {name!r} matched to Metron {metron_id} by {_who()}"
+                    f" (was Metron {old or 'none'})")
     started = person_art.ensure(current_app._get_current_object(), kind, name, force=True)
     return jsonify({"success": True, "started": started}), 202
 

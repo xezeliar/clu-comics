@@ -330,3 +330,30 @@ class TestMatchRoutes:
         assert client.post("/api/characters/Batman/match", json={"metron_id": 2}).status_code == 403
         assert client.delete("/api/characters/Batman/match").status_code == 403
         assert "matchModal" not in client.get("/characters/Batman").get_data(as_text=True)
+
+
+class TestMatchAuditLog:
+    """Change match, Unmatch and Refresh say who did it and what was there before."""
+
+    def test_match_and_unmatch_name_the_user_and_old_id(self, client, db_connection, library, monkeypatch, app):
+        from core.database import create_user
+        monkeypatch.delenv("CLU_USERNAME", raising=False)
+        monkeypatch.delenv("CLU_PASSWORD", raising=False)
+        create_user("owner", password="ownerpass", role="owner")
+        create_user("clerk1", password="clerkpass", role="clerk")
+        client.post("/login", data={"username": "clerk1", "password": "clerkpass"})
+        app.config["METRON_API_TOKEN"] = "t"
+        try:
+            with patch("models.metron.paused_reason", return_value=None), \
+                    patch("models.metron.get_flask_api", return_value=FakeMetron()), \
+                    patch("core.person_art.ensure", return_value=True), \
+                    patch("routes.creators.app_logger") as log:
+                assert client.post("/api/characters/Batman/match", json={"metron_id": 2}).status_code == 202
+                assert client.delete("/api/characters/Batman/match").status_code == 200
+                assert client.post("/api/characters/Batman/refresh").status_code == 202
+        finally:
+            app.config["METRON_API_TOKEN"] = ""
+        assert [c.args[0] for c in log.info.call_args_list] == [
+            "Person art: character 'Batman' matched to Metron 2 by clerk1 (was Metron 1)",
+            "Person art: character 'Batman' unmatched by clerk1 (was Metron 2)",
+            "Person art: character 'Batman' refresh asked by clerk1"]
