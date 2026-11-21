@@ -185,7 +185,7 @@ def resolve(kind, name, api, fetch_image, cv=None):
     if kind == "character":
         _save_teams(name, getattr(detail, "teams", None) or [])
 
-    url = getattr(detail, "image", None)
+    url = getattr(detail, "image", None) or _cv_image(kind, name)
     if not url:
         _save(kind, name, metron_id, "missing")
         return "missing"
@@ -297,6 +297,17 @@ def preview(kind, metron_id, api, fetch_image):
 # What to resolve next
 # --------------------------------------------------------------------------
 
+def _cv_image(kind, name):
+    """The stored ComicVine image URL, when Metron has none. Downloaded and
+    cached like Metron's: the browser never loads ComicVine either."""
+    if kind not in entity_profiles.KINDS:
+        return None
+    cv = (entity_profiles.get_profile(kind, name) or {}).get("cv") or {}
+    url = cv.get("image") or ""
+    # shortcut: ComicVine's "no image" placeholder is a file named *blank.png; match it by name.
+    return url if url and not url.rsplit("/", 1)[-1].endswith("blank.png") else None
+
+
 def _is_due(row, now):
     if row is None or not row["status"]:
         return True
@@ -313,14 +324,30 @@ def _is_due(row, now):
     return False
 
 
+_IMAGE_HOSTS = {"metron.cloud": ("metron-images", "Metron images", "https://static.metron.cloud"),
+                "gamespot.com": ("comicvine-images", "ComicVine images",
+                                 "https://comicvine.gamespot.com")}
+
+
 def _default_fetch_image(url):
-    """Image bytes via the shared, paced HTTP client; None on any failure."""
+    """Image bytes via the shared, paced HTTP client; None on any failure.
+
+    Only Metron and ComicVine image hosts: the URL comes from provider data.
+    """
+    from urllib.parse import urlparse
+
     from core.http_client import HttpClient, shared_http_client
     from core.version import CLU_USER_AGENT
 
-    client = shared_http_client("metron-images", lambda: HttpClient(
-        "metron-images", "Metron images", "https://static.metron.cloud", 30,
-        headers={"User-Agent": CLU_USER_AGENT}))
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    source = next((v for k, v in _IMAGE_HOSTS.items() if host == k or host.endswith("." + k)), None)
+    if parsed.scheme != "https" or source is None:
+        app_logger.warning(f"Person art: refused image from {host or url[:60]!r}")
+        return None
+    name, display, base = source
+    client = shared_http_client(name, lambda: HttpClient(
+        name, display, base, 30, headers={"User-Agent": CLU_USER_AGENT}))
     resp = client.get(url, context=f"image {url[-60:]}")
     if resp is None or not resp.content:
         return None

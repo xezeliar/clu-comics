@@ -345,3 +345,50 @@ class TestMatch:
         assert rec["name"] == "Batman" and rec["has_cv"] and rec["universes"] == ["Earth-0"]
         assert rec["image"].startswith("data:image/jpeg;base64,")
         assert person_art.preview("character", 9, api, lambda u: None) is None
+
+
+class TestComicVineImageFallback:
+    """No Metron image: the stored ComicVine image is downloaded and cached instead."""
+
+    def _api(self):
+        return FakeMetron(lists={("characters", "Nightjar"): [NS(id=7, name="Nightjar")]},
+                          details={("character", 7): NS(id=7, name="Nightjar", image=None,
+                                                        cv_id=70, teams=[])})
+
+    def _cv(self, url):
+        import json
+        from core import entity_profiles
+
+        entity_profiles._upsert("character", "Nightjar", cv_id=70,
+                                cv_json=json.dumps({"image": url}))
+
+    def test_uses_the_comicvine_image(self, cache, db_connection):
+        url = "https://comicvine.gamespot.com/a/uploads/original/1/2/nightjar.jpg"
+        self._cv(url)
+        fetched = []
+        status = person_art.resolve("character", "Nightjar", self._api(),
+                                    lambda u: fetched.append(u) or _jpeg())
+        assert status == "ok" and fetched == [url]
+        assert os.path.isfile(person_art.image_path("character", "nightjar"))
+
+    def test_comicvine_placeholder_is_missing(self, cache, db_connection):
+        self._cv("https://comicvine.gamespot.com/a/uploads/original/11122/111222211/6373148-blank.png")
+        fetched = []
+        assert person_art.resolve("character", "Nightjar", self._api(),
+                                  lambda u: fetched.append(u) or _jpeg()) == "missing"
+        assert fetched == []
+
+    @pytest.mark.parametrize("url", ["https://evil.example/x.jpg", "http://static.metron.cloud/x.jpg",
+                                     "https://metron.cloud.evil.example/x.jpg", "file:///etc/passwd"])
+    def test_default_fetch_refuses_other_hosts(self, url):
+        with patch("core.http_client.shared_http_client") as shared:
+            assert person_art._default_fetch_image(url) is None
+        shared.assert_not_called()
+
+    def test_default_fetch_uses_one_client_per_host(self):
+        resp = NS(content=b"img")
+        with patch("core.http_client.shared_http_client") as shared:
+            shared.return_value.get.return_value = resp
+            assert person_art._default_fetch_image("https://comicvine.gamespot.com/a/x.jpg") == b"img"
+            assert person_art._default_fetch_image("https://static.metron.cloud/media/x.jpg") == b"img"
+        assert [c.args[0] for c in shared.call_args_list] == ["comicvine-images", "metron-images"]

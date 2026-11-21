@@ -8,7 +8,7 @@ and creator pages (`templates/character.html`, `templates/team.html` and
 `templates/creator.html`, all extending `templates/entity_page.html`;
 `entity_details`, `character_info`, `team_info`, `team_members` and
 `creator_info` in `core/creators.py`). `person.html` is gone. Change match /
-Unmatch done (see "Matching"). Next: a ComicVine image fallback for portraits.
+Unmatch done (see "Matching"); portraits fall back to the ComicVine image.
 Design: the "Character page", "Team page", "Creator page" and "Change match"
 entries on the CLU Design Board.
 
@@ -28,6 +28,10 @@ lists), and cached Metron and ComicVine records.
   per-user folder grants.
 - Photos: `core/person_art.py` resolves a name on Metron (exact, casefolded
   name match) on a daemon thread when a detail page opens, and caches the image.
+  When Metron has none, the stored ComicVine image is downloaded and cached the
+  same way (never ComicVine's `*blank.png` placeholder). The browser never loads
+  either provider: images are fetched only from Metron and ComicVine hosts,
+  through one paced shared client per host.
 - Teams: where a team appears comes from ComicInfo `<Teams>` (`ci_teams`, tag
   kind `teams`); who is on it from `character_teams`, filled from Metron
   `Character.teams` during that resolve.
