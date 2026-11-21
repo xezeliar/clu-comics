@@ -205,7 +205,8 @@ def _detail(data, tags, prefixes, tabs, role=None, **details_args):
 def _detail_extra(st):
     return {"st": st, "title_sorts": TITLE_SORTS, "timeline_sorts": TIMELINE_SORTS,
             "can_refresh": _can_refresh(),
-            "has_token": bool((current_app.config.get("METRON_API_TOKEN") or "").strip())}
+            "has_token": bool((current_app.config.get("METRON_API_TOKEN") or "").strip()),
+            "has_cv_key": bool((current_app.config.get("COMICVINE_API_KEY") or "").strip())}
 
 
 @creators_bp.route("/characters/<path:name>")

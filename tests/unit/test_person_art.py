@@ -412,3 +412,9 @@ class TestResolveLogs:
         lines = [c.args[0] for c in log.info.call_args_list]
         assert lines == ["Person art: creator 'Tom King': Metron has no exact-name match (0 results)",
                          "Person art: creator 'Tom King' not looked up: unmatched by hand"]
+
+
+def test_cv_client_logs_why_comicvine_is_skipped():
+    with patch("core.person_art.app_logger") as log:
+        assert person_art._cv_client(NS(config={})) is None
+    assert log.info.call_args.args[0] == "Person art: ComicVine not asked: no ComicVine API key"

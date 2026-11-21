@@ -225,9 +225,10 @@
       {% if info.has_metron %}
         <p class="ch-note">
           {%- if info.has_cv %}Details from Metron and ComicVine, stored {{ stored }}.
+          {%- elif prof.cv_id and not has_cv_key %}From Metron, stored {{ stored }}. ComicVine details need a ComicVine API key{% if can_refresh %}: add one in <a href="{{ url_for('config_page') }}">Settings</a>, then Refresh{% endif %}.
           {%- elif prof.cv_id %}From Metron, stored {{ stored }}. ComicVine details are not stored yet.
           {%- else %}From Metron, stored {{ stored }}. Metron has no ComicVine id for this {{ noun }}, so ComicVine details are not shown.{% endif %}
-          {%- if can_refresh %} Refresh in More updates it.{% endif %}
+          {%- if can_refresh and (has_cv_key or not prof.cv_id) %} Refresh in More updates it.{% endif %}
           {%- if prof.error %}<br>{{ 'ComicVine' if prof.error.startswith('ComicVine') else 'Metron' }} could not be reached last time; these are the last stored details.{% endif -%}
         </p>
       {% elif p.looking %}

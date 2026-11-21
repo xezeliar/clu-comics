@@ -381,7 +381,9 @@ def _cv_client(app):
     from models import comicvine
 
     key = (getattr(app, "config", {}).get("COMICVINE_API_KEY") or "").strip()
-    if not key or comicvine.paused_reason():
+    why = "no ComicVine API key" if not key else comicvine.paused_reason()
+    if why:
+        app_logger.info(f"Person art: ComicVine not asked: {why}")
         return None
     return comicvine.get_cv_client(key)
 

@@ -357,3 +357,25 @@ class TestMatchAuditLog:
             "Person art: character 'Batman' matched to Metron 2 by clerk1 (was Metron 1)",
             "Person art: character 'Batman' unmatched by clerk1 (was Metron 2)",
             "Person art: character 'Batman' refresh asked by clerk1"]
+
+
+class TestComicVineKeyNote:
+    """Metron names a ComicVine id but there is no key: the note says so, not 'Refresh'."""
+
+    def _page(self, client, app, key):
+        from core import entity_profiles
+
+        entity_profiles.store("character", "Batman", NS(id=1, cv_id=1699, desc="x"))
+        app.config["COMICVINE_API_KEY"] = key
+        try:
+            return client.get("/characters/Batman").get_data(as_text=True)
+        finally:
+            app.config["COMICVINE_API_KEY"] = ""
+
+    def test_no_key_points_to_settings(self, client, library, app):
+        body = self._page(client, app, "")
+        assert "ComicVine details need a ComicVine API key" in body and "Refresh in More" not in body
+
+    def test_with_key_says_not_stored_yet(self, client, library, app):
+        body = self._page(client, app, "k")
+        assert "ComicVine details are not stored yet" in body and "Refresh in More updates it" in body
