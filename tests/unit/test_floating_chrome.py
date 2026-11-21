@@ -49,14 +49,13 @@ def test_active_item_never_relies_on_white_on_primary():
     assert "var(--bs-link-color)" in rules[0]
 
 
-def test_toolbar_matches_the_navbar_surface():
+def test_toolbar_is_a_command_row_not_a_raised_panel():
+    # The list-toolbar redesign: one hairline under the row, no surface.
     css = read("static", "css", "clu-page.css")
     block = css[css.index("\n.clu-toolbar {"):]
     block = block[:block.index("}")]
-    assert "var(--bs-tertiary-bg)" in block
-    assert "border: 1px solid var(--bs-border-color)" in block
-    assert "border-radius: 1rem" in block
-    assert "box-shadow" in block
+    assert "border-bottom: 1px solid var(--bs-border-color)" in block
+    assert "var(--bs-tertiary-bg)" not in block and "box-shadow" not in block
 
 
 def test_file_manager_panes_have_their_own_toolbar_and_body():
@@ -89,13 +88,13 @@ def test_view_toggles_are_segmented_controls_with_a_non_fill_selection():
         assert "clu-seg" in tag, template
 
 
-def test_filters_and_letters_are_pills_and_the_count_is_a_chip():
+def test_letters_are_a_text_strip_and_the_count_is_plain_text():
     css = read("static", "css", "clu-page.css")
-    assert ".clu-letter-bar.btn-group > .btn" in css
+    assert ".clu-letter.active {" in css and ".clu-letter-bar.btn-group" not in css
     assert ".clu-filter-options > .btn" in css
     count = css[css.index("\n.clu-toolbar-count {"):]
     count = count[:count.index("}")]
-    assert "border-radius: var(--bs-border-radius-pill)" in count
+    assert "border" not in count
 
 
 def test_toolbar_navigation_buttons_are_quiet_link_pills():

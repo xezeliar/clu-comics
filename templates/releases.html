@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state, no_matches %}
-{% from 'partials/filters.html' import toolbar, filter_bar, search_input, result_count %}
+{% from 'partials/filters.html' import toolbar, filter_bar, search_input, result_count, facet_column, facets_button %}
 
 {% block title %}Weekly Releases{% endblock %}
 
@@ -16,6 +16,9 @@
     {#- The week links are where you are (like a breadcrumb), so they stay in
         the header's top right; the toolbar only changes what this week shows. -#}
     {% call(slot) page_header('Weekly Releases', 'bi-calendar-week', subtitle=(date_range if date_range and date_range != 'N/A' else None)) %}
+        {% if slot == 'count' and releases %}
+            {{ result_count('releases-count', releases|length, 'releases', one='release') }}
+        {% endif %}
         {% if slot == 'actions' and view_mode != 'error' %}
             <div class="btn-group" role="group" aria-label="Week" data-clu-keep>
                 <a href="{{ url_for('series.releases', date=prev_date) }}" class="btn btn-sm btn-outline-secondary week-nav">
@@ -48,16 +51,31 @@
     {% endif %}
 
     {% if releases %}
-    {#- The view toggle, then the filters. Each filter group narrows the
-        releases independently and they combine (AND); every button's count
-        is what you would get by picking it. The options (with counts) are
-        drawn by the filter script below. -#}
-    {% call toolbar('Filter releases', id='release-filters') %}
+    {#- C: the filters are a column beside the releases (a sheet below lg).
+        Each group narrows the releases independently and they combine (AND);
+        every option's count is what you would get by picking it. The options
+        (with counts) are drawn by the filter script below. -#}
+    <div class="clu-facet-layout">
+    {% call facet_column('releaseFacets') %}
+        <div data-filter-group="subscribed">
+            {{ filter_bar('subscription-pills', [], label='Subscription', toggle_off=True, mode='facet') }}
+        </div>
+        <div data-filter-group="publisher" id="publisher-filter" hidden>
+            {{ filter_bar('publisher-pills', [], label='Publisher', toggle_off=True, mode='facet') }}
+            <p id="publisher-loading"
+                class="clu-toolbar-count mb-0 mt-1{% if not publisher_pending %} d-none{% endif %}">
+                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                Identifying publishers&hellip;
+            </p>
+        </div>
+    {% endcall %}
+    <div class="clu-facet-main">
+    {% call toolbar('Search releases', id='release-filters') %}
         <div class="clu-toolbar-row">
             {% set release_query = request.args.get('q', '') %}
             {{ search_input('releasesSearch', 'Search series', value=release_query) }}
+            {{ facets_button('releaseFacets') }}
             <div class="clu-toolbar-end">
-                {{ result_count('releases-count', releases|length, 'releases', one='release') }}
                 <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="View mode" id="view-toggle">
                     <button aria-label="Card view" type="button" class="btn btn-outline-secondary" data-view="cards" title="Card view"
                         aria-pressed="false">
@@ -70,21 +88,8 @@
                 </div>
             </div>
         </div>
-        <div class="clu-toolbar-row" data-filter-group="subscribed">
-            {{ filter_bar('subscription-pills', [], label='Subscription', toggle_off=True) }}
-        </div>
-        <div class="clu-toolbar-row" data-filter-group="publisher" id="publisher-filter" hidden>
-            {{ filter_bar('publisher-pills', [], label='Publisher', toggle_off=True) }}
-            <span id="publisher-loading"
-                class="clu-toolbar-count{% if not publisher_pending %} d-none{% endif %}">
-                <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-                Identifying publishers&hellip;
-            </span>
-        </div>
     {% endcall %}
-    {% endif %}
 
-    {% if releases %}
     {# releases.html's filter script shows it by clearing its inline display:none. #}
     {{ no_matches('releases', filtered=True, id='releases-no-match', clear_id='clear-filters', hidden=True) }}
 
@@ -179,6 +184,8 @@
             </div>
         </div>
     </div>
+    </div>{# .clu-facet-main #}
+    </div>{# .clu-facet-layout #}
     {% elif not error %}
     {{ empty_state('No releases this week', 'Nothing is listed for this week. Try the week before or after.', 'bi-calendar-x') }}
     {% endif %}
@@ -553,7 +560,7 @@
             FILTERS.forEach(function (f) {
                 const group = document.querySelector('[data-filter-group="' + f.key + '"]');
                 if (!group) return;
-                const pillsEl = group.querySelector('[role="group"]');
+                const pillsEl = group.querySelector('[data-clu-filter]');
                 const options = optionsByKey[f.key];
 
                 if (f.key === 'publisher') {
@@ -582,7 +589,7 @@
 
         // A second click on the selected button goes back to All.
         FILTERS.forEach(function (f) {
-            const group = document.querySelector('[data-filter-group="' + f.key + '"] [role="group"]');
+            const group = document.querySelector('[data-filter-group="' + f.key + '"] [data-clu-filter]');
             CLU.filterBar(group, {
                 toggleOff: true,
                 onChange: function (value) {

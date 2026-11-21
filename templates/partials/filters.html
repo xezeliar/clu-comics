@@ -1,24 +1,36 @@
 {#
   The list toolbar's controls: one look and one behaviour on every screen.
 
-    {% from 'partials/filters.html' import toolbar, filter_bar, letter_bar,
-           search_input, select_field, per_page_select, result_count, pager_nav %}
+    {% from 'partials/filters.html' import toolbar, toolbar_more, filter_bar,
+           letter_bar, search_input, select_field, per_page_select,
+           result_count, pager_nav, pager_row, facet_column, facets_button %}
 
   filter_bar(id, options, active='', label=None, icon=None, aria_label=None,
-             multi=False, toggle_off=False, classes=None)
-      A row of toggle buttons that narrows a list (status, source, tag...).
+             multi=False, toggle_off=False, classes=None, mode='bar')
+      A filter that narrows a list (status, source, tag...).
       options: a list of dicts {value, label, icon?, icon_class?, count?,
       disabled?} or (value, label) pairs. Put the "All" option in the list
-      yourself (value ''), so its wording stays the page's. active is the
-      selected value (or, with multi=True, a list of values; none means All).
-      toggle_off=True lets a second click on the selected button go back to
+      yourself (value ''), so its wording stays the page's; a multi menu or
+      facet leaves it out (its Clear does that job). active is the selected
+      value (or, with multi=True, a list of values; none means All).
+      toggle_off=True lets a second click on the selected option go back to
       ''. Wire it with CLU.filterBar(el, {onChange}) from clu-filters.js;
-      CLU.renderFilterOptions draws the same buttons from a script.
+      CLU.renderFilterOptions draws the same options from a script.
+      mode:
+        'menu'   the command row's filter: one pill button "Status" whose menu
+                 lists every option with its count (checkboxes for multi,
+                 radios for single; 0 counts dimmed, never removed). Set, the
+                 button reads "Status: Missing" / "Tags: 3" in the selected
+                 tint and the value repeats as a removable chip under the row.
+                 A bottom sheet on a phone.
+        'facet'  one group of facet_column(): a legend and checkbox/radio rows.
+        'bar'    the older row of toggle pills, for toolbars not yet moved.
 
   letter_bar(id, letters, active='', aria_label='Filter by first letter')
-      All, then '#', then A-Z, joined as one button group. A second click on
-      the selected letter goes back to All. CLU.letterBar draws the same bar
-      from a script, which is how most screens build theirs.
+      A text strip: All, '#', then A-Z. letters are the ones the list has; the
+      rest are greyed and skipped by Tab. A second click on the selected
+      letter goes back to All. CLU.letterBar draws the same strip from a
+      script, which is how most screens build theirs.
 
   search_input(id, label, value='', classes=None)
       type="search" with an accessible name, a theme-coloured icon box
@@ -28,39 +40,113 @@
       file names"); the placeholder is always the label plus an ellipsis.
 
   result_count(id, total, noun, one=None, shown=None, first=None, last=None)
-      The toolbar's count: "4,132 series", "Showing 12 of 245 publishers"
-      (shown: a filter over rows on the page), "Showing 1–60 of 4,132 series"
-      (first/last: a paged list). one is the singular when it differs
-      ("publisher"). CLU.countText / CLU.setCount say the same from a script.
+      The list's count, plain text: "4,132 series", "Showing 12 of 245
+      publishers" (shown: a filter over rows on the page), "Showing 1–60 of
+      4,132 series" (first/last: a paged list). one is the singular when it
+      differs ("publisher"). It goes in page_header's 'count' slot, next to
+      the title. CLU.countText / CLU.setCount say the same from a script.
 
   select_field(id, label, classes=None)            (a call block: the <option>s)
-      A labelled select for a toolbar row: "Publisher  All", "Sort  A-Z".
+      A labelled select for a toolbar row: "Sort  A-Z".
 
   per_page_select(id, current, sizes=None, default=None)
       select_field "Per page", offering clu_page_sizes() (helpers/paging.py)
       unless a page passes its own. The list's starting size (default, else
       clu_default_per_page()) goes on the select as data-default-per-page,
-      read by CLU.defaultPerPage.
+      read by CLU.defaultPerPage. It sits in pager_row(), under the list.
 
   toolbar(aria_label, id=None, classes=None)         (a call block: the rows)
-      The panel every list's controls sit in. Rows are .clu-toolbar-row:
-      search and selects first, then .clu-toolbar-end (result count, view
-      toggle, per page) pushed right; one row per filter_bar; the letter bar
-      last. Never a .card, never two panels.
+      The command row every list's controls sit in. No panel: a hairline
+      under it. Never a .card, never two toolbars.
 
-  pager_nav(id, aria_label, attrs=None, classes='mt-4')
+  toolbar_more(label='More options')                (a call block: <li>s)
+      The row's ⋯ menu: Refresh, Multi-select.
+
+  facet_column(id, label='Filters') / facets_button(id)
+      C, for the filter-heavy lists (Wanted, Pull List, Releases): every
+      group in a column beside the results, a bottom sheet below lg.
+
+  pager_nav(id, aria_label, attrs=None, classes='mt-4') / pager_row()
       The <nav> + .pagination that CLU.renderPageLinks / createServerPager
       fill. Hidden until there is more than one page.
 
-  Every row scrolls sideways on a phone (.clu-filter-scroll in clu-page.css).
+  On a phone the command row and every filter row scroll sideways on one
+  line, and the row's menus open as bottom sheets.
   Styles: static/css/clu-page.css ("Filters"). DESIGN.md "Filters, search and
   pagers" has the rules. tests/unit/test_shared_filters.py is the ratchet.
 #}
 
 
-{% macro filter_bar(id, options, active='', label=None, icon=None, aria_label=None, multi=False, toggle_off=False, classes=None) -%}
+{% macro _opt_button(opt, value, on, mode, multi) -%}
+{#- One option of a menu or facet group: a box (checkbox, or radio for single
+    choice), the label and the count. A 0 count stays listed, dimmed. -#}
+{%- set label = opt.get('label', '') if opt is mapping else opt[1] -%}
+{%- set count = opt.get('count') if opt is mapping else none -%}
+{%- set role = ('menuitemcheckbox' if multi else 'menuitemradio') if mode == 'menu' else ('checkbox' if multi else 'radio') -%}
+<button type="button" class="clu-opt{% if mode == 'menu' %} dropdown-item{% endif %}{% if on %} active{% endif %}{% if count == 0 %} is-zero{% endif %}"
+        role="{{ role }}" aria-checked="{{ 'true' if on else 'false' }}" data-value="{{ value }}" data-label="{{ label }}"
+        {%- if opt is mapping and opt.get('disabled') and not on %} aria-disabled="true"{% endif %}>
+  <span class="clu-opt-box{% if not multi %} is-radio{% endif %}" aria-hidden="true"></span>
+  <span class="clu-opt-label">
+    {%- if opt is mapping and opt.get('icon') %}<i class="bi {{ opt.icon }}{% if opt.get('icon_class') %} {{ opt.icon_class }}{% endif %} me-1" aria-hidden="true"></i>{% endif -%}
+    {{ label }}</span>
+  {%- if count is not none and count != '' %}<span class="clu-filter-count">{{ count }}</span>{% endif %}
+</button>
+{%- endmacro %}
+
+{% macro filter_bar(id, options, active='', label=None, icon=None, aria_label=None, multi=False, toggle_off=False, classes=None, mode='bar') -%}
 {%- set selected = (active if active is not string else [active]) if multi else [active] -%}
+{%- set selected = selected | map('string') | list -%}
 {%- set selected = selected if selected | reject('equalto', '') | list else [''] -%}
+{%- set name = label or aria_label or 'Filter' -%}
+{%- set attrs -%}
+data-clu-filter="{{ 'multi' if multi else 'single' }}" data-clu-mode="{{ mode }}"{% if toggle_off %} data-clu-toggle-off{% endif %}
+{%- endset -%}
+{%- if mode == 'menu' -%}
+{#- A: one pill button, "Status", that opens the options; set, it reads
+    "Status: Missing" (or "Tags: 3"). On a phone the menu is a bottom sheet. -#}
+{%- set ns = namespace(on=[]) -%}
+{%- for opt in options -%}
+  {%- set value = (opt.get('value', '') if opt is mapping else opt[0]) | string -%}
+  {%- if value != '' and value in selected %}{% set ns.on = ns.on + [opt.get('label', '') if opt is mapping else opt[1]] %}{% endif -%}
+{%- endfor -%}
+<div class="dropdown clu-fmenu{% if classes %} {{ classes }}{% endif %}">
+  <button type="button" class="btn btn-sm btn-outline-secondary clu-fmenu-btn{% if ns.on %} is-set{% endif %}" id="{{ id }}-btn"
+          data-bs-toggle="dropdown" data-bs-display="static" data-bs-auto-close="{{ 'outside' if multi else 'true' }}" aria-expanded="false">
+    <span class="clu-fmenu-k">{{ name }}</span><span class="clu-fmenu-v">{% if ns.on %}: <b>{{ ns.on[0] if ns.on | length == 1 else ns.on | length }}</b>{% endif %}</span>
+    <i class="bi bi-chevron-down" aria-hidden="true"></i>
+  </button>
+  <div class="dropdown-menu clu-fmenu-menu clu-sheet">
+    <div class="clu-sheet-head"><span>{{ name }}</span>
+      <button type="button" class="btn btn-sm clu-sheet-close" data-clu-close aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+    <div class="clu-fmenu-options" id="{{ id }}" role="menu" aria-labelledby="{{ id }}-btn" {{ attrs }}>
+      {%- for opt in options %}
+      {%- set value = (opt.get('value', '') if opt is mapping else opt[0]) | string %}
+      {%- if not (multi and value == '') %}
+      {{ _opt_button(opt, value, value in selected, mode, multi) }}
+      {%- endif %}
+      {%- endfor %}
+    </div>
+    {%- if multi %}
+    <div class="clu-sheet-foot"><button type="button" class="btn btn-primary" data-clu-close data-clu-show-n>Show results</button></div>
+    {%- endif %}
+  </div>
+</div>
+{%- elif mode == 'facet' -%}
+{#- C: one group of the facet column (facet_column), every option visible
+    with its count. Long lists show six and a "Show N more" (clu-filters.js). -#}
+<fieldset class="clu-facet{% if classes %} {{ classes }}{% endif %}">
+  <legend class="clu-facet-legend" id="{{ id }}-label">{{ name }}</legend>
+  <div class="clu-facet-options" id="{{ id }}" role="{{ 'group' if multi else 'radiogroup' }}" aria-labelledby="{{ id }}-label" {{ attrs }}>
+    {%- for opt in options %}
+    {%- set value = (opt.get('value', '') if opt is mapping else opt[0]) | string %}
+    {%- if not (multi and value == '') %}
+    {{ _opt_button(opt, value, value in selected, mode, multi) }}
+    {%- endif %}
+    {%- endfor %}
+  </div>
+</fieldset>
+{%- else -%}
 <div class="clu-filter{% if classes %} {{ classes }}{% endif %}">
   {%- if label %}
   <span class="clu-filter-label" id="{{ id }}-label">
@@ -68,7 +154,7 @@
   {%- endif %}
   <div class="clu-filter-options clu-filter-scroll" id="{{ id }}" role="group"
        {%- if label %} aria-labelledby="{{ id }}-label"{% else %} aria-label="{{ aria_label or 'Filter' }}"{% endif %}
-       data-clu-filter="{{ 'multi' if multi else 'single' }}"{% if toggle_off %} data-clu-toggle-off{% endif %}>
+       {{ attrs }}>
     {%- for opt in options %}
     {#- The raw value, not _opt(): a macro returns escaped Markup, and Writer's
         would then never match the active tag. #}
@@ -84,18 +170,27 @@
     {%- endfor %}
   </div>
 </div>
+{%- endif -%}
 {%- endmacro %}
 
 {% macro letter_bar(id, letters, active='', aria_label='Filter by first letter') -%}
+{#- A quiet text strip: All, '#' when the list has one, then all of A-Z.
+    Letters with nothing behind them stay in place, greyed and out of the Tab
+    order, so the strip never jumps. -#}
 {%- set active = active if active else '' -%}
-{%- set ordered = (['#'] if '#' in letters else []) + (letters | reject('equalto', '#') | sort | list) -%}
-<div class="btn-group btn-group-sm clu-letter-bar clu-filter-scroll" id="{{ id }}" role="group"
+{%- set ordered = (['#'] if '#' in letters or active == '#' else []) + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' | list -%}
+<div class="clu-letter-bar clu-filter-scroll" id="{{ id }}" role="group"
      aria-label="{{ aria_label }}" data-clu-filter="single" data-clu-toggle-off>
-  <button type="button" class="btn btn-outline-secondary{% if not active %} active{% endif %}" data-value=""
+  <button type="button" class="clu-letter clu-letter-all{% if not active %} active{% endif %}" data-value=""
           aria-pressed="{{ 'false' if active else 'true' }}">All</button>
   {%- for letter in ordered %}
-  <button type="button" class="btn btn-outline-secondary{% if active == letter %} active{% endif %}"
+  {%- if letter in letters or letter == active %}
+  <button type="button" class="clu-letter{% if active == letter %} active{% endif %}"
           data-value="{{ letter }}" aria-pressed="{{ 'true' if active == letter else 'false' }}">{{ letter }}</button>
+  {%- else %}
+  <button type="button" class="clu-letter" data-value="{{ letter }}" aria-pressed="false"
+          aria-disabled="true" tabindex="-1" aria-label="{{ letter }}, none">{{ letter }}</button>
+  {%- endif %}
   {%- endfor %}
 </div>
 {%- endmacro %}
@@ -152,15 +247,66 @@ Showing {{ fmt.format(shown) }} of {{ fmt.format(total) }} {{ name }}
 {%- endmacro %}
 
 {% macro toolbar(aria_label, id=None, classes=None) -%}
-{#- The one panel a list's controls sit in, between the page header and the
-    results. Fill it with rows:
-      <div class="clu-toolbar-row"> search, selects ... <div class="clu-toolbar-end">
-          count, view toggle, per page </div></div>
-      <div class="clu-toolbar-row"> filter_bar(...) </div>   one per filter
-      <div class="clu-toolbar-row"> letter_bar(...) </div>    always last -#}
+{#- The one command row a list's controls sit in, between the page header and
+    the results: no panel, one hairline under it. Fill it with rows:
+      <div class="clu-toolbar-row"> search, filter menus, selects ...
+          <div class="clu-toolbar-end"> switches, view toggle, toolbar_more() </div></div>
+      <div class="clu-toolbar-row"> letter_bar(...) </div>    always last
+    The count goes next to the page title (page_header's 'count' slot) and Per
+    page next to the pager. clu-filters.js adds the chip row of set filter
+    menus under the first row. -#}
 <section class="clu-toolbar{% if classes %} {{ classes }}{% endif %}"{% if id %} id="{{ id }}"{% endif %} aria-label="{{ aria_label }}">
   {{- caller() -}}
 </section>
+{%- endmacro %}
+
+{% macro toolbar_more(label='More options') -%}
+{#- The row's overflow menu: Refresh, Multi-select and other things a page
+    does now and then. Call it with <li> items (button.dropdown-item). -#}
+<div class="dropdown clu-toolbar-more">
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown" data-bs-display="static"
+          aria-expanded="false" aria-label="{{ label }}" title="{{ label }}"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
+  <ul class="dropdown-menu dropdown-menu-end clu-sheet">
+    {{- caller() -}}
+  </ul>
+</div>
+{%- endmacro %}
+
+{% macro facet_column(id, label='Filters') -%}
+{#- C: the filter column of Wanted, Pull List and Releases (a call block of
+    filter_bar(..., mode='facet') groups). Beside the results from lg up; below
+    it is a bottom sheet opened by facets_button(id). Wrap it and the results
+    in <div class="clu-facet-layout"> ... <div class="clu-facet-main">. -#}
+<aside class="offcanvas-lg offcanvas-bottom clu-facets" id="{{ id }}" tabindex="-1" aria-labelledby="{{ id }}-title">
+  <div class="clu-facets-head">
+    <h2 class="clu-facets-title" id="{{ id }}-title">{{ label }}</h2>
+    <button type="button" class="btn btn-link btn-sm clu-facets-clear" data-clu-clear-facets hidden>Clear all</button>
+    <button type="button" class="btn btn-sm clu-sheet-close d-lg-none" data-bs-dismiss="offcanvas" data-bs-target="#{{ id }}"
+            aria-label="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+  </div>
+  <div class="clu-facets-body">
+    {{- caller() -}}
+  </div>
+  <div class="clu-sheet-foot d-lg-none">
+    <button type="button" class="btn btn-primary" data-bs-dismiss="offcanvas" data-bs-target="#{{ id }}" data-clu-show-n>Show results</button>
+  </div>
+</aside>
+{%- endmacro %}
+
+{% macro facets_button(id, label='Filters') -%}
+{#- Opens facet_column(id) below lg; clu-filters.js writes "Filters · 2". -#}
+<button type="button" class="btn btn-sm btn-outline-secondary clu-fmenu-btn clu-facets-btn d-lg-none" data-clu-facets-btn
+        data-bs-toggle="offcanvas" data-bs-target="#{{ id }}" aria-controls="{{ id }}">
+  <i class="bi bi-funnel me-1" aria-hidden="true"></i><span class="clu-fmenu-k">{{ label }}</span><span class="clu-fmenu-v"></span>
+</button>
+{%- endmacro %}
+
+{% macro pager_row() -%}
+{#- The bottom of a paged list: Per page beside the page links. A call block
+    holding per_page_select(...) and pager_nav(..., classes=None). -#}
+<div class="clu-pager-row">
+  {{- caller() -}}
+</div>
 {%- endmacro %}
 
 {% macro pager_nav(id, aria_label, attrs=None, classes='mt-4') -%}

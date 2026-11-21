@@ -146,11 +146,98 @@ def test_filter_bar_multi_selects_several_and_none_means_all(macros):
     assert 'data-value="" aria-pressed="true"' in none
 
 
-def test_letter_bar_puts_hash_first_and_toggles_off(macros):
+def test_letter_bar_is_a_text_strip_of_the_whole_alphabet(macros):
     html = str(macros.letter_bar("ab", ["B", "#", "A"], active="B"))
-    assert re.findall(r'data-value="([^"]*)"', html) == ["", "#", "A", "B"]
+    values = re.findall(r'data-value="([^"]*)"', html)
+    assert values[:4] == ["", "#", "A", "B"] and values[-1] == "Z" and len(values) == 28
     assert "data-clu-toggle-off" in html
     assert 'data-value="B" aria-pressed="true"' in html
+    # No pills: plain text buttons.
+    assert "btn-outline-secondary" not in html and "btn-group" not in html
+    # A letter with nothing behind it stays, greyed and out of the Tab order.
+    c = html[html.index('data-value="C"'):].split(">", 1)[0]
+    assert 'aria-disabled="true"' in c and 'tabindex="-1"' in c
+    a = html[html.index('data-value="A"'):].split(">", 1)[0]
+    assert "aria-disabled" not in a
+    # '#' only when the list has one.
+    assert 'data-value="#"' not in str(macros.letter_bar("ab", ["A"]))
+
+
+def test_filter_menu_is_one_button_that_shows_its_value(macros):
+    opts = [("", "All"), {"value": "m", "label": "Missing", "count": 3}, {"value": "z", "label": "Zero", "count": 0}]
+    html = str(macros.filter_bar("st", opts, active="m", label="Status", mode="menu"))
+    assert 'class="dropdown clu-fmenu"' in html
+    assert 'data-bs-toggle="dropdown"' in html and 'data-bs-auto-close="true"' in html
+    assert "is-set" in html and '<span class="clu-fmenu-k">Status</span>' in html
+    assert ": <b>Missing</b>" in html
+    assert 'role="menu"' in html and 'data-clu-mode="menu"' in html
+    assert html.count('role="menuitemradio"') == 3            # All stays for single choice
+    assert 'data-value="m" data-label="Missing"' in html
+    assert 'aria-checked="true" data-value="m"' in html
+    # A 0 count stays listed, dimmed.
+    assert "is-zero" in html and 'data-value="z"' in html
+    # Single choice has no Show N footer.
+    assert "data-clu-show-n" not in html
+
+
+def test_filter_menu_multi_uses_checkboxes_counts_and_a_show_footer(macros):
+    opts = [("", "All"), ("a", "A"), ("b", "B")]
+    html = str(macros.filter_bar("t", opts, active=["a", "b"], label="Tags", multi=True, mode="menu"))
+    assert html.count('role="menuitemcheckbox"') == 2 and 'data-value=""' not in html
+    assert ": <b>2</b>" in html and 'data-bs-auto-close="outside"' in html
+    assert "data-clu-show-n" in html and "clu-sheet-head" in html
+    unset = str(macros.filter_bar("t", opts, label="Tags", multi=True, mode="menu"))
+    assert "is-set" not in unset and "<b>" not in unset
+
+
+def test_facet_group_is_a_fieldset_of_checkbox_or_radio_rows(macros):
+    one = str(macros.filter_bar("s", [("", "All"), ("x", "X")], active="x", label="Show", mode="facet"))
+    assert one.startswith('<fieldset class="clu-facet">') and "<legend" in one
+    assert 'role="radiogroup"' in one and one.count('role="radio"') == 2
+    assert "menuitem" not in one and "dropdown" not in one
+    many = str(macros.filter_bar("p", [("", "All"), ("x", "X")], label="Publisher", multi=True, mode="facet"))
+    assert 'role="group"' in many and many.count('role="checkbox"') == 1
+
+
+def test_facet_column_is_a_sheet_below_lg_with_a_button():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(ROOT, "templates")),
+                             autoescape=True)
+    html = env.from_string(
+        "{% from 'partials/filters.html' import facet_column, facets_button %}"
+        "{% call facet_column('fc') %}<fieldset></fieldset>{% endcall %}{{ facets_button('fc') }}"
+    ).render()
+    assert 'class="offcanvas-lg offcanvas-bottom clu-facets" id="fc"' in html
+    assert "data-clu-clear-facets hidden" in html and "data-clu-show-n" in html
+    assert 'data-bs-toggle="offcanvas" data-bs-target="#fc"' in html and "d-lg-none" in html
+
+
+def test_toolbar_more_is_an_overflow_menu():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(ROOT, "templates")),
+                             autoescape=True)
+    html = env.from_string(
+        "{% from 'partials/filters.html' import toolbar_more %}"
+        "{% call toolbar_more() %}<li>x</li>{% endcall %}"
+    ).render()
+    assert 'aria-label="More options"' in html and "bi-three-dots" in html
+    assert "dropdown-menu-end clu-sheet" in html and "<li>x</li>" in html
+
+
+def test_page_header_puts_the_count_beside_the_title():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(ROOT, "templates")),
+                             autoescape=True)
+    html = env.from_string(
+        "{% from 'partials/page_header.html' import page_header %}"
+        "{% from 'partials/filters.html' import result_count %}"
+        "{% call(slot) page_header('Things') %}{% if slot == 'count' %}{{ result_count('n', 3, 'things') }}{% endif %}{% endcall %}"
+    ).render()
+    head = html[html.index('class="clu-page-heading"'):]
+    assert head.index("<h1") < head.index('id="n"') < head.index("</div>")
+    bare = env.from_string(
+        "{% from 'partials/page_header.html' import page_header %}{{ page_header('Things') }}").render()
+    assert "clu-page-heading" not in bare
 
 
 def test_search_input_is_named_typed_and_theme_safe(macros):
@@ -205,7 +292,7 @@ def test_per_page_select_is_a_select_field(macros):
     assert "clu-select" in html and "clu-per-page" in html and ">Per page</label>" in html
 
 
-def test_toolbar_is_one_labelled_flat_panel():
+def test_toolbar_is_one_labelled_flat_row():
     jinja2 = pytest.importorskip("jinja2")
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(ROOT, "templates")),
                              autoescape=True)
@@ -241,7 +328,7 @@ def test_no_hand_built_letter_bars():
     pat = re.compile(r"data-letter\b|dataset\.letter\b|ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     hits = [f"{rel}:{src[:m.start()].count(chr(10)) + 1}"
             for rel, src in _sources(("static/js/*.js", "templates/**/*.html"))
-            if rel not in SHARED_JS for m in pat.finditer(src)]
+            if rel not in SHARED_JS | {"templates/partials/filters.html"} for m in pat.finditer(src)]
     assert not hits, "letter bar not built with CLU.letterBar:\n  " + "\n  ".join(hits)
 
 
@@ -305,7 +392,7 @@ def test_every_letter_bar_is_the_shared_one(path, call):
     assert call in _read(path), f"{path} must build its A-Z bar with {call}"
 
 
-# Every list screen's controls sit in the one toolbar() panel.
+# Every list screen's controls sit in the one toolbar() row.
 TOOLBAR_HOSTS = [
     "templates/collection.html",
     "templates/metadata_browser.html",
@@ -355,3 +442,69 @@ def test_letter_buckets_come_from_sort_letters():
     hits = [f"{rel}:{src[:m.start()].count(chr(10)) + 1}"
             for rel, src in _sources() for m in copy.finditer(src)]
     assert not hits, "use CLU.sortLetters:\n  " + "\n  ".join(hits)
+
+
+# ---- the command row (A) and the facet column (C) --------------------------
+
+def test_toolbar_css_is_a_row_not_a_panel():
+    css = _read("static/css/clu-page.css")
+    block = css[css.index("\n.clu-toolbar {"):]
+    block = block[:block.index("}")]
+    assert "border-bottom: 1px solid var(--bs-border-color)" in block
+    for banned in ("background", "box-shadow", "border-radius"):
+        assert banned not in block, banned
+    count = css[css.index("\n.clu-toolbar-count {"):]
+    count = count[:count.index("}")]
+    assert "border" not in count, "the count is plain text, not a pill"
+
+
+# Converted screens: the count is beside the title, not in the row.
+COUNT_IN_HEADER = [
+    ("templates/collection.html", "collectionCount"),
+    ("templates/metadata_browser.html", "mbCount"),
+    ("templates/people_index.html", "peopleCount"),
+    ("templates/source_wall.html", "swCount"),
+    ("templates/pull_list.html", "resultCount"),
+    ("templates/releases.html", "releases-count"),
+    ("templates/wanted.html", "wantedCount"),
+]
+
+
+@pytest.mark.parametrize("path,count_id", COUNT_IN_HEADER)
+def test_count_sits_beside_the_page_title(path, count_id):
+    src = _read(path)
+    header = src[src.index("page_header("):src.index("{% endcall %}", src.index("page_header("))]
+    assert "slot == 'count'" in header and count_id in header, path
+    rest = src[src.index("{% endcall %}", src.index("page_header(")):]
+    assert f"result_count('{count_id}'" not in rest, f"{path}: count still in the toolbar"
+
+
+@pytest.mark.parametrize("path", ["templates/wanted.html", "templates/pull_list.html", "templates/releases.html"])
+def test_filter_heavy_lists_use_the_facet_column(path):
+    src = _read(path)
+    assert "call facet_column(" in src and "facets_button(" in src and 'class="clu-facet-layout"' in src
+    assert "mode='facet'" in src
+    # The row keeps search and switches; no pill rows of filters.
+    assert "mode='bar'" not in src
+
+
+@pytest.mark.parametrize("path", ["templates/collection.html", "templates/metadata_browser.html",
+                                  "templates/pull_list.html"])
+def test_per_page_is_beside_the_pager_not_in_the_row(path):
+    src = _read(path)
+    tb = src[src.index("call toolbar("):]
+    tb = tb[:tb.index("{% endcall %}")]
+    assert "per_page_select(" not in tb, path
+    assert "per_page_select(" in src
+
+
+@pytest.mark.parametrize("path,ids", [
+    ("templates/collection.html", ("toggleCollectionSelectModeBtn", "collectionRefreshBtn")),
+    ("templates/metadata_browser.html", ("mbRefreshBtn",)),
+])
+def test_refresh_and_multi_select_are_behind_the_overflow_menu(path, ids):
+    src = _read(path)
+    more = src[src.index("call toolbar_more()"):]
+    more = more[:more.index("{% endcall %}")]
+    for i in ids:
+        assert f'id="{i}"' in more and "dropdown-item" in more

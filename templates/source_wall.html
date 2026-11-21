@@ -22,6 +22,10 @@
       </button>
     {% elif slot == 'crumbs' %}
       <li class="breadcrumb-item active"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Select a library</li>
+    {% elif slot == 'count' %}
+      {#- Hidden until a folder has loaded: before that "0 items" reads as an
+          empty library. source_wall.js updateWallCount shows it. -#}
+      <span class="d-none" id="swCountEnd">{{ result_count('swCount', 0, 'items') }}</span>
     {% endif %}
   {% endcall %}
 
@@ -47,7 +51,7 @@
       {% call select_field('swViewSelect', 'View') %}
         <option value="">Browse folders</option>
       {% endcall %}
-      <div class="btn-group btn-group-sm" role="group" aria-label="Provider view scope">
+      <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="Provider view scope">
         <button type="button" class="btn btn-outline-secondary active" id="swScopeFolder"
                 onclick="setProviderScope('folder')" title="Only the folder you are browsing, and its subfolders"
                 aria-pressed="true">
@@ -57,11 +61,6 @@
                 onclick="setProviderScope('library')" title="The whole library" aria-pressed="false">
           <i class="bi bi-collection me-1" aria-hidden="true"></i>All
         </button>
-      </div>
-      {#- Hidden until a folder has loaded: before that "0 items" reads as an
-          empty library. source_wall.js updateWallCount shows it. -#}
-      <div class="clu-toolbar-end d-none" id="swCountEnd">
-        {{ result_count('swCount', 0, 'items') }}
       </div>
     </div>
     <div class="clu-toolbar-row" id="swFilterBar" style="display: none;">

@@ -73,8 +73,9 @@ def test_status_row_actions_are_buttons():
 def test_library_toolbar_is_one_row_on_desktop():
     html = (ROOT / "templates" / "metadata_browser.html").read_text(encoding="utf-8")
     toolbar = html[html.index("{% call toolbar('Library view') %}"):html.index('id="mbLetterFilter"')]
-    # Search, view, sort, refresh and page size share one row; no divider row.
-    for needle in ('name="mbAxis"', "select_field('mbSort', 'Sort')", "per_page_select('mbPerPage'",
+    # Search, sort, the axis switch and the ⋯ menu (Refresh) share one row;
+    # page size moved to the pager.
+    for needle in ('name="mbAxis"', "select_field('mbSort', 'Sort')",
                    'id="mbRefreshBtn"', "search_input('mbSearch', 'Search title or series'"):
         assert needle in toolbar
     # Search comes first in the row.

@@ -1317,7 +1317,9 @@ class TestWantedPage:
         self._register_slug_global(app)
         self._seed_wanted()
         html = client_with_data.get("/wanted").get_data(as_text=True)
-        assert 'id="wantedToolbar" aria-label="Filter wanted issues"' in html
+        assert 'id="wantedToolbar" aria-label="Search wanted issues"' in html
+        # C: the Show filter is a facet column beside the lists.
+        assert 'id="wantedFacets"' in html and 'id="wantedStateFilter" role="radiogroup"' in html
         assert 'placeholder="Search series and reading lists…"' in html
         assert 'id="wantedCount" aria-live="polite">1 wanted issue</span>' in html
         # The script searches each issue's series and name.
@@ -1522,7 +1524,8 @@ class TestPullListPaging:
         ).get_data(as_text=True)
         assert html.count("data-series-id=") == 1
         assert 'data-series-id="200"' in html
-        assert '<option value="20" selected>' in html
+        pubs = html.split('id="publisherFilter"', 1)[1].split("</fieldset>", 1)[0]
+        assert re.search(r'aria-checked="true" data-value="20"', pubs)
         assert "bi bi-chevron-down text-primary ms-1" in html
 
     def test_bad_params_fall_back_to_defaults(self, app, client_with_data):
@@ -1709,15 +1712,19 @@ class TestPullListPaging:
         html = client_with_data.get("/pull-list?letter=Q&publisher=999").get_data(as_text=True)
         assert html.count("data-series-id=") == 2
         bar = html.split('id="alphabetFilter"', 1)[1].split("</div>", 1)[0]
-        assert re.search(r'class="btn btn-outline-secondary active"\s+data-value=""\s+aria-pressed="true"', bar)
+        assert re.search(r'class="clu-letter clu-letter-all active" data-value=""\s+aria-pressed="true"', bar)
+        pubs = html.split('id="publisherFilter"', 1)[1].split("</fieldset>", 1)[0]
+        assert re.search(r'aria-checked="true" data-value=""', pubs)
 
     def test_letters_and_publishers_render(self, app, client_with_data):
         TestPullListPage._register_slug_global(app)
         html = client_with_data.get("/pull-list?letter=B").get_data(as_text=True)
         bar = html.split('id="alphabetFilter"', 1)[1].split("</div>", 1)[0]
         assert 'data-value="A"' in bar and 'data-value="B"' in bar
-        assert re.search(r'class="btn btn-outline-secondary active"\s+data-value="B" aria-pressed="true"', bar)
+        assert re.search(r'class="clu-letter active"\s+data-value="B" aria-pressed="true"', bar)
         assert 'data-value="A" aria-pressed="false"' in bar
+        # The strip has the whole alphabet; letters with nothing are greyed.
+        assert re.search(r'data-value="Q" aria-pressed="false"\s+aria-disabled="true" tabindex="-1"', bar)
         assert html.count("data-series-id=") == 1
 
 
@@ -2262,8 +2269,8 @@ class TestReleasesPublisherFilter:
     def test_search_box_filters_by_series(self, client, app):
         html = self._render_releases_page(client, app)
         assert 'id="releasesSearch" aria-label="Search series"' in html
-        # Search first in the toolbar's first row, before the count.
-        assert html.index('id="releasesSearch"') < html.index('id="releases-count"')
+        # The count is beside the title, ahead of the search row.
+        assert html.index('id="releases-count"') < html.index('id="releasesSearch"')
         assert 'data-title="series 11"' in html  # cards and rows both carry it
         assert "if (query && (el.dataset.title || '').indexOf(query.toLowerCase()) === -1) return false;" in html
         assert "if (query) url.searchParams.set('q', query); else url.searchParams.delete('q');" in html
@@ -2281,13 +2288,15 @@ class TestReleasesPublisherFilter:
             assert f"key: '{key}',\n                param: '{key}'," in html
         # Subscription is known server-side, so its group is never hidden; the
         # publisher group waits for the map.
-        assert '<div class="clu-toolbar-row" data-filter-group="subscribed">' in html
+        assert '<div data-filter-group="subscribed">' in html
         assert 'id="publisher-filter" hidden' in html
         # Both groups are the shared filter_bar, filled by the script with
         # counts; the old pill-shaped buttons and their badges are gone.
-        assert 'id="subscription-pills" role="group"' in html
+        # C: both are groups of the facet column, radios with counts.
+        assert 'id="subscription-pills" role="radiogroup"' in html
         assert 'aria-labelledby="subscription-pills-label"' in html
-        assert 'id="publisher-pills" role="group"' in html
+        assert 'id="publisher-pills" role="radiogroup"' in html
+        assert 'id="releaseFacets"' in html and "data-clu-facets-btn" in html
         assert html.count("data-clu-toggle-off") >= 2
         assert "CLU.renderFilterOptions(pillsEl" in html
         assert not re.search(r"publisher-pill(?!s)", html)
