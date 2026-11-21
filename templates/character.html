@@ -23,6 +23,6 @@
 {% if info.origin %}<div><dt>Origin</dt><dd>{{ info.origin }}</dd></div>{% endif %}
 {% if info.teams %}<div><dt>Teams</dt><dd>{{ people(info.teams, 'creators.team_page') }}</dd></div>{% endif %}
 {% if info.powers %}<div><dt>Powers</dt><dd>{{ more_list(info.powers, 'powers') }}</dd></div>{% endif %}
-{% if info.allies %}<div><dt>Allies</dt><dd>{{ people(info.allies, 'creators.character_page') }}</dd></div>{% endif %}
-{% if info.enemies %}<div><dt>Enemies</dt><dd>{{ people(info.enemies, 'creators.character_page') }}</dd></div>{% endif %}
+{% if info.allies %}<div><dt>Allies</dt><dd>{{ people(info.allies, 'creators.character_page', shown=8, noun='allies') }}</dd></div>{% endif %}
+{% if info.enemies %}<div><dt>Enemies</dt><dd>{{ people(info.enemies, 'creators.character_page', shown=8, noun='enemies') }}</dd></div>{% endif %}
 {% endblock %}

@@ -379,3 +379,27 @@ class TestComicVineKeyNote:
     def test_with_key_says_not_stored_yet(self, client, library, app):
         body = self._page(client, app, "k")
         assert "ComicVine details are not stored yet" in body and "Refresh in More updates it" in body
+
+
+class TestLongPeopleListsFold:
+    """Allies and Enemies show 8, then fold the rest into "N more"."""
+
+    def _page(self, client, friends):
+        import json
+        from core import entity_profiles
+
+        entity_profiles.store("character", "Batman", NS(id=1, cv_id=None, desc="x"))
+        entity_profiles._upsert("character", "Batman", cv_json=json.dumps(
+            {"friends": [{"id": i, "name": f"Ally {i:02d}"} for i in range(friends)]}))
+        return client.get("/characters/Batman").get_data(as_text=True)
+
+    def test_long_list_folds(self, client, library):
+        body = self._page(client, 12)
+        dd = body[body.index("<dt>Allies</dt>"):]
+        dd = dd[:dd.index("</dd>")]
+        assert '<span class="ch-al-more">4 more allies</span>' in dd and "Show fewer allies" in dd
+        assert dd.index("Ally 07") < dd.index("<details") < dd.index("Ally 08")
+
+    def test_one_extra_is_just_shown(self, client, library):
+        body = self._page(client, 9)
+        assert "more allies" not in body and "Ally 08" in body

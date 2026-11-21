@@ -78,6 +78,7 @@
 .ch-dl li { display: flex; gap: .5rem; align-items: baseline; }
 .ch-dl li > :first-child { margin-right: auto; }
 .ch-al summary { color: var(--bs-link-color); font-size: .875rem; width: fit-content; margin-top: .15rem; }
+.ch-al[open] .ch-al-more, .ch-al:not([open]) .ch-al-less { display: none; }
 .ch-links { display: flex; gap: .25rem 1rem; flex-wrap: wrap; }
 .ch-inline { padding: 0; border: 0; vertical-align: baseline; font-size: inherit; text-align: left; }
 .ch-note { font-size: .75rem; color: var(--bs-secondary-color); margin: 0; }

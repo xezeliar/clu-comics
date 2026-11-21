@@ -106,8 +106,8 @@
 {% if info.disbanded_in %}<div><dt>Disbanded in</dt><dd><ul>
   {%- for d in info.disbanded_in %}<li>{% if d.issue %}{{ issue_ref(d.issue) }}{% else %}{{ d.name or 'An issue' }}<span class="ch-sub">Not in your library</span>{% endif %}</li>{% endfor -%}
 </ul></dd></div>{% endif %}
-{% if info.allies %}<div><dt>Allies</dt><dd>{{ people(info.allies, 'creators.character_page') }}</dd></div>{% endif %}
-{% if info.enemies %}<div><dt>Enemies</dt><dd>{{ people(info.enemies, 'creators.character_page') }}</dd></div>{% endif %}
+{% if info.allies %}<div><dt>Allies</dt><dd>{{ people(info.allies, 'creators.character_page', shown=8, noun='allies') }}</dd></div>{% endif %}
+{% if info.enemies %}<div><dt>Enemies</dt><dd>{{ people(info.enemies, 'creators.character_page', shown=8, noun='enemies') }}</dd></div>{% endif %}
 {% endblock %}
 
 {% block page_script %}

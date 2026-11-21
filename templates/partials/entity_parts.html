@@ -31,9 +31,12 @@
 {%- endmacro %}
 
 {#- Names that link to their CLU page when the library has them (n > 0). -#}
-{% macro people(rows, endpoint, unit='issue') -%}
+{#- ``shown``: list that many and fold the rest into "N more <noun>",
+    like more_list. Rows come sorted with owned names first. -#}
+{% macro people(rows, endpoint, unit='issue', shown=none, noun='') -%}
+{%- macro _rows(rs) %}
 <ul>
-  {%- for r in rows %}
+  {%- for r in rs %}
   <li>
     {%- if r.n %}<a href="{{ url_for(endpoint, name=r.name) }}">{{ r.name }}</a><span class="ch-n">{{ '{:,}'.format(r.n) }} {{ unit }}{{ 's' if r.n != 1 }}</span>
     {%- else %}<span>{{ r.name }}</span>{% endif -%}
@@ -41,11 +44,15 @@
   {%- endfor %}
 </ul>
 {%- endmacro %}
+{%- if shown and rows | length > shown + 1 %}{{ _rows(rows[:shown]) }}
+<details class="ch-al"><summary><span class="ch-al-more">{{ rows | length - shown }} more {{ noun }}</span><span class="ch-al-less">Show fewer {{ noun }}</span></summary>{{ _rows(rows[shown:]) }}</details>
+{%- else %}{{ _rows(rows) }}{% endif %}
+{%- endmacro %}
 
 {% macro more_list(items, noun, shown=3) -%}
 {{ items[:shown] | join(', ') }}
 {%- if items | length > shown %}
-<details class="ch-al"><summary>{{ items | length - shown }} more {{ noun }}</summary>{{ items[shown:] | join(', ') }}</details>
+<details class="ch-al"><summary><span class="ch-al-more">{{ items | length - shown }} more {{ noun }}</span><span class="ch-al-less">Show fewer {{ noun }}</span></summary>{{ items[shown:] | join(', ') }}</details>
 {%- endif %}
 {%- endmacro %}
 
