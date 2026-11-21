@@ -685,6 +685,10 @@ a.clu-stat:focus-visible .clu-stat-value {
 .clu-toolbar .btn-sm,
 .clu-toolbar .btn-group-sm > .btn {
     min-height: 2.25rem;
+    /* A min-height on a block button leaves its label at the top: centre it. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: 0.8125rem;
     padding-top: 0.125rem;
     padding-bottom: 0.125rem;
