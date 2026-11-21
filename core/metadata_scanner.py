@@ -404,7 +404,7 @@ def queue_metronid_backfill(limit=1000):
 
 
 def queue_provider_backfill(limit=1000):
-    """Queue comics indexed before ci_provider existed so the column fills in.
+    """Queue comics indexed before ci_provider or ci_teams existed so they fill in.
 
     Same housekeeping contract as :func:`queue_metronid_backfill`: lowest
     priority, drained only when idle, self-terminating because every scan
@@ -427,7 +427,7 @@ def queue_provider_backfill(limit=1000):
         if files:
             with scanner_lock:
                 scanner_progress['total_pending'] += len(files)
-            app_logger.info(f"Queued {len(files)} files to backfill ci_provider")
+            app_logger.info(f"Queued {len(files)} files to backfill ci_provider/ci_teams")
 
         return len(files)
 

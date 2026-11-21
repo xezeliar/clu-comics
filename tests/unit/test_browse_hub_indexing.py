@@ -45,20 +45,19 @@ def test_scanner_write_indexes_teams_editor_translator(db_connection):
     assert _tags(db_connection, path) == EXPECTED
 
 
-def test_adding_the_columns_queues_tagged_files_for_one_rescan(db_connection):
+def test_files_scanned_before_teams_existed_are_backfilled_once(db_connection):
+    # The main scan query skips has_comicinfo=1, so only the idle backfill can
+    # re-read these (an empty Teams index otherwise).
+    from core.database import get_files_needing_provider_backfill
     c = db_connection
-    c.execute("INSERT INTO file_index (name, path, type, has_comicinfo, metadata_scanned_at)"
-              " VALUES ('a.cbz', '/data/a.cbz', 'file', 1, 5), ('b.cbz', '/data/b.cbz', 'file', 0, 5)")
-    for col in ("ci_teams", "ci_editor", "ci_translator"):
-        c.execute(f"ALTER TABLE file_index DROP COLUMN {col}")
+    c.execute("INSERT INTO file_index (name, path, type, has_comicinfo, metadata_scanned_at,"
+              " ci_provider) VALUES ('a.cbz', '/data/a.cbz', 'file', 1, 5, ''),"
+              " ('b.cbz', '/data/b.cbz', 'file', 0, 5, '')")
     c.commit()
-    init_db()
-    scanned = dict(c.execute("SELECT name, metadata_scanned_at FROM file_index").fetchall())
-    assert scanned == {"a.cbz": None, "b.cbz": 5}
-    c.execute("UPDATE file_index SET metadata_scanned_at = 6")
-    c.commit()
-    init_db()  # columns exist now: nothing is queued again
-    assert {r[0] for r in c.execute("SELECT metadata_scanned_at FROM file_index")} == {6}
+    assert [f["path"] for f in get_files_needing_provider_backfill()] == ["/data/a.cbz"]
+    fid = c.execute("SELECT id FROM file_index WHERE path = '/data/a.cbz'").fetchone()[0]
+    update_file_metadata(fid, {"ci_teams": "X-Men"}, 6.0, 1)
+    assert get_files_needing_provider_backfill() == []
 
 
 def test_every_credit_and_team_in_cbz_info_links():

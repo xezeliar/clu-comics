@@ -404,26 +404,11 @@ def _init_db_locked():
             "ci_translator",  # Translator(s) - comma-separated
             "metadata_scanned_at",  # Timestamp of last scan (REAL)
         ]
-        # Added after the library was first scanned: files tagged before then
-        # carry <Teams>/<Editor>/<Translator> the index never read, so the
-        # scanner re-reads every file that has a ComicInfo.xml, once.
-        _rescan_for_new_ci = (
-            "ci_teams" not in columns
-            and "ci_title" in columns and "has_comicinfo" in columns
-        )
         for col in metadata_columns:
             if col not in columns:
                 col_type = "REAL" if col == "metadata_scanned_at" else "TEXT"
                 c.execute(f"ALTER TABLE file_index ADD COLUMN {col} {col_type}")
                 app_logger.info(f"Migrating file_index: adding {col} column")
-        if _rescan_for_new_ci:
-            c.execute(
-                "UPDATE file_index SET metadata_scanned_at = NULL"
-                " WHERE type = 'file' AND has_comicinfo = 1"
-            )
-            app_logger.info(
-                "Queued files with ComicInfo.xml for a rescan (teams, editor, translator)"
-            )
 
         # Migration: Add first_indexed_at column to track when files were first added
         if "first_indexed_at" not in columns:
@@ -8096,10 +8081,11 @@ def _provider_for_index(notes):
 
 
 def get_files_needing_provider_backfill(limit=1000):
-    """Already-scanned comics whose ci_provider has never been read.
+    """Already-scanned comics whose ci_provider or ci_teams has never been read.
 
     Same shape and reasoning as :func:`get_files_needing_metronid_backfill`:
-    each scan writes a provider or '', so the result set shrinks to empty.
+    each scan writes a provider or '' and teams or '' (ci_editor and
+    ci_translator arrive with ci_teams), so the result set shrinks to empty.
     """
     try:
         with db_conn() as conn:
@@ -8113,7 +8099,7 @@ def get_files_needing_provider_backfill(limit=1000):
                 WHERE type = 'file'
                 AND (LOWER(path) LIKE '%.cbz' OR LOWER(path) LIKE '%.zip')
                 AND has_comicinfo = 1
-                AND ci_provider IS NULL
+                AND (ci_provider IS NULL OR ci_teams IS NULL)
                 ORDER BY modified_at DESC
                 LIMIT ?
                 """,
