@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, select_field, per_page_select, result_count %}
+{% from 'partials/filters.html' import toolbar, toolbar_more, select_field, per_page_select, result_count %}
 {% block title %}Browse Library{% endblock %}
 {% block page_shell %}container-fluid clu-shell-wide{% endblock %}
 {% block extra_css %}
@@ -38,6 +38,9 @@
     {% call(slot) page_header('Home', 'bi-house', title_id='collectionTitle', crumbs_id='breadcrumb') %}
         {% if slot == 'crumbs' %}
             <li class="breadcrumb-item active"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Loading...</li>
+        {% elif slot == 'count' %}
+            {# Worded and updated by updateCollectionCount() in collection.js. #}
+            {{ result_count('collectionCount', 0, 'items', one='item') }}
         {% endif %}
     {% endcall %}
 
@@ -47,8 +50,9 @@
     {# The grid's controls. collection.js fills #gridSearchRow (only past 25
        items), shows #librarySelectorContainer when there is more than one
        library, the view buttons per mode, and the letter row once it has
-       letters. Multi-Select, Refresh, card size and per page are always
-       there, so the panel never renders empty on the dashboard. #}
+       letters. Card size and the ⋯ menu (Multi-select, Refresh) are always
+       there, so the row never renders empty on the dashboard. Per page is in
+       the pager's tail. #}
     {% call toolbar('Browse controls', id='collectionToolbar') %}
         <div class="clu-toolbar-row" id="collectionOptions">
             <div id="gridSearchRow" class="collection-search-slot"></div>
@@ -79,19 +83,6 @@
             </div>
 
             <div class="clu-toolbar-end">
-                {# Worded and updated by updateCollectionCount() in collection.js. #}
-                {{ result_count('collectionCount', 0, 'items', one='item') }}
-                {% if _can_manage %}
-                <button type="button" class="btn btn-sm btn-outline-secondary"
-                    id="toggleCollectionSelectModeBtn" onclick="toggleCollectionSelectMode()"
-                    title="Toggle multi-select mode" aria-pressed="false">
-                    <i class="bi bi-check2-square me-1" aria-hidden="true"></i>Multi-Select
-                </button>
-                {% endif %}
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="collectionRefreshBtn"
-                    onclick="refreshCurrentView(true, true)" aria-label="Refresh" title="Refresh">
-                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-                </button>
                 {# Text is the same grid items laid out as rows (.view-text in
                    collection.css), so selection, menus and read state work the
                    same in every layout. #}
@@ -109,14 +100,23 @@
                         <i class="bi bi-list-ul" aria-hidden="true"></i>
                     </button>
                 </div>
-                {{ per_page_select('itemsPerPage', clu_default_per_page('collection'), default=clu_default_per_page('collection')) }}
+                {% call toolbar_more() %}
+                    {% if _can_manage %}
+                    <li><button type="button" class="dropdown-item"
+                        id="toggleCollectionSelectModeBtn" onclick="toggleCollectionSelectMode()" aria-pressed="false">
+                        <i class="bi bi-check2-square me-2" aria-hidden="true"></i>Multi-select</button></li>
+                    {% endif %}
+                    <li><button type="button" class="dropdown-item" id="collectionRefreshBtn"
+                        onclick="refreshCurrentView(true, true)">
+                        <i class="bi bi-arrow-clockwise me-2" aria-hidden="true"></i>Refresh</button></li>
+                {% endcall %}
             </div>
         </div>
 
         {# Drawn by CLU.letterBar in collection.js updateFilterBar(), which
            also toggles the row's hidden attribute. #}
         <div class="clu-toolbar-row" id="gridFilterButtons" hidden>
-            <div class="btn-group btn-group-sm clu-letter-bar clu-filter-scroll" role="group" aria-label="Filter by first letter"></div>
+            <div class="clu-letter-bar clu-filter-scroll" role="group" aria-label="Filter by first letter"></div>
         </div>
     {% endcall %}
 
@@ -164,6 +164,7 @@
                        filled in by renderPagination(), which is also what makes an
                        out-of-range page unreachable -- there is nothing to type. #}
                     <div class="pager-tail d-flex align-items-center gap-2">
+                        {{ per_page_select('itemsPerPage', clu_default_per_page('collection'), default=clu_default_per_page('collection')) }}
                         <div class="pager-jump input-group input-group-sm d-none d-md-flex">
                             <label class="input-group-text" for="pageJumpSelect">Jump to</label>
                             <select class="form-select" id="pageJumpSelect" aria-label="Jump to page"

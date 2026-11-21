@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% from 'partials/page_header.html' import page_header %}
-{% from 'partials/filters.html' import toolbar, search_input, select_field, per_page_select, pager_nav, result_count %}
+{% from 'partials/filters.html' import toolbar, toolbar_more, search_input, select_field, per_page_select, pager_nav, pager_row, result_count %}
 {% block title %}Library{% endblock %}
 {% block page_shell %}container-fluid clu-shell-wide{% endblock %}
 {% block extra_css %}
@@ -17,26 +17,17 @@
     {% call(slot) page_header('Library', 'bi-collection', title_id='mbTitle', crumbs_id='mbBreadcrumb') %}
         {% if slot == 'crumbs' %}
             <li class="breadcrumb-item active"><i class="bi bi-collection me-1" aria-hidden="true"></i>Library</li>
+        {% elif slot == 'count' %}
+            {{ result_count('mbCount', 0, 'items') }}
         {% endif %}
     {% endcall %}
 
-    {# Search, then the axis and sort, refresh and page size pushed right; the
-       letter row last (metadata_browser.js fills it and hides it when there
-       are no letters). #}
+    {# Search, the sort, then the axis switch and the ⋯ menu (Refresh) pushed
+       right; the letter strip last (metadata_browser.js fills it and hides it
+       when there are no letters). Per page sits by the pager. #}
     {% call toolbar('Library view') %}
         <div class="clu-toolbar-row">
             {{ search_input('mbSearch', 'Search title or series') }}
-
-            <div class="btn-group btn-group-sm" role="group" aria-label="Primary axis">
-                <input type="radio" class="btn-check" name="mbAxis" id="mbAxisPublisher" value="publisher" autocomplete="off" checked>
-                <label class="btn btn-outline-secondary" for="mbAxisPublisher"><i class="bi bi-building me-1" aria-hidden="true"></i>Publisher</label>
-
-                <input type="radio" class="btn-check" name="mbAxis" id="mbAxisSeries" value="series" autocomplete="off">
-                <label class="btn btn-outline-secondary" for="mbAxisSeries"><i class="bi bi-journal-text me-1" aria-hidden="true"></i>Series</label>
-
-                <input type="radio" class="btn-check" name="mbAxis" id="mbAxisYear" value="year" autocomplete="off">
-                <label class="btn btn-outline-secondary" for="mbAxisYear"><i class="bi bi-calendar3 me-1" aria-hidden="true"></i>Year</label>
-            </div>
 
             {% call select_field('mbSort', 'Sort') %}
                 <option value="alpha" selected>A–Z</option>
@@ -46,16 +37,25 @@
             {% endcall %}
 
             <div class="clu-toolbar-end">
-                {{ result_count('mbCount', 0, 'items') }}
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="mbRefreshBtn" aria-label="Refresh" title="Refresh">
-                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-                </button>
-                {{ per_page_select('mbPerPage', clu_default_per_page()) }}
+                <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="Primary axis">
+                    <input type="radio" class="btn-check" name="mbAxis" id="mbAxisPublisher" value="publisher" autocomplete="off" checked>
+                    <label class="btn btn-outline-secondary" for="mbAxisPublisher"><i class="bi bi-building me-1" aria-hidden="true"></i>Publisher</label>
+
+                    <input type="radio" class="btn-check" name="mbAxis" id="mbAxisSeries" value="series" autocomplete="off">
+                    <label class="btn btn-outline-secondary" for="mbAxisSeries"><i class="bi bi-journal-text me-1" aria-hidden="true"></i>Series</label>
+
+                    <input type="radio" class="btn-check" name="mbAxis" id="mbAxisYear" value="year" autocomplete="off">
+                    <label class="btn btn-outline-secondary" for="mbAxisYear"><i class="bi bi-calendar3 me-1" aria-hidden="true"></i>Year</label>
+                </div>
+                {% call toolbar_more() %}
+                    <li><button type="button" class="dropdown-item" id="mbRefreshBtn">
+                        <i class="bi bi-arrow-clockwise me-2" aria-hidden="true"></i>Refresh</button></li>
+                {% endcall %}
             </div>
         </div>
         <div class="clu-toolbar-row" id="mbLetterFilter">
             {# Drawn by CLU.letterBar in metadata_browser.js renderLetterFilter(). #}
-            <div class="btn-group btn-group-sm clu-letter-bar clu-filter-scroll" role="group" aria-label="Filter by first letter"></div>
+            <div class="clu-letter-bar clu-filter-scroll" role="group" aria-label="Filter by first letter"></div>
         </div>
     {% endcall %}
 
@@ -70,7 +70,10 @@
             <span class="visually-hidden">Loading…</span>
         </div>
     </div>
-    {{ pager_nav('mbPagination', 'Metadata pagination') }}
+    {% call pager_row() %}
+        {{ per_page_select('mbPerPage', clu_default_per_page()) }}
+        {{ pager_nav('mbPagination', 'Metadata pagination', classes=None) }}
+    {% endcall %}
 </div>
 
 <!-- Grid Item Template (matches collection.html) -->

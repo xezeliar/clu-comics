@@ -28,7 +28,9 @@
 <div class="people-page">
     {% call(slot) page_header(title, icon,
                               subtitle=subtitle) %}
-        {% if slot == 'help' %}
+        {% if slot == 'count' and people %}
+            {{ result_count('peopleCount', people | length, noun, one) }}
+        {% elif slot == 'help' %}
             <p>Counts are issues you own that carry the tag. Open {{ 'a ' ~ one }}
                to see their series, what you have read and what is still unread.
                {%- if kind == 'teams' %} A team's issues are the ones that hold any of its member characters.{% endif %}</p>
@@ -38,9 +40,6 @@
     {% call toolbar('Search and filter ' ~ noun) %}
         <div class="clu-toolbar-row">
             {{ search_input('peopleSearch', 'Search ' ~ noun, value=q) }}
-            <div class="clu-toolbar-end">
-                {{ result_count('peopleCount', people | length, noun, one) }}
-            </div>
         </div>
         {% if people | length > 20 %}
         <div class="clu-toolbar-row">
