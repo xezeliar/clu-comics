@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, search_input, result_count, filter_bar %}
+{% from 'partials/filters.html' import toolbar, search_input, result_count, filter_bar, facet_column, facets_button %}
 
 {% block title %}Wanted Issues{% endblock %}
 
@@ -42,6 +42,8 @@
 {% endblock %}
 
 {% block content %}
+{% set _show_list = not loading and not (total_wanted == 0 and not reading_list_wanted and not ignored) %}
+{% set _facets = _show_list and (missing or ignored) %}
 <div>
     {% call(slot) page_header('Wanted Issues', 'bi-star',
                               subtitle='Issues missing from your tracked series' ~ (' · Updated ' ~ cache_age if cache_age else ''),
@@ -49,7 +51,9 @@
                                      {'value': total_upcoming, 'label': 'upcoming'},
                                      {'value': total_missing, 'label': 'missing'},
                                      {'value': reading_list_wanted|length, 'label': 'from reading lists'}]) %}
-        {% if slot == 'actions' %}
+        {% if slot == 'count' and _show_list %}
+            {{ result_count('wantedCount', missing|length + upcoming|length + reading_list_wanted|length, 'wanted issues', one='wanted issue') }}
+        {% elif slot == 'actions' %}
             <button class="btn btn-sm btn-primary" id="checkMissingBtn" onclick="checkForMissing()">
                 <i class="bi bi-search me-1" aria-hidden="true"></i>Check for missing issues
             </button>
@@ -91,31 +95,35 @@
         </a>
     {% endcall %}
     {% else %}
-    {% set wanted_rows = missing|length + upcoming|length + reading_list_wanted|length %}
-    {% call toolbar('Filter wanted issues', id='wantedToolbar') %}
+    {#- C: the Show filter is a column beside the lists (a sheet below lg); the
+        row keeps the search and the By series / By issue switch. The column
+        and its layout close after the reading-list section, at the end. -#}
+    {% if missing or ignored %}
+    <div class="clu-facet-layout">
+    {% call facet_column('wantedFacets') %}
+        {{ filter_bar('wantedStateFilter', [{'value': '', 'label': 'All'},
+                                            {'value': 'not_found', 'label': 'Not found'},
+                                            {'value': 'not_searched', 'label': 'Not searched'},
+                                            {'value': 'in', 'label': 'In Downloads'},
+                                            {'value': 'failed', 'label': 'Failed'},
+                                            {'value': 'ignored', 'label': 'Ignored'}], label='Show', mode='facet') }}
+    {% endcall %}
+    <div class="clu-facet-main">
+    {% endif %}
+    {% call toolbar('Search wanted issues', id='wantedToolbar') %}
         <div class="clu-toolbar-row">
             {% set wanted_q = request.args.get('q', '') %}
             {{ search_input('wantedSearch', 'Search series and reading lists', value=wanted_q) }}
+            {% if missing or ignored %}
+            {{ facets_button('wantedFacets') }}
             <div class="clu-toolbar-end">
-                {{ result_count('wantedCount', wanted_rows, 'wanted issues', one='wanted issue') }}
-                {% if missing or ignored %}
                 <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="Group missing issues" id="wantedView">
                     <button type="button" class="btn btn-outline-secondary" data-view="series" aria-pressed="true">By series</button>
                     <button type="button" class="btn btn-outline-secondary" data-view="issue" aria-pressed="false">By issue</button>
                 </div>
-                {% endif %}
             </div>
+            {% endif %}
         </div>
-        {% if missing or ignored %}
-        <div class="clu-toolbar-row">
-            {{ filter_bar('wantedStateFilter', [{'value': '', 'label': 'All'},
-                                                {'value': 'not_found', 'label': 'Not found'},
-                                                {'value': 'not_searched', 'label': 'Not searched'},
-                                                {'value': 'in', 'label': 'In Downloads'},
-                                                {'value': 'failed', 'label': 'Failed'},
-                                                {'value': 'ignored', 'label': 'Ignored'}], label='Show') }}
-        </div>
-        {% endif %}
     {% endcall %}
     <div id="wantedNoMatches" hidden></div>
 
@@ -295,6 +303,10 @@
             </div>
         </div>
     </div>
+    {% endif %}
+    {% if _facets %}
+    </div>{# .clu-facet-main #}
+    </div>{# .clu-facet-layout #}
     {% endif %}
 </div>
 

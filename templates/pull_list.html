@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
-{% from 'partials/filters.html' import toolbar, filter_bar, letter_bar, search_input, select_field, per_page_select, pager_nav, result_count %}
+{% from 'partials/filters.html' import toolbar, filter_bar, letter_bar, search_input, per_page_select, pager_nav, pager_row, result_count, facet_column, facets_button %}
 
 {% block title %}Pull List{% endblock %}
 
@@ -18,8 +18,6 @@
     .pl-bar i { flex-basis: 0; min-width: 2px; border-radius: 1px; background: var(--bs-primary); }
     .pl-bar i.pl-miss { background: none; box-shadow: inset 0 0 0 1px var(--bs-secondary-color); }
     .pl-sub { display: none; }
-    #attentionFilter[aria-pressed="true"] { color: var(--bs-emphasis-color); border-color: var(--bs-primary);
-        background-color: color-mix(in srgb, var(--bs-primary) 18%, transparent); box-shadow: inset 0 0 0 1px var(--bs-primary); }
 
     /* This week strip */
     .pl-week ol { display: grid; grid-auto-flow: column; grid-auto-columns: 6.25rem; gap: 1rem; overflow-x: auto;
@@ -57,7 +55,16 @@
     {% call(slot) page_header('Pull List', 'bi-list-check',
                               subtitle='All tracked series in your collection',
                               stats=[{'value': total_series, 'label': 'tracked series'}]) %}
-        {% if slot == 'actions' %}
+        {% if slot == 'count' and total_series > 0 %}
+            {%- set _start = (pager.page - 1) * pager.per_page %}
+            {%- if pager.error %}
+            <span class="clu-toolbar-count" id="resultCount" aria-live="polite"><span class="text-danger">{{ pager.error }}</span></span>
+            {%- elif pager.total == 0 %}
+            {{ result_count('resultCount', total_series, 'series', one='series', shown=0) }}
+            {%- else %}
+            {{ result_count('resultCount', pager.total, 'series', one='series', first=_start + 1, last=_start + series_list|length) }}
+            {%- endif %}
+        {% elif slot == 'actions' %}
             <a href="{{ url_for('series.series_search') }}" class="btn btn-sm btn-primary">
                 <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add series
             </a>
@@ -136,24 +143,31 @@
     </section>
     {% endif %}
 
-    {% call toolbar('Filter the pull list') %}
+    {#- C: Status, Attention and Publisher are a column beside the table (a
+        sheet below lg); the row keeps the search, Columns and the letters. -#}
+    {% set _st = filters.status if filters.status in ['complete', 'missing', 'upcoming', 'unmonitored', 'new'] else '' %}
+    <div class="clu-facet-layout">
+    {% call facet_column('plFacets') %}
+        {{ filter_bar('statusFilter', [
+            ('', 'All'),
+            {'value': 'complete', 'label': 'Complete', 'icon': 'bi-square-fill', 'icon_class': 'text-success'},
+            {'value': 'missing', 'label': 'Missing', 'icon': 'bi-square-fill', 'icon_class': 'text-danger'},
+            {'value': 'upcoming', 'label': 'Upcoming', 'icon': 'bi-square-fill', 'icon_class': 'text-info'},
+            {'value': 'unmonitored', 'label': 'Not monitored', 'icon': 'bi-square-fill', 'icon_class': 'text-secondary'},
+            {'value': 'new', 'label': 'New arrivals', 'count': new_arrivals},
+        ], active=_st, label='Status', mode='facet') }}
+        {{ filter_bar('attentionFilter', [{'value': '1', 'label': 'Needs attention', 'count': attention_count}],
+                      active=['1'] if filters.attention else [], label='Attention', multi=True, mode='facet') }}
+        {% set _pubs = [('', 'All')] %}
+        {% for pub in publishers %}{% set _ = _pubs.append((pub.id, pub.name)) %}{% endfor %}
+        {{ filter_bar('publisherFilter', _pubs, active=filters.publisher_id or '', label='Publisher', toggle_off=True, mode='facet') }}
+    {% endcall %}
+    <div class="clu-facet-main">
+    {% call toolbar('Search the pull list') %}
         <div class="clu-toolbar-row">
             {{ search_input('searchInput', 'Search series', value=filters.q) }}
-            {% call select_field('publisherFilter', 'Publisher') %}
-                <option value="">All</option>
-                {% for pub in publishers %}
-                <option value="{{ pub.id }}" {% if filters.publisher_id == pub.id %}selected{% endif %}>{{ pub.name }}</option>
-                {% endfor %}
-            {% endcall %}
+            {{ facets_button('plFacets') }}
             <div class="clu-toolbar-end">
-                {%- set _start = (pager.page - 1) * pager.per_page %}
-                {%- if pager.error %}
-                <span class="clu-toolbar-count" id="resultCount" aria-live="polite"><span class="text-danger">{{ pager.error }}</span></span>
-                {%- elif pager.total == 0 %}
-                {{ result_count('resultCount', total_series, 'series', one='series', shown=0) }}
-                {%- else %}
-                {{ result_count('resultCount', pager.total, 'series', one='series', first=_start + 1, last=_start + series_list|length) }}
-                {%- endif %}
                 <div class="dropdown">
                     <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" id="plColumnsBtn"
                         data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
@@ -170,24 +184,7 @@
                         {% endfor %}
                     </div>
                 </div>
-                {{ per_page_select('plPerPage', pager.per_page, sizes=page_sizes, default=default_per_page) }}
             </div>
-        </div>
-        {% set _st = filters.status if filters.status in ['complete', 'missing', 'upcoming', 'unmonitored', 'new'] else '' %}
-        <div class="clu-toolbar-row">
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="attentionFilter"
-                aria-pressed="{{ 'true' if filters.attention else 'false' }}">
-                <i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>Needs attention
-                <span class="badge text-bg-secondary ms-1">{{ attention_count }}</span>
-            </button>
-            {{ filter_bar('statusFilter', [
-                ('', 'All'),
-                {'value': 'complete', 'label': 'Complete', 'icon': 'bi-square-fill', 'icon_class': 'text-success'},
-                {'value': 'missing', 'label': 'Missing', 'icon': 'bi-square-fill', 'icon_class': 'text-danger'},
-                {'value': 'upcoming', 'label': 'Upcoming', 'icon': 'bi-square-fill', 'icon_class': 'text-info'},
-                {'value': 'unmonitored', 'label': 'Not monitored', 'icon': 'bi-square-fill', 'icon_class': 'text-secondary'},
-                {'value': 'new', 'label': 'New arrivals', 'count': new_arrivals},
-            ], active=_st, label='Status') }}
         </div>
         <div class="clu-toolbar-row">
             {{ letter_bar('alphabetFilter', letters, active=filters.letter if filters.letter in letters else '') }}
@@ -267,16 +264,21 @@
         </div>
     </div>
 
-    {{ pager_nav('plPagination', 'Pull list pagination', attrs={
-        'data-endpoint': url_for('series.pull_list_rows'),
-        'data-ids-endpoint': url_for('series.pull_list_ids'),
-        'data-page': pager.page, 'data-per-page': pager.per_page,
-        'data-default-per-page': default_per_page,
-        'data-per-page-cookie': per_page_cookie,
-        'data-total-pages': pager.total_pages, 'data-total': pager.total,
-        'data-total-series': total_series,
-        'data-sort': filters.sort, 'data-dir': 'desc' if filters.descending else '',
-    }) }}
+    {% call pager_row() %}
+        {{ per_page_select('plPerPage', pager.per_page, sizes=page_sizes, default=default_per_page) }}
+        {{ pager_nav('plPagination', 'Pull list pagination', classes=None, attrs={
+            'data-endpoint': url_for('series.pull_list_rows'),
+            'data-ids-endpoint': url_for('series.pull_list_ids'),
+            'data-page': pager.page, 'data-per-page': pager.per_page,
+            'data-default-per-page': default_per_page,
+            'data-per-page-cookie': per_page_cookie,
+            'data-total-pages': pager.total_pages, 'data-total': pager.total,
+            'data-total-series': total_series,
+            'data-sort': filters.sort, 'data-dir': 'desc' if filters.descending else '',
+        }) }}
+    {% endcall %}
+    </div>{# .clu-facet-main #}
+    </div>{# .clu-facet-layout #}
 
     {% endif %}
 </div>
@@ -711,8 +713,8 @@
         // '' is All on both bars.
         let currentLetterFilter = alphabetFilter ? CLU.filterValue(alphabetFilter) : '';
         let currentStatusFilter = statusFilter ? CLU.filterValue(statusFilter) : '';
-        const attentionBtn = document.getElementById('attentionFilter');
-        let currentAttention = attentionBtn ? attentionBtn.getAttribute('aria-pressed') === 'true' : false;
+        const attentionFilter = document.getElementById('attentionFilter');
+        let currentAttention = attentionFilter ? CLU.filterValue(attentionFilter).length > 0 : false;
         let currentSort = {
             column: nav.dataset.sort || null,
             ascending: nav.dataset.dir !== 'desc',
@@ -801,7 +803,7 @@
         function filterParams() {
             return {
                 q: searchInput.value.trim(),
-                publisher: publisherFilter ? publisherFilter.value : '',
+                publisher: publisherFilter ? CLU.filterValue(publisherFilter) : '',
                 letter: currentLetterFilter,
                 status: currentStatusFilter,
                 attention: currentAttention ? '1' : '',
@@ -940,11 +942,11 @@
             if (!btn) return;
             searchInput.value = '';
             if (btn.textContent.trim() === 'Clear filters') {
-                if (publisherFilter) publisherFilter.value = '';
                 currentLetterFilter = '';
                 currentStatusFilter = '';
                 currentAttention = false;
-                if (attentionBtn) attentionBtn.setAttribute('aria-pressed', 'false');
+                CLU.setFilterValue(publisherFilter, '');
+                CLU.setFilterValue(attentionFilter, []);
                 CLU.setFilterValue(alphabetFilter, '');
                 CLU.setFilterValue(statusFilter, '');
             }
@@ -954,15 +956,10 @@
         // A server search: CLU.bindSearch waits for a pause in the typing.
         CLU.bindSearch(searchInput, applyFilters);
 
-        if (publisherFilter) publisherFilter.addEventListener('change', applyFilters);
-
-        if (attentionBtn) {
-            attentionBtn.addEventListener('click', function () {
-                currentAttention = !currentAttention;
-                attentionBtn.setAttribute('aria-pressed', String(currentAttention));
-                applyFilters();
-            });
-        }
+        CLU.filterBar(publisherFilter, { onChange: applyFilters });
+        CLU.filterBar(attentionFilter, {
+            onChange: value => { currentAttention = value.length > 0; applyFilters(); },
+        });
 
         // The letter bar's second click on a letter goes back to All.
         CLU.filterBar(alphabetFilter, {
