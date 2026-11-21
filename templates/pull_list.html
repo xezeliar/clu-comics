@@ -176,7 +176,7 @@
                     </button>
                     <div class="dropdown-menu dropdown-menu-end p-2" id="plColumnsMenu" aria-labelledby="plColumnsBtn">
                         {% for key, label in optional_columns %}
-                        <div class="form-check dropdown-item-text py-1">
+                        <div class="form-check py-1 me-2">
                             <input class="form-check-input pl-col-toggle" type="checkbox" id="plCol-{{ key }}"
                                 value="{{ key }}" {% if key not in hidden_columns %}checked{% endif %}>
                             <label class="form-check-label" for="plCol-{{ key }}">{{ label }}</label>
