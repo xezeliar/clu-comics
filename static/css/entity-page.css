@@ -30,6 +30,16 @@
 .ch-col { display: flex; flex-direction: column; gap: 2rem; min-width: 0; }
 .ch-sh { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .75rem; flex-wrap: wrap; }
 .ch-sh h2, .ch-aside h2 { font-size: 1.25rem; font-weight: 500; margin: 0 auto 0 0; }
+/* A section's "see all" link: a quiet tinted pill with an arrow that leans in on hover. */
+.ch-all { --ch-all: var(--clu-select, var(--bs-link-color)); align-self: center; display: inline-flex; align-items: center; gap: .35rem;
+    padding: .3rem .5rem .3rem .75rem; border-radius: var(--bs-border-radius-pill); font-size: .8125rem; font-weight: 500;
+    color: var(--bs-emphasis-color); text-decoration: none; white-space: nowrap;
+    background: color-mix(in srgb, var(--ch-all) 14%, transparent); border: 1px solid color-mix(in srgb, var(--ch-all) 40%, transparent);
+    transition: background-color .15s, border-color .15s; }
+.ch-all .bi { font-size: .8em; opacity: .7; transition: translate .15s, opacity .15s; }
+.ch-all:hover { color: var(--bs-emphasis-color); background: color-mix(in srgb, var(--ch-all) 24%, transparent); border-color: color-mix(in srgb, var(--ch-all) 60%, transparent); }
+.ch-all:hover .bi { translate: 2px 0; opacity: 1; }
+.ch-all:focus-visible { outline: 2px solid var(--ch-all); outline-offset: 2px; }
 .ch-n { font-size: .75rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ch-sub { display: block; font-size: .75rem; color: var(--bs-secondary-color); }
 
@@ -129,7 +139,7 @@
     .tm-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem .75rem; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .ch-cover { transition: none; }
+    .ch-cover, .ch-all, .ch-all .bi { transition: none; }
     .ch-card:hover .ch-cover, .ch-card:focus-visible .ch-cover { translate: none; }
     .ch-loading { animation: none; }
 }

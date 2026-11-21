@@ -120,13 +120,13 @@
       {% if p.most %}
       <section aria-labelledby="chMostH">
         <div class="ch-sh"><h2 id="chMostH">{{ most_label | default('Appears most in') }}</h2>
-          {% if p.series | length > p.most | length %}<a class="small" href="{{ series_href }}">All {{ p.series | length }} series</a>{% endif %}</div>
+          {% if p.series | length > p.most | length %}<a class="ch-all" href="{{ series_href }}">All {{ p.series | length }} series<i class="bi bi-arrow-right" aria-hidden="true"></i></a>{% endif %}</div>
         <ul class="ch-shelf">{% for s in p.most %}{{ series_card(s) }}{% endfor %}</ul>
       </section>
       {% endif %}
       {% if p.newest %}
       <section aria-labelledby="chNewH">
-        <div class="ch-sh"><h2 id="chNewH">Newest in your library</h2><a class="small" href="{{ newest_href }}">{{ newest_label }}</a></div>
+        <div class="ch-sh"><h2 id="chNewH">Newest in your library</h2><a class="ch-all" href="{{ newest_href }}">{{ newest_label }}<i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
         <ul class="ch-shelf">{% for i in p.newest %}{{ issue_card(i, 'newest', loop.index0) }}{% endfor %}</ul>
       </section>
       {% endif %}

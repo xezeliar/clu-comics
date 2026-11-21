@@ -44,7 +44,7 @@
 {% block overview_mid %}
 {% if mem['in'] %}
 <section aria-labelledby="tmMemH">
-  <div class="ch-sh"><h2 id="tmMemH">Members</h2><a class="small" href="{{ members_href }}">All {{ n_members }} member{{ 's' if n_members != 1 }}</a></div>
+  <div class="ch-sh"><h2 id="tmMemH">Members</h2><a class="ch-all" href="{{ members_href }}">All {{ n_members }} member{{ 's' if n_members != 1 }}<i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
   <ul class="pt-grid tm-strip">
     {% for m in mem['in'] %}{{ member_tile(m) }}{% endfor %}
   </ul>
