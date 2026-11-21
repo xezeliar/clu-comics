@@ -233,3 +233,100 @@ class TestRefreshProfile:
         create_user("reader", password="readerpass", role="reader")
         client.post("/login", data={"username": "reader", "password": "readerpass"})
         assert client.post("/api/characters/Batman/refresh").status_code == 403
+
+
+class TestMatchRoutes:
+    """Change match / Unmatch: search, record preview, POST and DELETE."""
+
+    @pytest.fixture
+    def token(self, app):
+        app.config["METRON_API_TOKEN"] = "t"
+        yield
+        app.config["METRON_API_TOKEN"] = ""
+
+    @pytest.fixture
+    def api(self):
+        api = FakeMetron(
+            lists={("characters", "Batman"): [NS(id=1, name="Batman"), NS(id=2, name="Batman")]},
+            details={("character", 2): NS(id=2, name="Batman", image=None, cv_id=None, desc="Earth-2",
+                                         alias=[], universes=[], creators=[], resource_url=None)})
+        with patch("models.metron.paused_reason", return_value=None), \
+                patch("models.metron.get_flask_api", return_value=api):
+            yield api
+
+    def test_search_marks_the_current_match(self, client, library, token, api):
+        r = client.get("/api/characters/Batman/match/search?q=Batman")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["current"] == 1 and data["unmatched"] is False
+        assert [x["id"] for x in data["results"]] == [1, 2]
+
+    def test_current_record_comes_from_the_stored_profile(self, client, library, token, api):
+        from core import entity_profiles
+
+        entity_profiles.store("character", "Batman", NS(id=1, cv_id=7, desc="Bruce", name="Batman (1940)"))
+        api.calls.clear()
+        data = client.get("/api/characters/Batman/match/search").get_json()
+        rec = data["current_record"]
+        assert rec["id"] == 1 and rec["desc"] == "Bruce" and rec["has_cv"]
+        assert rec["name"] == "Batman (1940)"  # the record's own name, not the page's
+        assert rec["image"].startswith("/api/person-art/character/Batman")
+        assert api.calls == [("characters_list", {"name": "Batman"})]
+
+    def test_record(self, client, library, token, api):
+        with patch("core.person_art._default_fetch_image", return_value=None):
+            r = client.get("/api/characters/metron-record/2")
+        assert r.status_code == 200 and r.get_json()["record"]["desc"] == "Earth-2"
+
+    def test_failed_search_says_failed(self, client, library, token, api):
+        api.fail_list = True
+        r = client.get("/api/characters/Batman/match/search")
+        assert r.status_code == 502 and r.get_json()["reason"] == "failed"
+
+    def test_quota_and_token_reasons(self, client, library, token):
+        with patch("models.metron.paused_reason", return_value="Daily limit spent."):
+            r = client.get("/api/characters/Batman/match/search")
+        assert r.status_code == 503 and r.get_json()["reason"] == "quota"
+
+    def test_no_token(self, client, library):
+        r = client.get("/api/characters/Batman/match/search")
+        assert r.status_code == 409 and r.get_json()["reason"] == "token"
+
+    def test_post_pins_and_refetches(self, client, library, token, api):
+        with patch("core.person_art.ensure", return_value=True) as ensure:
+            r = client.post("/api/characters/Batman/match", json={"metron_id": 2})
+        assert r.status_code == 202
+        assert person_art.current_match("character", "Batman") == (2, False)
+        assert ensure.call_args.args[1:] == ("character", "Batman")
+        assert ensure.call_args.kwargs == {"force": True}
+
+    def test_post_needs_a_number(self, client, library, token, api):
+        assert client.post("/api/characters/Batman/match", json={"metron_id": "x"}).status_code == 400
+
+    def test_delete_unmatches(self, client, library):
+        assert client.delete("/api/characters/Batman/match").status_code == 200
+        assert person_art.current_match("character", "Batman") == (None, True)
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "Unmatched by hand" in body and 'data-bs-target="#matchModal"' in body
+        assert "#unmatchModal" not in body
+
+    def test_matched_page_offers_change_and_unmatch(self, client, library):
+        from core import entity_profiles
+
+        entity_profiles.store("character", "Batman", NS(id=1, cv_id=None, desc="x"))
+        body = client.get("/characters/Batman").get_data(as_text=True)
+        assert "Change match" in body and 'data-bs-target="#unmatchModal"' in body
+        assert "/static/js/entity-match.js" in body
+
+    def test_reader_gets_403_and_no_modal(self, client, db_connection, library, monkeypatch, token):
+        from core.database import create_user
+        monkeypatch.delenv("CLU_USERNAME", raising=False)
+        monkeypatch.delenv("CLU_PASSWORD", raising=False)
+        create_user("owner", password="ownerpass", role="owner")
+        create_user("reader", password="readerpass", role="reader")
+        client.post("/login", data={"username": "reader", "password": "readerpass"})
+        assert client.get("/api/characters/Batman/match/search").status_code == 403
+        assert client.get("/api/characters/metron-record/2").status_code == 403
+        assert client.post("/api/characters/Batman/match", json={"metron_id": 2}).status_code == 403
+        assert client.delete("/api/characters/Batman/match").status_code == 403
+        assert "matchModal" not in client.get("/characters/Batman").get_data(as_text=True)

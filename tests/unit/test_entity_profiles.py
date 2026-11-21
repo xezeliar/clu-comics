@@ -60,7 +60,7 @@ def test_resolve_stores_metron_and_comicvine(cache, db_connection):
     person_art.resolve("character", "Batman", _api(), lambda u: None, cv)
     p = entity_profiles.get_profile("character", "batman")
     assert (p["status"], p["metron_id"], p["cv_id"], p["error"]) == ("ok", 1, 1699, None)
-    assert p["metron"] == {"desc": "The Dark Knight.", "gcd_id": 7, "alias": ["The Bat"],
+    assert p["metron"] == {"name": "Batman", "desc": "The Dark Knight.", "gcd_id": 7, "alias": ["The Bat"],
                            "url": "https://metron.cloud/character/batman/",
                            "universes": ["Earth 0"], "creators": ["Bob Kane"]}
     assert p["cv"]["aliases"] == ["Matches Malone", "The Bat-Man"]
@@ -113,7 +113,7 @@ def test_creator_fields_and_sanitized_description(cache, db_connection):
         website="https://mara.example", description='<p onclick="x()">Hi<script>bad()</script></p>')})
     person_art.resolve("creator", "Mara Quell", api, lambda u: None, cv)
     p = entity_profiles.get_profile("creator", "Mara Quell")
-    assert p["metron"] == {"desc": None, "gcd_id": None, "url": None, "alias": [],
+    assert p["metron"] == {"name": None, "desc": None, "gcd_id": None, "url": None, "alias": [],
                            "birth": "1970-01-02", "death": None}
     assert (p["cv"]["hometown"], p["cv"]["country"], p["cv"]["website"]) == (
         "Leeds", "UK", "https://mara.example")

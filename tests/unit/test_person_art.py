@@ -281,3 +281,67 @@ class TestArtUrls:
             urls = person_art.art_urls("character", ["Batman", "Joker"])
         assert urls["Joker"] is None
         assert urls["Batman"].startswith("/api/person-art/character/Batman?v=")
+
+
+class TestMatch:
+    """Change match / Unmatch: a Clerk picks the Metron record by hand."""
+
+    def _batman(self, cache):
+        api = FakeMetron(**BATMAN_API)
+        person_art.resolve("character", "Batman", api, lambda u: _jpeg())
+        return api
+
+    def test_set_match_clears_everything_and_pins_the_id(self, cache, db_connection):
+        from core import entity_profiles
+
+        self._batman(cache)
+        assert os.path.isfile(person_art.image_path("character", "batman"))
+        person_art.set_match("character", "Batman", 2)
+        row = _row(db_connection, "character", "Batman")
+        assert row["metron_id"] == 2 and row["status"] is None and row["image_file"] is None
+        assert not os.path.exists(person_art.image_path("character", "batman"))
+        assert db_connection.execute(
+            "SELECT COUNT(*) FROM character_teams WHERE character_key = 'batman'").fetchone()[0] == 0
+        prof = entity_profiles.get_profile("character", "Batman")
+        assert prof["metron_id"] is None and prof["metron"] is None and prof["cv"] is None
+        assert entity_profiles.is_due("character", "Batman", person_art._utcnow())
+
+    def test_resolve_after_set_match_uses_the_picked_record(self, cache, db_connection):
+        api = self._batman(cache)
+        api.details[("character", 2)] = NS(id=2, name="Batman (Earth-2)", image=None, teams=[])
+        person_art.set_match("character", "Batman", 2)
+        api.calls.clear()
+        person_art.resolve("character", "Batman", api, lambda u: _jpeg())
+        assert api.calls == [("character", 2)]
+        assert _row(db_connection, "character", "Batman")["metron_id"] == 2
+
+    def test_unmatch_is_never_looked_up_again(self, cache, db_connection):
+        from core import entity_profiles
+
+        api = self._batman(cache)
+        person_art.unmatch("character", "Batman")
+        row = _row(db_connection, "character", "Batman")
+        assert row["metron_id"] is None and row["status"] == "unmatched"
+        assert entity_profiles.get_profile("character", "Batman")["status"] == "unmatched"
+        now = person_art._utcnow()
+        assert not person_art._is_due(row, now)
+        assert not entity_profiles.is_due("character", "Batman", now)
+        api.calls.clear()
+        assert person_art.resolve("character", "Batman", api, lambda u: _jpeg()) == "unmatched"
+        assert api.calls == []
+        assert person_art.current_match("character", "Batman") == (None, True)
+
+    def test_search_returns_ids_and_names(self, cache):
+        api = FakeMetron(**BATMAN_API)
+        assert person_art.search("character", "Batman", api) == [
+            {"id": 2, "name": "Batman (Earth-2)"}, {"id": 1, "name": "BATMAN"}]
+        assert person_art.search("character", "Batman", FakeMetron(fail_list=True)) is None
+
+    def test_preview_inlines_a_small_image(self, cache):
+        api = FakeMetron(details={("character", 1): NS(
+            id=1, name="Batman", image="https://img/b.jpg", cv_id=5, desc="Bruce",
+            alias=["Bruce Wayne"], universes=[NS(name="Earth-0")], creators=[], resource_url=None)})
+        rec = person_art.preview("character", 1, api, lambda u: _jpeg())
+        assert rec["name"] == "Batman" and rec["has_cv"] and rec["universes"] == ["Earth-0"]
+        assert rec["image"].startswith("data:image/jpeg;base64,")
+        assert person_art.preview("character", 9, api, lambda u: None) is None

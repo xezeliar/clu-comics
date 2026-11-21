@@ -7,8 +7,9 @@ team counts from `<Teams>`; every credit links); stored profiles done
 and creator pages (`templates/character.html`, `templates/team.html` and
 `templates/creator.html`, all extending `templates/entity_page.html`;
 `entity_details`, `character_info`, `team_info`, `team_members` and
-`creator_info` in `core/creators.py`). `person.html` is gone. Next: Change
-match / Unmatch. Design: the "Character page", "Team page" and "Creator page"
+`creator_info` in `core/creators.py`). `person.html` is gone. Change match /
+Unmatch done (see "Matching"). Next: a ComicVine image fallback for portraits.
+Design: the "Character page", "Team page", "Creator page" and "Change match"
 entries on the CLU Design Board.
 
 ## Origin and data policy
@@ -186,7 +187,7 @@ ComicVine client. Write both into one `entity_profiles` row per (kind, key)
 | `metron_id`, `cv_id` | the matched records (`cv_id` from Metron) |
 | `metron_json`, `cv_json` | only the fields the page shows (the source tables), not the whole response |
 | `metron_fetched_at`, `cv_fetched_at` | UTC, set on each successful fetch |
-| `status`, `error` | `ok` / `error` / `missing`, last error text |
+| `status`, `error` | `ok` / `error` / `missing` / `unmatched`, last error text |
 
 - **No expiry.** A stored profile is never deleted or hidden because it is old.
   Only Unmatch clears it (and Change match replaces it).
@@ -200,6 +201,29 @@ ComicVine client. Write both into one `entity_profiles` row per (kind, key)
 A sweep would burn the shared Metron and ComicVine limits (`person_art` already
 removed one because it "hammered Metron into timeouts"), so no job, setting or
 Schedules row is added.
+
+## Matching
+
+The default match is still the exact, casefolded name on Metron. A Clerk or
+Store Owner fixes a wrong one from More on the detail page
+(`templates/partials/match_modal.html`, `static/js/entity-match.js`):
+
+- **Change match** (or **Match <noun>** when nothing is matched) searches
+  Metron by name (`GET /api/<grid>/<name>/match/search?q=`) and shows the one
+  record picked (`GET /api/<grid>/metron-record/<id>`). Search results are only
+  names and ids, so the record tells them apart. Its image comes back as a small
+  data URI made on the server: the browser never loads Metron.
+- **Use this match** (`POST /api/<grid>/<name>/match {metron_id}`) is enabled
+  only once a record other than Current has loaded. `person_art.set_match` pins
+  the id and clears the photo, the stored profile and (characters) the teams
+  before the refetch, so the old record's ComicVine facts never show under the
+  new one if ComicVine fails.
+- **Unmatch** (`DELETE /api/<grid>/<name>/match`, after a confirm) clears the
+  same things and sets status `unmatched` in `person_art` and
+  `entity_profiles`. An unmatched name is never looked up by name again; a
+  Change match is the only way back.
+- Errors carry `reason`: `quota` (Metron paused, no Retry), `token` (link to
+  Settings) or `failed` (Retry). The stored match is kept in every case.
 
 ## Out of scope
 

@@ -1,0 +1,57 @@
+{#- Change match / Unmatch for the character, team and creator pages
+    (docs/browse-hub.md "Matching"). Included by entity_page.html for Clerk
+    and up; static/js/entity-match.js drives it. Needs noun, refresh_grid,
+    p and prof in context. -#}
+{% set matched = prof.metron_id %}
+<div class="modal fade" id="matchModal" tabindex="-1" aria-labelledby="matchModalLabel" aria-hidden="true"
+     data-search-url="{{ url_for('creators.match_search', grid=refresh_grid, name=p.name) }}"
+     data-record-url="{{ url_for('creators.match_record', grid=refresh_grid, metron_id=0) }}"
+     data-match-url="{{ url_for('creators.set_match', grid=refresh_grid, name=p.name) }}"
+     data-settings-url="{{ url_for('config_page') }}"
+     data-noun="{{ noun }}" data-name="{{ p.name }}">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="matchModalLabel">{{ 'Change match for' if matched else 'Match' }} {{ p.name }}</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body mt-bd">
+        {% if matched %}
+        <p class="mt-cur">Matched to <b>{{ (prof.metron or {}).name or p.name }}</b>, Metron {{ prof.metron_id }}{% if p.info.universe %} · {{ p.info.universe }}{% endif %}.</p>
+        {% endif %}
+        <form class="mt-q" role="search" id="matchForm">
+          <label class="visually-hidden" for="matchQ">Search Metron {{ noun }}s</label>
+          <input class="form-control" type="search" id="matchQ" value="{{ p.name }}" placeholder="Search Metron {{ noun }}s…" maxlength="200">
+          <button type="submit" class="btn btn-outline-secondary">Search</button>
+        </form>
+        <div id="matchMid"></div>
+      </div>
+      <div class="modal-footer mt-ft">
+        <span class="mt-note" id="matchNote">Replaces the photo, bio and Information with this record’s.</span>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="matchUse" disabled>Use this match</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if matched %}
+<div class="modal fade" id="unmatchModal" tabindex="-1" aria-labelledby="unmatchModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="unmatchModalLabel">Unmatch {{ p.name }}?</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>This removes the Metron photo, bio{{ ', Information and teams' if noun == 'character' else ' and Information' }} stored for {{ p.name }}, and CLU stops matching it by name. Your comics and their tags are not changed.</p>
+        <p class="small text-body-secondary mb-0">You can choose a Metron record again from More.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-danger" id="unmatchBtn">Unmatch</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

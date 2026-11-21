@@ -162,6 +162,8 @@ def resolve(kind, name, api, fetch_image, cv=None):
     key = key_for(name)
     row = _get_row(kind, key)
     metron_id = row["metron_id"] if row else None
+    if metron_id is None and row and row["status"] == "unmatched":
+        return "unmatched"
 
     if metron_id is None:
         results = getattr(api, _LIST_METHOD[kind])({"name": name})
@@ -199,12 +201,107 @@ def resolve(kind, name, api, fetch_image, cv=None):
 
 
 # --------------------------------------------------------------------------
+# Change match / Unmatch (a Clerk picks the Metron record by hand)
+# --------------------------------------------------------------------------
+
+def _forget(kind, name, metron_id, status):
+    """Drop the photo, stored profile and (characters) teams, then pin the row."""
+    key = key_for(name)
+    try:
+        os.unlink(image_path(kind, key))
+    except OSError:
+        pass
+    with db_conn() as conn:
+        if not conn:
+            return False
+        conn.execute(
+            "INSERT INTO person_art (kind, key, name, metron_id, image_file, status, checked_at)"
+            " VALUES (?, ?, ?, ?, NULL, ?, ?)"
+            " ON CONFLICT(kind, key) DO UPDATE SET name = excluded.name,"
+            " metron_id = excluded.metron_id, image_file = NULL,"
+            " status = excluded.status, checked_at = excluded.checked_at",
+            (kind, key, name, metron_id, status, _utcnow().strftime("%Y-%m-%d %H:%M:%S")))
+        if kind == "character":
+            conn.execute("DELETE FROM character_teams WHERE character_key = ?", (key,))
+        conn.commit()
+    if kind in entity_profiles.KINDS:
+        entity_profiles.clear(kind, name, status)
+    return True
+
+
+def set_match(kind, name, metron_id):
+    """Use this Metron record for the name. The caller then refetches (``ensure(force=True)``).
+
+    The old profile is cleared first, so the old record's ComicVine facts never
+    show under the new one if the ComicVine fetch fails.
+    """
+    if kind not in KINDS:
+        raise ValueError(f"Unknown kind {kind!r}")
+    return _forget(kind, name, int(metron_id), None)
+
+
+def unmatch(kind, name):
+    """Forget the match and never look the name up again (until a Change match)."""
+    if kind not in KINDS:
+        raise ValueError(f"Unknown kind {kind!r}")
+    return _forget(kind, name, None, "unmatched")
+
+
+def current_match(kind, name):
+    """``(metron_id, unmatched)`` for the page's picker."""
+    row = _get_row(kind, key_for(name))
+    if not row:
+        return None, False
+    return row["metron_id"], row["status"] == "unmatched"
+
+
+def search(kind, query, api):
+    """Metron's name search: ``[{id, name}]``, or None when the request failed."""
+    results = getattr(api, _LIST_METHOD[kind])({"name": query})
+    if results is None:
+        return None
+    return [{"id": r.id, "name": r.name} for r in results[:50] if getattr(r, "name", None)]
+
+
+def preview(kind, metron_id, api, fetch_image):
+    """One Metron record for the picker, or None when the request failed.
+
+    The image comes back as a small data URI: the browser never loads Metron.
+    """
+    import base64
+
+    detail = getattr(api, _DETAIL_METHOD[kind])(int(metron_id))
+    if detail is None:
+        return None
+    out = entity_profiles.metron_fields(kind, detail)
+    out.update(id=detail.id, name=getattr(detail, "name", ""),
+               has_cv=bool(getattr(detail, "cv_id", None)), image=None)
+    url = getattr(detail, "image", None)
+    data = fetch_image(str(url)) if url else None
+    if data:
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img = img.convert("RGB")
+                img.thumbnail((240, 240))
+                buf = io.BytesIO()
+                img.save(buf, "JPEG", quality=80)
+            out["image"] = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+        except Exception as e:
+            app_logger.warning(f"Person art: preview image for {kind} {metron_id} failed: {e}")
+    return out
+
+
+# --------------------------------------------------------------------------
 # What to resolve next
 # --------------------------------------------------------------------------
 
 def _is_due(row, now):
     if row is None or not row["status"]:
         return True
+    if row["status"] == "unmatched":
+        return False
     try:
         checked = datetime.strptime(row["checked_at"], "%Y-%m-%d %H:%M:%S")
     except (TypeError, ValueError):

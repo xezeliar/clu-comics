@@ -54,7 +54,8 @@ def _aliases(text):
 
 def metron_fields(kind, detail):
     """The Metron fields a page shows, as plain JSON-able values."""
-    out = {"desc": getattr(detail, "desc", None) or None,
+    out = {"name": getattr(detail, "name", None) or None,
+           "desc": getattr(detail, "desc", None) or None,
            "gcd_id": getattr(detail, "gcd_id", None),
            "url": _url(getattr(detail, "resource_url", None))}
     if kind in ("character", "creator"):
@@ -180,6 +181,14 @@ def record_error(kind, name, why):
     """A Metron request failed; whatever was stored before stays."""
     if kind in KINDS:
         _upsert(kind, name, status="error", error=why)
+
+
+def clear(kind, name, status=None):
+    """Forget the stored record: Change match (``status`` None, refetched next)
+    or Unmatch (``"unmatched"``, never looked up by name again)."""
+    if kind in KINDS:
+        _upsert(kind, name, status=status, error=None, metron_id=None, cv_id=None,
+                metron_json=None, cv_json=None, metron_fetched_at=None, cv_fetched_at=None)
 
 
 def store(kind, name, detail, cv=None):

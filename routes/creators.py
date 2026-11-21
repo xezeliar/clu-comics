@@ -279,6 +279,93 @@ def refresh_profile(grid, name):
     return jsonify({"success": True, "started": started}), 202
 
 
+# --- Change match / Unmatch (Clerk and up) ---
+
+def _match_api():
+    """``(api, None)``, or ``(None, error response)`` naming why Metron cannot be asked."""
+    from models import metron
+
+    if not _can_refresh():
+        return None, (jsonify({"success": False, "error": "Clerk or Store Owner only"}), 403)
+    if not (current_app.config.get("METRON_API_TOKEN") or "").strip():
+        return None, (jsonify({"success": False, "reason": "token",
+                               "error": "Add a Metron API token in Settings first"}), 409)
+    reason = metron.paused_reason()
+    if reason:
+        return None, (jsonify({"success": False, "reason": "quota", "error": reason}), 503)
+    api = metron.get_flask_api(current_app._get_current_object())
+    if not api:
+        return None, (jsonify({"success": False, "reason": "token",
+                               "error": "Add a Metron API token in Settings first"}), 409)
+    return api, None
+
+
+def _failed(what):
+    return jsonify({"success": False, "reason": "failed",
+                    "error": f"Metron did not answer the {what}."}), 502
+
+
+@creators_bp.route("/api/<any(characters, teams, creators):grid>/<path:name>/match/search")
+def match_search(grid, name):
+    """Metron records to pick from, with the one in use now."""
+    api, err = _match_api()
+    if err:
+        return err
+    name = strip_provider_ids(name) or name
+    q = (request.args.get("q") or name).strip()[:200]
+    results = person_art.search(ART_KINDS[grid], q, api)
+    if results is None:
+        return _failed("search")
+    kind = ART_KINDS[grid]
+    current, unmatched = person_art.current_match(kind, name)
+    # Current's record comes from the stored profile, so opening costs one Metron call.
+    prof = entity_profiles.get_profile(kind, name) or {}
+    record = None
+    if current and prof.get("metron_id") == current and prof.get("metron"):
+        listed = next((r["name"] for r in results if r["id"] == current), None)
+        record = {**prof["metron"], "id": current, "has_cv": bool(prof.get("cv_id")),
+                  "name": prof["metron"].get("name") or listed or name,
+                  "image": person_art.art_urls(kind, [name])[name]}
+    return jsonify({"success": True, "results": results, "current": current,
+                    "current_record": record, "unmatched": unmatched})
+
+
+@creators_bp.route("/api/<any(characters, teams, creators):grid>/metron-record/<int:metron_id>")
+def match_record(grid, metron_id):
+    """One Metron record for the picker's preview; its image comes inline."""
+    api, err = _match_api()
+    if err:
+        return err
+    record = person_art.preview(ART_KINDS[grid], metron_id, api,
+                                person_art._default_fetch_image)
+    if record is None:
+        return _failed("request for that record")
+    return jsonify({"success": True, "record": record})
+
+
+@creators_bp.route("/api/<any(characters, teams, creators):grid>/<path:name>/match",
+                   methods=["POST", "DELETE"])
+def set_match(grid, name):
+    """POST ``{metron_id}`` uses that record and refetches; DELETE unmatches."""
+    kind = ART_KINDS[grid]
+    name = strip_provider_ids(name) or name
+    if request.method == "DELETE":
+        if not _can_refresh():
+            return jsonify({"success": False, "error": "Clerk or Store Owner only"}), 403
+        person_art.unmatch(kind, name)
+        return jsonify({"success": True})
+    api, err = _match_api()
+    if err:
+        return err
+    try:
+        metron_id = int((request.get_json(silent=True) or {}).get("metron_id"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "metron_id must be a number"}), 400
+    person_art.set_match(kind, name, metron_id)
+    started = person_art.ensure(current_app._get_current_object(), kind, name, force=True)
+    return jsonify({"success": True, "started": started}), 202
+
+
 @creators_bp.route("/api/person-art/<kind>/<path:name>", endpoint="person_art")
 def person_art_image(kind, name):
     """A cached Metron photo. The file path is a hash of the name, never the name."""

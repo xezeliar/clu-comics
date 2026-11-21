@@ -77,8 +77,22 @@
           {{ self.actions() }}
         {% elif slot == 'actions' %}{{ self.actions() }}
         {% elif slot == 'more' and can_refresh %}
+          {% if prof.metron_id %}
           <li><button type="button" class="dropdown-item" id="refreshProfileBtn">
             <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh Metron and ComicVine</button></li>
+          <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#matchModal">
+            <i class="bi bi-arrow-left-right" aria-hidden="true"></i> Change match</button></li>
+          <li><hr class="dropdown-divider"></li>
+          <li><button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#unmatchModal">
+            <i class="bi bi-x-circle" aria-hidden="true"></i> Unmatch</button></li>
+          {% else %}
+          {% if prof.status and prof.status != 'unmatched' %}
+          <li><button type="button" class="dropdown-item" id="refreshProfileBtn">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh Metron and ComicVine</button></li>
+          {% endif %}
+          <li><button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#matchModal">
+            <i class="bi bi-search" aria-hidden="true"></i> Match {{ noun }}</button></li>
+          {% endif %}
         {% endif %}
       {% endcall %}
     </div>
@@ -218,8 +232,12 @@
         </p>
       {% elif p.looking %}
         <p class="ch-note ch-loading" role="status">Looking {{ p.name }} up on Metron. Reload the page in a moment to see the bio and details.</p>
+      {% elif prof.status == 'unmatched' %}
+        <div class="ch-note ch-unmatched">Unmatched by hand, so CLU will not look it up again.
+          {%- if can_refresh %} Match {{ noun }} to choose a Metron record.
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#matchModal">Match {{ noun }}</button>{% endif %}</div>
       {% elif prof.status == 'missing' %}
-        <p class="ch-note">Metron has no {{ noun }} named exactly “{{ p.name }}”, so there is no bio or ComicVine detail.</p>
+        <p class="ch-note">Metron has no {{ noun }} named exactly “{{ p.name }}”, so there is no bio or ComicVine detail.{% if can_refresh %} Match {{ noun }} in More to choose one.{% endif %}</p>
       {% elif prof.status == 'error' %}
         <p class="ch-note">Metron could not be reached.{% if can_refresh %} Refresh in More tries again.{% endif %}</p>
       {% elif has_token %}
@@ -234,6 +252,7 @@
 </div>
 
 {% include 'partials/reader_modal.html' %}
+{% if can_refresh %}{% include 'partials/match_modal.html' %}{% endif %}
 {% block page_end %}{% endblock %}
 {% endblock %}
 
@@ -245,6 +264,7 @@
 <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
 <script src="{{ asset('js/clu-streaming.js') }}"></script>
 <script src="{{ asset('js/reader.js') }}"></script>
+{% if can_refresh %}<script src="{{ asset('js/entity-match.js') }}"></script>{% endif %}
 <script>
 (function () {
     const lists = {

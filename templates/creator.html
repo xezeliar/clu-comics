@@ -58,7 +58,7 @@
   <div class="ch-sh"><h2 id="crMoreH">More on {{ p.name }}</h2></div>
   <details>
     <summary>ComicVine biography</summary>
-    <div class="cr-desc">{{ info.description | safe }}</div>
+    <div class="cr-desc">{{ info.description | sanitize_description }}</div>
     <p class="ch-note">From ComicVine.</p>
   </details>
 </section>
