@@ -438,12 +438,15 @@
             b.hidden = long && i >= MORE_AFTER && !b.classList.contains('active');
         });
         var more = group.nextElementSibling;
-        if (!more || !more.hasAttribute('data-clu-more')) {
+        // Not [data-clu-more]: that names the page header's More menu and the
+        // dashboard card's menu button, and a click inside the header menu used
+        // to land in the handler below, which hid the menu for good.
+        if (!more || !more.hasAttribute('data-clu-facet-more')) {
             if (!long) return;
             more = document.createElement('button');
             more.type = 'button';
             more.className = 'btn btn-link btn-sm clu-facet-more';
-            more.setAttribute('data-clu-more', '');
+            more.setAttribute('data-clu-facet-more', '');
             group.after(more);
         }
         var hidden = opts.filter(function (b) { return b.hidden; }).length;
@@ -513,7 +516,7 @@
             clearGroups(Array.prototype.slice.call(clearFacets.closest('.clu-facets').querySelectorAll('[data-clu-mode="facet"]')));
             return;
         }
-        var more = t.closest('[data-clu-more]');
+        var more = t.closest('[data-clu-facet-more]');
         if (more) {
             var group = more.previousElementSibling;
             group._cluShowAll = true;
