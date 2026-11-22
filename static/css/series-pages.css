@@ -1,0 +1,541 @@
+/*
+ * Series, a series' issue list and the issue page (templates/series_index.html,
+ * series_issues.html, comic_issue.html; static/js/series-pages.js).
+ *
+ * Theme variables only, except on cover art: the stickers keep the collection
+ * grid's fixed colours (collection.css .issue-badge / .xml-badge) because they
+ * sit on artwork, not on the themed page (DESIGN.md, The Sticker Exception).
+ */
+
+/* ---- Cover grids ---------------------------------------------------------- */
+
+.sp-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 1.5rem;
+}
+
+@media (max-width: 575.98px) {
+    .sp-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+}
+
+.sp-card {
+    position: relative;
+    min-width: 0;
+}
+
+.sp-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sp-card:hover .sp-tile,
+.sp-tile:focus-visible {
+    transform: translateY(-5px);
+    color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sp-tile { transition: none; }
+    .sp-card:hover .sp-tile { transform: none; }
+}
+
+.sp-cover {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    overflow: clip;
+    background: var(--bs-tertiary-bg);
+    box-shadow: var(--clu-cover-shadow, 0 2px 5px rgba(0, 0, 0, 0.1));
+}
+
+.sp-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.sp-card.is-selected .sp-cover,
+.sp-card:has(.sp-pick:focus-visible) .sp-cover {
+    box-shadow: 0 0 0 3px var(--bs-body-bg), 0 0 0 5px var(--clu-select, var(--bs-primary));
+}
+
+.sp-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--bs-emphasis-color);
+    line-height: 1.25;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+}
+
+.sp-meta {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+    margin-top: -0.25rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--bs-border-color);
+    overflow: hidden;
+    margin-top: -0.125rem;
+}
+
+.sp-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--clu-select, var(--bs-primary));
+}
+
+/* Stickers (fixed colours: they sit on cover art) */
+.sp-num {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: thin solid #000;
+    background: rgb(253 200 63 / 85%);
+    color: #212529;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.sp-num.is-read {
+    background: rgb(25 135 84 / 90%);
+    color: #fff;
+}
+
+.sp-fix {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(220, 53, 69, 0.85);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.sp-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.sp-progress > i {
+    display: block;
+    height: 100%;
+    background: #fff;
+}
+
+/* Cover actions: a 32px scrim circle, shown on hover, focus and on touch. */
+.sp-info {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.sp-card:hover .sp-info,
+.sp-info:focus-visible {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .sp-info { opacity: 1; }
+}
+
+/* Select mode: a tick in the corner; the whole card is the checkbox. */
+.sp-tick {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 4px;
+    border: 2px solid #fff;
+    background: rgba(0, 0, 0, 0.35);
+    display: none;
+    place-items: center;
+    color: #fff;
+}
+
+.sp-pick {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+    display: none;
+}
+
+.is-selecting .sp-tick,
+.is-selecting .sp-pick {
+    display: grid;
+}
+
+.is-selecting .sp-info {
+    display: none;
+}
+
+.sp-card.is-selected .sp-tick {
+    background: var(--clu-select, var(--bs-primary));
+    border-color: var(--clu-select, var(--bs-primary));
+}
+
+.sp-tick i {
+    visibility: hidden;
+}
+
+.sp-card.is-selected .sp-tick i {
+    visibility: visible;
+}
+
+/* A run of missing issues: a dashed frame in the run, one slot however long. */
+.sp-gap {
+    aspect-ratio: 2 / 3;
+    border-radius: 8px;
+    border: 2px dashed var(--bs-secondary-color);
+    background: var(--bs-tertiary-bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    text-align: center;
+}
+
+.sp-gap strong {
+    font-size: 1.25rem;
+    color: var(--bs-emphasis-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-gap span {
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+}
+
+/* ---- Facet column extras -------------------------------------------------- */
+
+.sp-facet-search {
+    margin-bottom: 0.25rem;
+}
+
+.sp-facet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.sp-facet-head .clu-seg .btn {
+    font-size: 0.75rem;
+    padding: 0.0625rem 0.5rem;
+}
+
+@media (min-width: 992px) {
+    .sp-facets.clu-facets {
+        max-height: calc(100vh - 2rem);
+        overflow: auto;
+        padding-right: 0.25rem;
+    }
+}
+
+.sp-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
+.sp-strip-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    padding: 0.625rem 0.875rem;
+    margin-bottom: 1.25rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+    background: var(--bs-tertiary-bg);
+    font-size: 0.875rem;
+}
+
+/* ---- The bulk bar ----------------------------------------------------------- */
+
+.sp-bulk {
+    position: sticky;
+    bottom: 1rem;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 1rem;
+    background: var(--bs-dark);
+    color: var(--bs-light);
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+}
+
+.sp-bulk[hidden] {
+    display: none;
+}
+
+.sp-bulk .btn {
+    --bs-btn-color: var(--bs-light);
+    --bs-btn-border-color: rgba(var(--bs-light-rgb), 0.4);
+    --bs-btn-hover-color: var(--bs-dark);
+    --bs-btn-hover-bg: var(--bs-light);
+    --bs-btn-hover-border-color: var(--bs-light);
+}
+
+.sp-bulk .btn-link {
+    --bs-btn-border-color: transparent;
+    color: var(--bs-light);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.sp-bulk-note {
+    font-size: 0.8125rem;
+    opacity: 0.85;
+}
+
+/* ---- Tables ----------------------------------------------------------------- */
+
+.sp-table td,
+.sp-table th {
+    white-space: nowrap;
+    vertical-align: middle;
+    font-variant-numeric: tabular-nums;
+}
+
+.sp-table tr.is-gap td {
+    color: var(--bs-secondary-color);
+    background: var(--bs-tertiary-bg);
+}
+
+/* ---- The issue page ------------------------------------------------------------ */
+
+.sp-issue-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+}
+
+.sp-issue-cover {
+    max-width: 160px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+@media (min-width: 768px) {
+    .sp-issue-top {
+        grid-template-columns: 240px minmax(0, 1fr);
+        gap: 2.5rem;
+    }
+
+    .sp-issue-cover {
+        max-width: 240px;
+    }
+}
+
+.sp-section {
+    border-top: 1px solid var(--bs-border-color);
+    padding-top: 1.25rem;
+    margin-top: 1.5rem;
+}
+
+.sp-section h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+}
+
+.sp-summary {
+    margin: 0;
+    max-width: 68ch;
+    line-height: 1.65;
+}
+
+.sp-credits {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 0.75rem 1.5rem;
+    margin: 0;
+}
+
+.sp-credits dt {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--bs-secondary-color);
+}
+
+.sp-credits dd {
+    margin: 0;
+}
+
+.sp-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.sp-tag {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding: 0 0.625rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    font-size: 0.875rem;
+    color: var(--bs-body-color);
+    text-decoration: none;
+}
+
+.sp-tag:hover {
+    background: var(--bs-tertiary-bg);
+    color: var(--bs-emphasis-color);
+}
+
+@media (pointer: coarse) {
+    .sp-tag { min-height: 2.75rem; }
+    .sp-actions .btn { min-height: 2.75rem; }
+}
+
+.sp-fields summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--bs-emphasis-color);
+    min-height: 2.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sp-fields-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 0 2.5rem;
+}
+
+.sp-fields-grid h3 {
+    margin: 1rem 0 0.375rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--bs-secondary-color);
+}
+
+.sp-fields-grid dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    border-top: 1px solid var(--bs-border-color);
+}
+
+.sp-fields-grid dt,
+.sp-fields-grid dd {
+    margin: 0;
+    padding: 0.375rem 0;
+    border-bottom: 1px solid var(--bs-border-color);
+    font-size: 0.875rem;
+}
+
+.sp-fields-grid dt {
+    font-weight: 400;
+    color: var(--bs-secondary-color);
+}
+
+.sp-fields-grid dd {
+    color: var(--bs-emphasis-color);
+    overflow-wrap: anywhere;
+}
+
+.sp-fields-grid .is-empty {
+    display: none;
+}
+
+.sp-fields.show-empty .is-empty {
+    display: block;
+}
+
+.sp-fields-grid dd.is-empty {
+    color: var(--bs-secondary-color);
+    font-style: italic;
+}
+
+.sp-strip {
+    display: flex;
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0.375rem 0.375rem 1rem;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+}
+
+.sp-strip > li {
+    flex: 0 0 7.5rem;
+    scroll-snap-align: center;
+}
+
+.sp-cover.is-current {
+    box-shadow: 0 0 0 3px var(--bs-body-bg), 0 0 0 5px var(--clu-select, var(--bs-primary));
+}
+
+.sp-path {
+    font-family: var(--bs-font-monospace);
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}

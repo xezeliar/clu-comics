@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state, no_matches %}
+{% from 'partials/filters.html' import toolbar, toolbar_more, search_input, result_count,
+       pager_row, pager_nav, per_page_select %}
+
+{% block title %}{{ record.name }} - Comic Library{% endblock %}
+{% block page_shell %}container-fluid clu-shell-wide{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ asset('css/series-pages.css') }}">
+{% endblock %}
+
+{% set c = data.counts %}
+{% set noun = {'all': 'issues', 'unread': 'unread issues', 'read': 'read issues', 'untagged': 'untagged issues', 'gaps': 'missing issues'}[data.show] %}
+
+{% block content %}
+{% call(slot) page_header(record.name, subtitle=([record.publisher, years] | select | join(' · '))) %}
+  {% if slot == 'crumbs' %}
+    <li class="breadcrumb-item"><a href="{{ url_for('series_index.series_index') }}">Series</a></li>
+    {% if record.publisher %}<li class="breadcrumb-item"><a href="{{ url_for('series_index.series_index', publisher=record.publisher) }}">{{ record.publisher }}</a></li>{% endif %}
+  {% elif slot == 'count' %}
+    {% if data.jump and data.jump.gap and not data.jump.found %}
+      <span class="clu-toolbar-count" id="issuesCount">#{{ data.jump.number }} · not in your library</span>
+    {% elif q %}
+      {{ result_count('issuesCount', c.all, 'issues', 'issue', shown=data.issues_on_page | length) }}
+    {% elif data.pages > 1 %}
+      {{ result_count('issuesCount', data.total_slots, noun, first=data.first, last=data.last) }}
+    {% else %}
+      {{ result_count('issuesCount', c[data.show], noun) }}
+    {% endif %}
+  {% elif slot == 'actions' %}
+    {% if data.continue %}
+      <a class="btn btn-sm btn-primary" href="{{ continue_href }}" data-clu-keep>
+        <i class="bi bi-play-fill me-1" aria-hidden="true"></i>{{ 'Continue' if data.continue.status == 'progress' else 'Read' }}{% if data.continue.number %} #{{ data.continue.number }}{% endif %}</a>
+    {% endif %}
+  {% elif slot == 'more' %}
+    {% if series_page %}<li><a class="dropdown-item" href="{{ series_page }}"><i class="bi bi-list-check me-2" aria-hidden="true"></i>Pull List series page</a></li>{% endif %}
+    <li><a class="dropdown-item" href="{{ url_for('collection.metadata_browser_page', axis='series', series=record.name, publisher=record.publisher) }}"><i class="bi bi-collection me-2" aria-hidden="true"></i>Open in Library</a></li>
+  {% endif %}
+{% endcall %}
+
+<p class="text-body-secondary small d-flex flex-wrap gap-1 column-gap-3" style="margin-top: -.75rem;">
+  {% for cr in credits %}<span>{{ cr.label }} {% for n in cr.names %}<a href="{{ url_for('creators.creator_page', name=n) }}">{{ n }}</a>{{ ', ' if not loop.last }}{% endfor %}</span>{% endfor %}
+  {% if owner %}{% for folder in record.folders[:2] %}<span class="sp-path" title="Folder">{{ folder }}</span>{% endfor %}{% endif %}
+</p>
+
+{% call toolbar('Search, filter and view issues') %}
+  <div class="clu-toolbar-row">
+    {{ search_input('issuesSearch', 'Search titles and numbers', value=q) }}
+    <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="Show">
+      {% for key, label in [('all', 'All'), ('unread', 'Unread'), ('read', 'Read')] + ([('untagged', 'Untagged'), ('gaps', 'Gaps')] if owner else []) %}
+      <a class="btn btn-outline-secondary" href="{{ link(show='' if key == 'all' else key, q='') }}"
+         aria-pressed="{{ 'true' if data.show == key and not q else 'false' }}">{{ label }}
+        <span class="clu-filter-count{% if key in ('untagged', 'gaps') and c[key] %} text-danger fw-semibold{% endif %}">{{ '{:,}'.format(c[key]) }}</span></a>
+      {% endfor %}
+    </div>
+    <div class="clu-toolbar-end">
+      <div class="btn-group btn-group-sm clu-seg" role="group" aria-label="View">
+        <a class="btn btn-outline-secondary" href="{{ link(view='') }}" aria-pressed="{{ 'true' if view == 'grid' else 'false' }}"><i class="bi bi-grid-3x3-gap-fill me-1" aria-hidden="true"></i>Covers</a>
+        <a class="btn btn-outline-secondary" href="{{ link(view='table') }}" aria-pressed="{{ 'true' if view == 'table' else 'false' }}"><i class="bi bi-list-ul me-1" aria-hidden="true"></i>Table</a>
+      </div>
+      {% call toolbar_more() %}
+        <li><button type="button" class="dropdown-item" id="issuesSelectBtn"><i class="bi bi-check2-square me-2" aria-hidden="true"></i>Select <kbd class="ms-2">s</kbd></button></li>
+      {% endcall %}
+    </div>
+  </div>
+  <p class="small text-body-secondary mb-0" id="issuesJumpHint" aria-live="polite">
+    {%- if data.jump -%}
+      {%- if data.jump.found %}Enter opens #{{ data.jump.number }}.
+      {%- elif data.jump.gap %}#{{ data.jump.number }} is not in your library: it is one of the gaps.
+      {%- else %}There is no #{{ data.jump.number }} in your library.{% endif -%}
+    {%- else -%}Type a number like #12 to jump to that issue.{%- endif -%}
+  </p>
+{% endcall %}
+
+{% if owner and c.untagged and data.show in ('all', 'untagged') and not q %}
+<div class="sp-strip-note">
+  <span>{{ c.untagged }} {{ 'issue in this series is' if c.untagged == 1 else 'issues in this series are' }} untagged.</span>
+  <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="issuesTagUntagged">Tag {{ c.untagged }} {{ 'issue' if c.untagged == 1 else 'issues' }}…</button>
+</div>
+{% endif %}
+
+<div id="issuesRoot" data-series="{{ record.key }}"
+     data-matching="{{ data.matching_paths | tojson | forceescape }}"
+     data-untagged="{{ (record.files | selectattr('untagged') | map(attribute='path') | list) | tojson | forceescape }}"
+     data-owner="{{ 'true' if owner else 'false' }}">
+{% if data.rows %}
+  {% if view == 'table' %}
+  <div class="table-responsive border rounded-3">
+    <table class="table table-sm table-hover mb-0 sp-table">
+      <thead><tr>
+        <th scope="col" class="sp-sel-col" hidden><span class="visually-hidden">Select</span></th>
+        <th scope="col" class="text-end" aria-sort="ascending">#</th><th scope="col">Title</th><th scope="col">Year</th><th scope="col">Read</th>
+        {% if owner %}<th scope="col" class="text-end">Size</th><th scope="col">ComicInfo</th><th scope="col">File</th><th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}
+      </tr></thead>
+      <tbody>
+      {% for r in data.rows %}
+        {% if r.gap %}
+        <tr class="is-gap"><td class="sp-sel-col" hidden></td>
+          <td class="text-end fw-semibold">{{ r.first }}{% if r.last != r.first %}–{{ r.last }}{% endif %}</td>
+          <td colspan="3">{{ r.count }} {{ 'issue' if r.count == 1 else 'issues' }} not in your library</td>
+          {% if owner %}<td colspan="3"></td><td>{% if series_page %}<a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ series_page }}">Wanted</a>{% endif %}</td>{% endif %}
+        </tr>
+        {% else %}
+        <tr class="sp-card" data-path="{{ r.path }}" data-name="{{ r.name }}">
+          <td class="sp-sel-col" hidden><input class="form-check-input sp-pick-row" type="checkbox" aria-label="Select #{{ r.number }}"></td>
+          <td class="text-end fw-semibold">{{ r.number }}</td>
+          <td><a href="{{ r.href }}">{{ r.title or r.name }}</a></td>
+          <td>{{ r.year or '' }}</td>
+          <td>{% if r.status == 'read' %}Read{% elif r.status == 'progress' %}Page {{ r.page_no }}{% if r.page_total %} of {{ r.page_total }}{% endif %}{% else %}<span class="text-body-secondary">—</span>{% endif %}</td>
+          {% if owner %}
+          <td class="text-end">{{ (r.size / 1048576) | round(1) }} MB</td>
+          <td>{% if r.untagged %}<span class="text-danger fw-semibold">Untagged</span>{% endif %}</td>
+          <td class="sp-path text-body-secondary">{{ r.name }}</td>
+          <td><button type="button" class="btn btn-sm btn-link sp-open-info" aria-label="{{ 'Add' if r.untagged else 'Edit' }} ComicInfo for #{{ r.number }}" title="{{ 'Add' if r.untagged else 'Edit' }} ComicInfo (i)"><i class="bi bi-info-circle" aria-hidden="true"></i></button></td>
+          {% endif %}
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <ul class="sp-grid" id="issuesGrid">
+    {% for r in data.rows %}
+      {% if r.gap %}
+      <li class="sp-card">
+        <div class="sp-gap">
+          <strong>#{{ r.first }}{% if r.last != r.first %}–#{{ r.last }}{% endif %}</strong>
+          <span>{{ 'Not' if r.count == 1 else r.count ~ ' issues not' }} in your library</span>
+          {% if owner and series_page %}<a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ series_page }}" title="Search and Wanted marks live on the Pull List series page">Wanted</a>{% endif %}
+        </div>
+      </li>
+      {% else %}
+      <li class="sp-card" data-path="{{ r.path }}" data-name="{{ r.name }}">
+        <a class="sp-tile" href="{{ r.href }}"
+           aria-label="{{ record.name }} #{{ r.number }}{% if r.title %}, {{ r.title }}{% endif %}, {% if r.status == 'read' %}read{% elif r.status == 'progress' %}in progress, page {{ r.page_no }}{% if r.page_total %} of {{ r.page_total }}{% endif %}{% else %}unread{% endif %}{% if owner and r.untagged %}, untagged{% endif %}">
+          <span class="sp-cover">
+            <img src="{{ r.thumbnail_url }}" alt="" loading="lazy" decoding="async">
+            <span class="sp-num{% if r.status == 'read' %} is-read{% endif %}" aria-hidden="true">{% if r.number %}#{{ r.number }}{% endif %}{% if r.status == 'read' %}<i class="bi bi-book-fill"></i>{% endif %}</span>
+            {% if owner and r.untagged %}<span class="sp-fix" aria-hidden="true">No XML</span>{% endif %}
+            {% if r.status == 'progress' and r.page_total %}<span class="sp-progress" aria-hidden="true"><i style="width: {{ (100 * r.page_no / r.page_total) | round | int }}%"></i></span>{% endif %}
+          </span>
+          <span class="sp-title" title="{{ r.title or r.name }}">{{ r.title or r.name }}</span>
+          {% if r.year %}<span class="sp-meta">{{ r.year }}</span>{% endif %}
+        </a>
+        {% if owner %}<button type="button" class="sp-info sp-open-info" aria-label="{{ 'Add' if r.untagged else 'Edit' }} ComicInfo for #{{ r.number }}" title="{{ 'Add' if r.untagged else 'Edit' }} ComicInfo (i)"><i class="bi bi-info-lg" aria-hidden="true"></i></button>{% endif %}
+        <span class="sp-tick" aria-hidden="true"><i class="bi bi-check-lg"></i></span>
+        <input class="sp-pick" type="checkbox" aria-label="Select #{{ r.number }}" tabindex="-1">
+      </li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% call pager_row() %}
+    {{ per_page_select('issuesPerPage', data.per_page, sizes=page_sizes) }}
+    {{ pager_nav('issuesPager', 'Issue pages', attrs={'data-page': data.page, 'data-pages': data.pages}, classes=None) }}
+  {% endcall %}
+{% elif q %}
+  {{ no_matches('issues', q, clear_href=link(q='')) }}
+{% else %}
+  {{ empty_state('No issues match these filters', 'Show all issues to see the rest of the series.', 'bi-funnel') }}
+{% endif %}
+
+  <div class="sp-bulk" id="issuesBulk" role="region" aria-label="Selected issues" hidden>
+    <span class="fw-semibold" id="issuesBulkCount" aria-live="polite">0 selected</span>
+    <span class="sp-bulk-note" id="issuesBulkHidden" hidden></span>
+    <button type="button" class="btn btn-link btn-sm" id="issuesSelectAll">Select all {{ data.matching_paths | length }}</button>
+    <button type="button" class="btn btn-link btn-sm" id="issuesClearSel" hidden>Clear</button>
+    <span class="flex-grow-1"></span>
+    <span class="sp-bulk-note" id="issuesBulkEmpty">Select issues to act on</span>
+    {% if owner %}<button type="button" class="btn btn-sm" id="issuesBulkTag" hidden>Tag selected…</button>{% endif %}
+    <button type="button" class="btn btn-sm" id="issuesBulkRead" hidden>Mark read</button>
+    <button type="button" class="btn btn-sm" id="issuesBulkUnread" hidden>Mark unread</button>
+    <button type="button" class="btn btn-sm" id="issuesBulkDone" title="Done (Esc)">Done</button>
+  </div>
+</div>
+
+<div class="modal fade" id="issuesConfirmModal" tabindex="-1" aria-labelledby="issuesConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h2 class="modal-title fs-5" id="issuesConfirmTitle"></h2>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body">
+      <p id="issuesConfirmBody" class="mb-2"></p>
+      <p id="issuesConfirmHidden" class="small mb-0"></p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      <button type="button" class="btn btn-primary" id="issuesConfirmGo"></button>
+    </div>
+  </div></div>
+</div>
+
+{% if owner %}
+{% include 'partials/modal_cbz_info.html' %}
+{% include 'partials/modal_bulk_metadata_review.html' %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{% if owner %}
+<script src="{{ asset('js/clu-cbz-info.js') }}"></script>
+<script src="{{ asset('js/bulk-metadata-review.js') }}"></script>
+{% endif %}
+<script src="{{ asset('js/series-pages.js') }}"></script>
+<script>CLU.seriesIssues({ markApi: {{ url_for('series_index.api_mark_read_bulk') | tojson }} });</script>
+{% endblock %}

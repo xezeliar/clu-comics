@@ -53,7 +53,7 @@
           </ul>
         </li>
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle {% if current_page in [url_for('index'), url_for('collection.metadata_browser_page'), url_for('source_wall.source_wall_page'), url_for('smart_collections.smart_collections_page'), url_for('creators.creators_index'), url_for('creators.characters_index'), url_for('creators.teams_index')] %}active{% endif %}"
+          <a class="nav-link dropdown-toggle {% if current_page in [url_for('index'), url_for('collection.metadata_browser_page'), url_for('source_wall.source_wall_page'), url_for('series_index.series_index'), url_for('creators.creators_index'), url_for('creators.characters_index'), url_for('creators.teams_index')] %}active{% endif %}"
             href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
             Home
           </a>
@@ -71,9 +71,9 @@
               </a>
             </li>
             <li>
-              <a href="{{ url_for('smart_collections.smart_collections_page') }}"
-                class="dropdown-item {% if current_page == url_for('smart_collections.smart_collections_page') %}active{% endif %}">
-                <i class="bi bi-funnel me-2"></i>Smart collections
+              <a href="{{ url_for('series_index.series_index') }}"
+                class="dropdown-item {% if current_page == url_for('series_index.series_index') %}active{% endif %}">
+                <i class="bi bi-journals me-2"></i>Series
               </a>
             </li>
             <li>

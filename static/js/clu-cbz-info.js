@@ -209,6 +209,15 @@
     if (typeof proceed === 'function') proceed();
   }
 
+  /** "Open issue page": shown only for a library file the index knows
+   *  (/cbz-metadata's issue_url). Leaving with staged edits asks first. */
+  function _setIssueLink(url) {
+    var link = _el('cbzIssuePageLink');
+    if (!link) return;
+    link.hidden = !url || window.location.pathname === url;
+    link.setAttribute('href', url || '#');
+  }
+
   CLU.navigateCBZPrev = function () {
     if (_currentIndex > 0) _guardPendingEdits(function () { _navigateTo(_currentIndex - 1); });
   };
@@ -1003,6 +1012,7 @@
     _updateNavButtons();
     _refreshHeader();
     _refreshFooter();
+    _setIssueLink(null);
 
     // Reset content (spinner)
     content.innerHTML =
@@ -1034,6 +1044,7 @@
         _refreshHeader();
         _refreshFooter();
         _loadPreview(filePath, data);
+        _setIssueLink(data.issue_url);
       })
       .catch(function (err) {
         if (filePath !== _currentFilePath) return;
@@ -1047,6 +1058,13 @@
   document.addEventListener('DOMContentLoaded', function () {
     var prevBtn = _el('cbzPrevBtn');
     var nextBtn = _el('cbzNextBtn');
+    var issueLink = _el('cbzIssuePageLink');
+    if (issueLink) issueLink.addEventListener('click', function (e) {
+      var url = issueLink.getAttribute('href');
+      if (!url || url === '#') return;
+      e.preventDefault();
+      _guardPendingEdits(function () { window.location.href = url; });
+    });
 
     if (prevBtn) prevBtn.addEventListener('click', CLU.navigateCBZPrev);
     if (nextBtn) nextBtn.addEventListener('click', CLU.navigateCBZNext);

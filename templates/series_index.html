@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+{% from 'partials/empty_state.html' import empty_state, no_matches %}
+{% from 'partials/filters.html' import toolbar, search_input, select_field, result_count, letter_bar,
+       filter_bar, facet_column, facets_button, pager_row, pager_nav, per_page_select %}
+
+{% block title %}Series - Comic Library{% endblock %}
+{% block page_shell %}container-fluid clu-shell-wide{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ asset('css/series-pages.css') }}">
+{% endblock %}
+
+{% block content %}
+{% call(slot) page_header('Series', 'bi-journals',
+                          subtitle='Every series in your library, built from the metadata in your comics.') %}
+  {% if slot == 'count' %}
+    {{ result_count('seriesCount', data.total, 'series', first=data.first, last=data.last)
+       if data.pages > 1 else result_count('seriesCount', data.all_total, 'series', shown=data.total) }}
+  {% elif slot == 'help' %}
+    <p>A series groups comics by the series name and publisher in their ComicInfo.xml. An untagged comic
+       (no ComicInfo.xml, marked “No XML” on its cover) joins the series most of its folder belongs to.
+       Ticking more Creators or Characters narrows the list (All); switch a group to Any to widen it.
+       Publishers, Years and the other groups always widen within the group, and groups narrow each other.
+       “Tracked” series are on your Pull List, which adds release tracking and Wanted issues.</p>
+  {% endif %}
+{% endcall %}
+
+{% if owner and (data.untagged_series or data.orphans) %}
+<p class="text-body-secondary small mb-3" style="margin-top: -.75rem;">
+  {% if data.untagged_series %}<a href="{{ links.set('health', 'untagged') }}"><b>{{ '{:,}'.format(data.untagged_series) }}</b> series have untagged issues</a>{% endif %}
+  {% if data.untagged_series and data.orphans %} · {% endif %}
+  {% if data.orphans %}<a href="{{ url_for('collection.metadata_browser_page', axis='issue') }}" title="Opens the Library; these comics have no series in their ComicInfo">
+    <b>{{ '{:,}'.format(data.orphans) }}</b> issues belong to no series</a>{% endif %}
+</p>
+{% endif %}
+
+{% call toolbar('Search and sort series') %}
+  <div class="clu-toolbar-row">
+    {{ search_input('seriesSearch', 'Search series', value=f.q) }}
+    {% call select_field('seriesSort', 'Sort') %}
+      {% for value, label in sorts.items() %}
+      <option value="{{ value }}"{% if value == f.sort %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    {% endcall %}
+    {{ facets_button('seriesFacets') }}
+  </div>
+  <div class="clu-toolbar-row">
+    {{ letter_bar('seriesLetters', data.letters, active=f.letter, aria_label='Filter series by first letter') }}
+  </div>
+{% endcall %}
+
+<div class="clu-facet-layout">
+  {% call facet_column('seriesFacets') %}
+    {% if data.health %}
+      {{ filter_bar('facet-health', data.health['items'], active=f.health, label='Needs attention', mode='facet', toggle_off=True) }}
+    {% endif %}
+    {% for group in data.multi %}
+      {% set label = {'creators': 'Creators', 'characters': 'Characters', 'publishers': 'Publishers'}[group.group] %}
+      <div class="sp-facet" data-sp-group="{{ group.group }}">
+        {% if group.group in mode_links %}
+        <div class="sp-facet-head">
+          <span class="visually-hidden">{{ label }} match</span>
+          <div class="btn-group btn-group-sm clu-seg ms-auto" role="group" aria-label="Match {{ label | lower }}">
+            <a class="btn btn-outline-secondary" href="{{ mode_links[group.group]['any'] }}" aria-pressed="{{ 'true' if group.mode == 'any' else 'false' }}"
+               title="Series with any of the ticked {{ label | lower }}">Any</a>
+            <a class="btn btn-outline-secondary" href="{{ mode_links[group.group]['all'] }}" aria-pressed="{{ 'true' if group.mode == 'all' else 'false' }}"
+               title="Series with all of the ticked {{ label | lower }}">All</a>
+          </div>
+        </div>
+        {% endif %}
+        {% if group.total > 5 %}
+        <div class="sp-facet-search">
+          {{ search_input('facetSearch-' ~ group.group, 'Search ' ~ label | lower) }}
+        </div>
+        {% endif %}
+        {{ filter_bar('facet-' ~ group.group, group['items'],
+                      active=group['items'] | selectattr('checked') | map(attribute='value') | list,
+                      label=label, mode='facet', multi=True) }}
+        {% if group.total > group['items'] | length %}
+        <button type="button" class="btn btn-link btn-sm px-0" data-sp-show-all="{{ group.group }}">Show all {{ '{:,}'.format(group.total) }} {{ label | lower }}</button>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% for group in data.singles %}
+      {{ filter_bar('facet-' ~ group.key, group['items'], active=f[group.key],
+                    label={'decade': 'Years', 'read': 'Read status', 'pull': 'Pull List'}[group.key],
+                    mode='facet', toggle_off=True) }}
+    {% endfor %}
+  {% endcall %}
+
+  <div class="clu-facet-main">
+    {% if chips %}
+    <div class="sp-chips" aria-label="Filters you set">
+      {% for c in chips %}
+      <span class="clu-chip"><span class="text-body-secondary">{{ c.kind }}:</span> {{ c.value }}
+        <a class="clu-chip-x" href="{{ c.href }}" aria-label="Remove {{ c.kind | lower }} {{ c.value }}"><i class="bi bi-x" aria-hidden="true"></i></a></span>
+      {% endfor %}
+      <a class="btn btn-link btn-sm" href="{{ links.clear() }}">Clear all</a>
+    </div>
+    {% endif %}
+
+    {% if owner and f.health in ('untagged', 'any') and data.untagged_in_view %}
+    <div class="sp-strip-note">
+      <span>{{ '{:,}'.format(data.untagged_in_view) }} untagged {{ 'issue' if data.untagged_in_view == 1 else 'issues' }}
+            in {{ data.untagged_series_in_view }} {{ 'series' }} on this list.</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="seriesTagAll"
+              data-paths="{{ data.untagged_paths | tojson | forceescape }}">Tag {{ '{:,}'.format(data.untagged_in_view) }} {{ 'issue' if data.untagged_in_view == 1 else 'issues' }}…</button>
+    </div>
+    {% endif %}
+
+    {% if data['items'] %}
+    <ul class="sp-grid" id="seriesList">
+      {% for s in data['items'] %}
+      <li class="sp-card">
+        <a class="sp-tile" href="{{ s.href }}"
+           aria-label="{{ s.name }}, {{ s.count }} {{ 'issue' if s.count == 1 else 'issues' }}{% if s.status == 'In progress' %}, {{ s.n_read }} of {{ s.count }} read{% else %}, {{ s.status | lower }}{% endif %}{% if s.to_fix %}, {{ s.to_fix }} to fix{% endif %}">
+          <span class="sp-cover">
+            <img src="{{ s.thumbnail_url }}" alt="" loading="lazy" decoding="async">
+            {% if s.status == 'Finished' %}<span class="sp-num is-read" aria-hidden="true"><i class="bi bi-check-lg"></i></span>{% endif %}
+            {% if s.to_fix %}<span class="sp-fix" aria-hidden="true"
+                  title="{{ [s.untagged ~ ' untagged' if s.untagged else '', s.gaps ~ ' missing' if s.gaps else ''] | select | join(', ') }}">{{ s.to_fix }} to fix</span>{% endif %}
+          </span>
+          <span class="sp-title" title="{{ s.name }}">{{ s.name }}</span>
+          <span class="sp-meta">{{ s.count }} {{ 'issue' if s.count == 1 else 'issues' }}{% if s.publisher %} · {{ s.publisher }}{% endif %}{% if s.years %} · {{ s.years }}{% endif %}</span>
+          {% if s.status == 'In progress' %}<span class="sp-bar" aria-hidden="true"><i style="width: {{ (100 * s.n_read / s.count) | round | int }}%"></i></span>{% endif %}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% call pager_row() %}
+      {{ per_page_select('seriesPerPage', data.per_page, sizes=page_sizes) }}
+      {{ pager_nav('seriesPager', 'Series pages', attrs={'data-page': data.page, 'data-pages': data.pages}, classes=None) }}
+    {% endcall %}
+    {% elif f.q and not filter_count %}
+      {{ no_matches('series', f.q, clear_href=links.drop('q')) }}
+    {% elif filter_count or f.q or f.letter %}
+      {{ no_matches('series', f.q, filtered=True, clear_href=links.clear()) }}
+    {% else %}
+      {{ empty_state('No series yet', 'Series appear once your comics carry ComicInfo series tags. Run a metadata tag or scan to fill them in.', 'bi-journals') }}
+    {% endif %}
+  </div>
+</div>
+
+{% if owner %}{% include 'partials/modal_bulk_metadata_review.html' %}{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+{% if owner %}<script src="{{ asset('js/bulk-metadata-review.js') }}"></script>{% endif %}
+<script src="{{ asset('js/series-pages.js') }}"></script>
+<script>CLU.seriesIndex({ facetApi: {{ url_for('series_index.api_facet_values') | tojson }} });</script>
+{% endblock %}

@@ -1,4 +1,4 @@
-"""Series page links from the Library, Creators/Characters and Smart collections.
+"""Series page links from the Library and Creators/Characters.
 
 A folder is a series once a ``series`` row's ``mapped_path`` names it; each page
 links to ``/series/<slug>`` only for such folders.
@@ -153,32 +153,3 @@ class TestCreatorIssues:
     def test_unmapped_folder_has_none(self, client, library):
         d = client.get("/api/creators/Tom%20King/issues?folder=" + quote("/data/DC/Other")).get_json()
         assert d["series_href"] is None
-
-
-
-class TestSmartCollectionReader:
-    def test_cards_open_the_reader(self):
-        path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "smart_collections.html")
-        with open(path, encoding="utf-8") as fh:
-            body = fh.read()
-        assert "partials/reader_modal.html" in body
-        assert "js/reader.js" in body
-        assert "window.openComicReader(it.path)" in body
-
-
-class TestSmartCollectionIssues:
-    def test_items_carry_series_url(self, client, db_connection):
-        from core.database import _backfill_file_metadata_tags
-        _file(db_connection, "/data/DC/Batman", "B1.cbz")
-        _file(db_connection, "/data/DC/Other", "O1.cbz", ci_series="Other")
-        _backfill_file_metadata_tags(db_connection)
-        _series(db_connection, 7, "Batman", 1, "/data/DC/Batman")
-        # Results are confined to the library roots.
-        with patch("helpers.library.get_library_roots", return_value=["/data"]):
-            cid = client.post("/api/smart-collections", json={
-                "name": "C", "match": "all", "sort": "alpha",
-                "rules": [{"field": "publisher", "op": "is", "value": "dc"}]}).get_json()["collection"]["id"]
-            items = client.get(f"/api/smart-collections/{cid}/issues").get_json()["items"]
-        by_path = {i["path"]: i["series_url"] for i in items}
-        assert by_path == {"/data/DC/Batman/B1.cbz": "/series/batman-v1-7",
-                           "/data/DC/Other/O1.cbz": None}
