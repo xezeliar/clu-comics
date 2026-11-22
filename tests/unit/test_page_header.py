@@ -37,6 +37,8 @@ WIDE_PAGES = {
     "source_wall.html",
     "releases.html",
     "to_read.html",
+    "series_index.html",
+    "series_issues.html",
 }
 
 

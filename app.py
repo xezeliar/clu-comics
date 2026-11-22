@@ -384,9 +384,11 @@ from routes.download_queue import download_queue_bp
 
 app.register_blueprint(activity_bp)
 app.register_blueprint(download_queue_bp)
-from routes.smart_collections import smart_collections_bp
+from routes.gaps import gaps_bp
+from routes.series_index import series_index_bp
 
-app.register_blueprint(smart_collections_bp)
+app.register_blueprint(gaps_bp)
+app.register_blueprint(series_index_bp)
 from routes.insights import insights_bp
 
 app.register_blueprint(insights_bp)

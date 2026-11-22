@@ -21,7 +21,7 @@ import traceback
 import sqlite3
 from datetime import datetime
 from flask import (Blueprint, request, jsonify, Response,
-                   stream_with_context, current_app)
+                   stream_with_context, current_app, url_for)
 import core.app_state as app_state
 from core.app_logging import app_logger
 from core.auth import require_role
@@ -386,6 +386,23 @@ def _sample_page_dimensions(zf, image_files):
     return result
 
 
+def _issue_page_url(file_path):
+    """The issue page URL for a library file in the index, else None."""
+    from core.database import db_conn
+    from helpers.library import is_valid_library_path
+    try:
+        if not is_valid_library_path(file_path):
+            return None
+        with db_conn() as conn:
+            row = conn and conn.execute(
+                "SELECT id FROM file_index WHERE path = ? AND type = 'file'",
+                (file_path,)).fetchone()
+        return url_for('series_index.comic_page', file_id=row[0]) if row else None
+    except Exception as e:
+        app_logger.debug(f"cbz_metadata: no issue page link for {file_path}: {e}")
+        return None
+
+
 @metadata_bp.route('/cbz-metadata', methods=['GET'])
 def cbz_metadata():
     """Extract metadata from a CBZ file.
@@ -479,6 +496,9 @@ def cbz_metadata():
             # Get first few files for preview
             metadata["file_list"] = sorted(file_list)[:10]  # First 10 files
 
+        # The CBZ Info modal links to the issue page, which only library files
+        # have (WATCH and TARGET files are not in the index's library rows).
+        metadata["issue_url"] = _issue_page_url(file_path)
         return jsonify(metadata)
 
     except Exception as e:

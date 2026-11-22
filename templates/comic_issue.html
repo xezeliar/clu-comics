@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% from 'partials/page_header.html' import page_header %}
+
+{% set heading = (series_name ~ (' #' ~ number if number else '')) if series_name else row.name %}
+{% block title %}{{ heading }} - Comic Library{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+<link rel="stylesheet" href="{{ asset('css/reader.css') }}">
+<link rel="stylesheet" href="{{ asset('css/series-pages.css') }}">
+{% endblock %}
+
+{% block content %}
+{% call(slot) page_header(heading, subtitle=title or none) %}
+  {% if slot == 'crumbs' %}
+    <li class="breadcrumb-item"><a href="{{ url_for('series_index.series_index') }}">Series</a></li>
+    {% if publisher_href %}<li class="breadcrumb-item"><a href="{{ publisher_href }}">{{ record.publisher }}</a></li>{% endif %}
+    {% if series_href %}<li class="breadcrumb-item"><a href="{{ series_href }}">{{ record.name }}</a></li>{% endif %}
+  {% elif slot == 'actions' %}
+    {% if owner and not tagged %}
+      <button type="button" class="btn btn-sm btn-primary" id="issueTag" data-clu-keep><i class="bi bi-tags me-1" aria-hidden="true"></i>Tag this issue</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="issueRead"><i class="bi bi-play-fill me-1" aria-hidden="true"></i>{{ 'Continue reading' if status == 'progress' else 'Read' }}</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="issueEditInfo"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Add ComicInfo</button>
+    {% else %}
+      <button type="button" class="btn btn-sm btn-primary" id="issueRead" data-clu-keep><i class="bi bi-play-fill me-1" aria-hidden="true"></i>{{ 'Continue reading' if status == 'progress' else ('Read again' if status == 'read' else 'Read') }}</button>
+      {% if owner %}<button type="button" class="btn btn-sm btn-outline-secondary" id="issueEditInfo"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit ComicInfo</button>
+      {% else %}<button type="button" class="btn btn-sm btn-outline-secondary" id="issueWant" aria-pressed="{{ 'true' if want else 'false' }}"><i class="bi bi-bookmark me-1" aria-hidden="true"></i>Want to Read</button>{% endif %}
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="issueMarkRead" aria-pressed="{{ 'true' if status == 'read' else 'false' }}"><i class="bi bi-check-lg me-1" aria-hidden="true"></i>Read</button>
+    {% endif %}
+  {% elif slot == 'more' %}
+    {% if owner %}<li><button type="button" class="dropdown-item" id="issueWantMenu"><i class="bi bi-bookmark me-2" aria-hidden="true"></i><span>{{ 'Remove from Want to Read' if want else 'Want to Read' }}</span></button></li>{% endif %}
+    <li><a class="dropdown-item" href="{{ url_for('download_file', path=row.path) }}"><i class="bi bi-download me-2" aria-hidden="true"></i>Download</a></li>
+    {% if owner and tagged %}<li><button type="button" class="dropdown-item" id="issueRetag"><i class="bi bi-arrow-repeat me-2" aria-hidden="true"></i>Re-tag</button></li>{% endif %}
+    {% if prev_href %}<li><a class="dropdown-item" href="{{ prev_href }}"><i class="bi bi-chevron-left me-2" aria-hidden="true"></i>Previous issue <kbd class="ms-2">[</kbd></a></li>{% endif %}
+    {% if next_href %}<li><a class="dropdown-item" href="{{ next_href }}"><i class="bi bi-chevron-right me-2" aria-hidden="true"></i>Next issue <kbd class="ms-2">]</kbd></a></li>{% endif %}
+  {% endif %}
+{% endcall %}
+
+<div class="sp-issue-top" id="issueRoot" data-path="{{ row.path }}" data-name="{{ row.name }}"
+     data-prev="{{ prev_href or '' }}" data-next="{{ next_href or '' }}">
+  <div class="sp-issue-cover">
+    <span class="sp-cover">
+      <img src="{{ thumbnail_url }}" alt="Cover of {{ heading }}" decoding="async">
+      {% if owner and not tagged %}<span class="sp-fix" aria-hidden="true">No XML</span>{% endif %}
+    </span>
+    {% if status == 'progress' and page_total %}
+    <div class="sp-bar" role="progressbar" aria-label="Reading progress, page {{ page_no }} of {{ page_total }}"
+         aria-valuemin="0" aria-valuemax="{{ page_total }}" aria-valuenow="{{ page_no }}" style="height: 4px;"><i style="width: {{ (100 * page_no / page_total) | round | int }}%"></i></div>
+    <p class="small text-body-secondary mb-0">Page {{ page_no }} of {{ page_total }}</p>
+    {% elif status == 'read' %}
+    <p class="small text-body-secondary mb-0"><i class="bi bi-check-lg me-1" aria-hidden="true"></i>Read</p>
+    {% endif %}
+  </div>
+
+  <div class="min-w-0">
+    {% if meta %}<p class="text-body-secondary small mb-1">{{ meta | join(' · ') }}</p>{% endif %}
+    {% if owner %}
+    <p class="text-body-secondary small d-flex flex-wrap align-items-center gap-2 mb-0">
+      <span class="sp-path">{{ row.path }}</span><span>· {{ size_mb }} MB</span>
+      <button type="button" class="btn btn-sm btn-link p-0" id="issueCopyPath" aria-label="Copy path" title="Copy path"><i class="bi bi-copy" aria-hidden="true"></i></button>
+    </p>
+    {% endif %}
+
+    {% if tagged %}
+      {% if summary %}
+      <section class="sp-section" aria-labelledby="hSummary">
+        <h2 id="hSummary">Summary</h2>
+        <p class="sp-summary">{{ summary }}</p>
+      </section>
+      {% endif %}
+      {% if credits %}
+      <section class="sp-section" aria-labelledby="hCredits">
+        <h2 id="hCredits">Credits</h2>
+        <dl class="sp-credits">
+          {% for cr in credits %}
+          <div><dt>{{ cr.label }}</dt><dd>{% for n in cr.names %}<a href="{{ url_for('creators.creator_page', name=n) }}">{{ n }}</a>{{ ', ' if not loop.last }}{% endfor %}</dd></div>
+          {% endfor %}
+        </dl>
+      </section>
+      {% endif %}
+      {% if cast %}
+      <section class="sp-section" aria-labelledby="hCast">
+        <h2 id="hCast">Characters and teams</h2>
+        <div class="sp-tags">
+          {% for kind, name in cast[:24] %}
+          <a class="sp-tag" href="{{ url_for('creators.character_page', name=name) if kind == 'character' else url_for('creators.team_page', name=name) }}">{{ name }}</a>
+          {% endfor %}
+          {% if cast | length > 24 %}<span class="sp-tag text-body-secondary">+{{ cast | length - 24 }} more</span>{% endif %}
+        </div>
+      </section>
+      {% endif %}
+    {% else %}
+      <section class="sp-section" aria-labelledby="hNoCi">
+        {% if owner %}
+        <h2 id="hNoCi">Untagged: this file has no ComicInfo.xml</h2>
+        <p class="text-body-secondary mb-0" style="max-width: 60ch;">Without it there is no title, summary, credits or characters to show,
+          and the issue won’t appear under its creators. Tag this issue looks it up on your metadata providers;
+          you review the match before anything is written to the file.</p>
+        {% else %}
+        <h2 id="hNoCi">This issue hasn’t been tagged yet</h2>
+        <p class="text-body-secondary mb-0">There is no summary or credit list for it yet. You can still read it.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  </div>
+</div>
+
+{% if owner and tagged %}
+<section class="sp-section" style="margin-top: 2.5rem;">
+  <details class="sp-fields" id="issueFields">
+    <summary><i class="bi bi-chevron-right" aria-hidden="true"></i>All ComicInfo fields <span class="fw-normal text-body-secondary small">· {{ set_count }} set</span></summary>
+    <div class="form-check form-switch mt-2">
+      <input class="form-check-input" type="checkbox" role="switch" id="issueShowEmpty">
+      <label class="form-check-label" for="issueShowEmpty">Show {{ empty_count }} empty {{ 'field' if empty_count == 1 else 'fields' }}</label>
+    </div>
+    <div class="sp-fields-grid">
+      {% for g in groups %}
+      <div>
+        <h3>{{ g.title }}</h3>
+        <dl>
+          {% for r in g.rows %}
+          <dt class="{{ '' if r.value else 'is-empty' }}">{{ r.label }}</dt><dd class="{{ '' if r.value else 'is-empty' }}">{{ r.value or 'Not set' }}</dd>
+          {% endfor %}
+        </dl>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+</section>
+{% endif %}
+
+{% if strip | length > 1 %}
+<section class="sp-section" aria-labelledby="hMore" style="margin-top: 2.5rem;">
+  <div class="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
+    <h2 id="hMore" class="mb-0">More from {{ record.name }} <span class="fw-normal text-body-secondary small">· {{ record.count }} {{ 'issue' if record.count == 1 else 'issues' }}</span></h2>
+    <a class="small" href="{{ series_href }}">All issues</a>
+  </div>
+  <ul class="sp-strip">
+    {% for s in strip %}
+    <li class="sp-card">
+      <a class="sp-tile" href="{{ s.href }}" {% if s.current %}aria-current="page"{% endif %}
+         aria-label="{{ record.name }} #{{ s.number }}{% if s.current %}, this issue{% elif s.read %}, read{% endif %}">
+        <span class="sp-cover{% if s.current %} is-current{% endif %}">
+          <img src="{{ s.thumbnail_url }}" alt="" loading="lazy" decoding="async">
+          <span class="sp-num{% if s.read %} is-read{% endif %}" aria-hidden="true">{% if s.number %}#{{ s.number }}{% endif %}{% if s.read %}<i class="bi bi-book-fill"></i>{% endif %}</span>
+          {% if s.untagged %}<span class="sp-fix" aria-hidden="true">No XML</span>{% endif %}
+        </span>
+        <span class="sp-meta text-truncate">{{ s.title }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% include 'partials/reader_modal.html' %}
+{% if owner %}
+{% include 'partials/modal_cbz_info.html' %}
+{% include 'partials/modal_bulk_metadata_review.html' %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+<script src="{{ asset('js/clu-streaming.js') }}"></script>
+<script src="{{ asset('js/reader.js') }}"></script>
+{% if owner %}
+<script src="{{ asset('js/clu-cbz-info.js') }}"></script>
+<script src="{{ asset('js/bulk-metadata-review.js') }}"></script>
+{% endif %}
+<script src="{{ asset('js/series-pages.js') }}"></script>
+<script>CLU.comicIssue();</script>
+{% endblock %}

@@ -20,6 +20,9 @@
               <i class="bi bi-chevron-right" aria-hidden="true"></i>
             </button>
           </span>
+          {# The issue page for a library file; clu-cbz-info.js shows it when
+             /cbz-metadata returns an issue_url, behind the unsaved-edits guard. #}
+          <a id="cbzIssuePageLink" class="btn btn-sm btn-outline-secondary ci-issue-link" href="#" hidden>Open issue page</a>
           <button type="button" class="btn-close ci-x" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
       </div>

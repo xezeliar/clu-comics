@@ -199,7 +199,8 @@ def app(db_connection, tmp_path):
     from routes.search_review import search_review_bp
     from routes.activity import activity_bp
     from routes.download_queue import download_queue_bp
-    from routes.smart_collections import smart_collections_bp
+    from routes.gaps import gaps_bp
+    from routes.series_index import series_index_bp
     from routes.insights import insights_bp
 
     test_app.register_blueprint(auth_bp)
@@ -231,7 +232,8 @@ def app(db_connection, tmp_path):
     test_app.register_blueprint(search_review_bp)
     test_app.register_blueprint(activity_bp)
     test_app.register_blueprint(download_queue_bp)
-    test_app.register_blueprint(smart_collections_bp)
+    test_app.register_blueprint(gaps_bp)
+    test_app.register_blueprint(series_index_bp)
     test_app.register_blueprint(insights_bp)
 
     # Stub routes that app.py defines but aren't in any blueprint.
