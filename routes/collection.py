@@ -149,8 +149,8 @@ DASHBOARD_SECTION_DEFS = {
         'icon': 'bi-journals text-primary',
         'swiper_id': 'seriesSwiper',
         'section_html_id': 'seriesSection',
-        'view_all_type': 'button',
-        'view_all_onclick': "loadDirectory('')",
+        'view_all_type': 'link',
+        'view_all_href': '/series',
         'view_all_text': 'View All',
     },
 }

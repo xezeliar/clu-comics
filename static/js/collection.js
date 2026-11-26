@@ -5093,7 +5093,7 @@ async function loadRecentlyAddedSwiper() {
 
 /**
  * Series shelf: every series by last activity, 30 at a time (the next page on
- * Swiper's reachEnd), then a "View all N" tile that opens the Collection root.
+ * Swiper's reachEnd), then a "View all N" tile that opens the Series page.
  * The "N new" sticker is get_new_arrival_counts; nothing here marks the
  * series visited (only opening its folder does, as on the grid).
  */
@@ -5151,7 +5151,7 @@ async function loadSeriesSwiper(append = false) {
         } else {
             swiper.innerHTML = html + `
             <div class="swiper-slide series-view-all-slide">
-                <div class="dashboard-card series-view-all" role="button" tabindex="0" data-dash-action="open-folder" data-path="">
+                <div class="dashboard-card series-view-all" role="button" tabindex="0" data-dash-action="open-url" data-url="/series">
                     <b>${seriesShelf.total.toLocaleString()}</b><span>View all series</span>
                 </div>
             </div>`;
@@ -5983,6 +5983,9 @@ function onDashboardClick(event) {
     switch (d.dashAction) {
         case 'open-folder':
             loadDirectory(d.path);
+            break;
+        case 'open-url':
+            window.location.href = d.url;
             break;
         case 'open-item':
             navigateToItem(d.path, d.type);
