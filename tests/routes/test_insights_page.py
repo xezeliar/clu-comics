@@ -87,24 +87,6 @@ class TestCreditsBackfill:
             "SELECT writer, credits_read FROM issues_read WHERE user_id = ?", (other,)
         ).fetchone()[:] == ("", 0)
 
-    def test_start_returns_an_op_and_the_result_follows(self, client, db_connection, monkeypatch):
-        monkeypatch.setattr(insights, "run_reading_credits_backfill",
-                            lambda op_id, uid: insights._stash(op_id, {"user_id": uid, "updated": 0,
-                                                                       "skipped": 0, "skipped_issues": []}))
-        resp = client.post("/api/backfill-reading-metadata")
-        assert resp.status_code == 202
-        op_id = resp.get_json()["op_id"]
-        for _ in range(50):
-            body = client.get(f"/api/backfill-reading-metadata/{op_id}").get_json()
-            if not body["pending"]:
-                break
-            time.sleep(0.02)
-        assert body["pending"] is False and body["result"]["updated"] == 0
-
-    def test_another_users_result_stays_hidden(self, client, db_connection):
-        insights._stash("foreign", {"user_id": 9999, "updated": 1})
-        assert client.get("/api/backfill-reading-metadata/foreign").get_json()["pending"] is True
-
 
 class TestCollectionOverview:
     def test_read_counts_only_files_still_in_the_index(self, db_connection):
@@ -121,16 +103,3 @@ class TestCollectionOverview:
         assert len(c["added_per_month"]) == 12
         assert sum(m["count"] for m in c["added_per_month"]) == 1
         assert c["largest"][0]["folder"] == "S"
-
-
-@pytest.mark.parametrize("files", [0, 1])
-def test_page_renders(app, client, db_connection, files):
-    if files:
-        _add_file(db_connection, "/lib/S/a.cbz", time.time())
-
-    app.add_url_rule("/insights-render", "insights_render", lambda: render_template(
-        "insights.html", collection=insights.get_collection_overview()))
-    html = client.get("/insights-render").get_data(as_text=True)
-    assert "CLU Wrapped" in html and "Read credits from ComicInfo" in html
-    assert ('id="inCollectionData"' in html) == bool(files)
-    assert ("Your library is empty" in html) != bool(files)

@@ -106,7 +106,7 @@ def test_pace_count_is_short(js, css):
 
 
 def test_info_returns_title():
-    app = read("app.py")
+    app = read("routes", "reading.py")
     body = function_body(app, "read_comic_info", keyword="def")
     assert "get_reader_display_fields(" in body
     db = read("core", "database.py")

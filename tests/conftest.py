@@ -335,3 +335,25 @@ def _folder_art_in_tmp(tmp_path, monkeypatch):
     folder_art.reset_state()
     yield
     folder_art.reset_state()
+
+
+@pytest.fixture(autouse=True)
+def _wrapped_slides_in_tmp(tmp_path):
+    """Keep core.wrapped_slides' PNG cache inside the test's tmp dir.
+
+    Like folder art, its root is the fixed /cache volume, and any test that
+    asks a Wrapped route for a slide writes one.
+    """
+    try:
+        from core import wrapped_slides
+    except ImportError:
+        yield
+        return
+    # Not the shared `monkeypatch`: requesting it from an autouse fixture sets
+    # it up before `app`, so its teardown ran after the app's patch.stop() and
+    # re-installed a test's stale core.config.get_data_dir mock for every
+    # later test.
+    from unittest.mock import patch
+    with patch.object(wrapped_slides, "get_cache_dir",
+                      lambda: str(tmp_path / "cache")):
+        yield

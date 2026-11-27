@@ -30,7 +30,7 @@ class TestPathMatchesPrefix:
         ("/staticx", False),
         ("/api/v1/auth/ping", True),
         ("/api/v1x", False),
-        ("/api/insights", False),  # exempt by exact path (_EXEMPT_PATHS): /api/insights/who stays gated
+        ("/api/insights", False),  # exempt by exact path (_EXEMPT_PATHS): a path under it stays gated
         ("/api/insights-admin", False),
     ])
     def test_login_exemptions(self, path, expected):

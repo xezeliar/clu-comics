@@ -2203,17 +2203,14 @@ document.addEventListener('DOMContentLoaded', function () {
 // Polls /api/operation/<id>, never /api/operations: that one clears the
 // header's pending notifications, so only base.html may poll it.
 function pollOperation(opId, done) {
-  let busy = false;  // skip a tick if the previous poll is still in-flight
-  const interval = setInterval(() => {
-    if (busy) return;
-    busy = true;
-    fetch('/api/operation/' + encodeURIComponent(opId)).then(r => r.json()).then(data => {
+  const interval = CLU.startPoll(signal => {
+    return fetch('/api/operation/' + encodeURIComponent(opId), { signal }).then(r => r.json()).then(data => {
       const op = data.operation || null;
       if (op && (op.status === 'running' || op.status === 'queued')) return;
       clearInterval(interval);
       done(op);
-    }).catch(() => {}).finally(() => { busy = false; });
-  }, 2000);
+    }).catch(() => {});
+  }, 2000, { immediate: false });
   setTimeout(() => clearInterval(interval), 1800000); // 30min safety
 }
 

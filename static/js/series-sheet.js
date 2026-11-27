@@ -150,7 +150,7 @@
                 if (c) colourCache.set(it.path, c);
                 if (it === issues[idx] && c) setColour(c);
             });
-            img.addEventListener('error', () => { img.src = '/static/images/error.svg'; }, { once: true });
+            img.addEventListener('error', () => { img.src = CLU.staticUrl('images/error.svg'); }, { once: true });
         });
     }
 

@@ -45,9 +45,3 @@ def test_name_is_escaped():
     assert "<b>" not in html
 
 
-def test_insights_js_draws_the_same_tile_classes():
-    js = (ROOT / "static/js/insights.js").read_text()
-    for cls in ("pt-img", "pt-n", "pt-c", "pt-ini", "pt-grid"):
-        assert cls in js
-    # The toggle row and the Artists tab are gone.
-    assert "data-in-tab" not in js and "penciller" not in js

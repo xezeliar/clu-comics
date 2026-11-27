@@ -2,58 +2,424 @@
 {% from 'partials/page_header.html' import page_header %}
 {% from 'partials/empty_state.html' import empty_state %}
 
-{% block title %}Insights{% endblock %}
+{% block title %}Library Insights{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ asset('css/insights.css') }}">
-<link rel="stylesheet" href="{{ asset('css/people-tiles.css') }}">
-<link rel="stylesheet" href="{{ asset('css/clu-accent.css') }}">
+<link rel="stylesheet" href="{{ asset('css/wrapped-story.css') }}">
 {% endblock %}
 
 {% block content %}
 <div class="insights-page">
-    {% call(slot) page_header('Insights', 'bi-graph-up-arrow') %}
+    {% call(slot) page_header('Insights', 'bi-graph-up-arrow',
+                              subtitle='Explore your collection statistics and reading habits') %}
         {% if slot == 'actions' %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="generateWrappedBtn"
-                data-bs-toggle="modal" data-bs-target="#wrappedModal">
-                <i class="bi bi-gift me-1" aria-hidden="true"></i>CLU Wrapped
+            <button class="btn btn-sm btn-primary" id="generateWrappedBtn" data-bs-toggle="modal"
+                data-bs-target="#wrappedModal">
+                <i class="bi bi-gift me-1" aria-hidden="true"></i>Year Wrapped
             </button>
-        {% elif slot == 'more' %}
-            <li><button type="button" class="dropdown-item" data-in-backfill>Read credits from ComicInfo
-                <small class="d-block text-body-secondary">Re-reads creators and characters for issues you have read</small></button></li>
-            <li><a class="dropdown-item" href="{{ url_for('timeline') }}">Timeline
-                <small class="d-block text-body-secondary">Everything you read, by day</small></a></li>
         {% endif %}
     {% endcall %}
 
-    {% if not collection.files %}
-        {% call empty_state('Your library is empty', 'Insights shows what you read and what you have once a library holds comics.', 'bi-graph-up-arrow') %}
-            <a class="btn btn-primary" href="{{ url_for('config_page') }}">Open Settings</a>
-        {% endcall %}
-    {% else %}
-    <div class="in" id="insights" data-home="{{ url_for('index') }}" data-timeline="{{ url_for('timeline') }}"
-         data-wanted="{{ url_for('series.wanted') }}" data-collection="{{ url_for('collection.collection') }}"
-         data-who="{{ url_for('insights.who_you_read') }}" data-teams="{{ url_for('creators.teams_index') }}"
-         data-characters="{{ url_for('creators.characters_index') }}" data-creators="{{ url_for('creators.creators_index') }}">
-        <section class="in-sec" aria-labelledby="inReadingH">
-            <header><h2 id="inReadingH">Your reading</h2><div id="inYears"></div></header>
-            <div id="inReading" class="in-body"><p class="text-body-secondary">Loading your reading&hellip;</p></div>
-        </section>
-        <section class="in-sec" aria-labelledby="inCollectionH">
-            <header><h2 id="inCollectionH">Your collection</h2></header>
-            <div id="inCollection" class="in-body"></div>
-        </section>
+    <!-- Collection Stats -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>Collection Stats</h5>
     </div>
-    <script type="application/json" id="inCollectionData">{{ collection | tojson }}</script>
-    {% endif %}
+
+    <!-- Top Stats Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon primary">
+                    <i class="bi bi-file-earmark-text"></i>
+                </div>
+                <div class="stat-value">{{ "{:,}".format(library_stats.total_files) }}</div>
+                <div class="stat-label">Total Files</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon success">
+                    <i class="bi bi-hdd"></i>
+                </div>
+                {% set size_gb = library_stats.total_size / (1024*1024*1024) %}
+                <div class="stat-value">{% if size_gb > 999 %}{{ (size_gb / 1024)|round(2) }}<small
+                        class="fs-6 fw-normal"> TB</small>{% else %}{{ size_gb|round(1) }}<small class="fs-6 fw-normal">
+                        GB</small>{% endif %}</div>
+                <div class="stat-label">Total Size</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon info">
+                    <i class="bi bi-folder"></i>
+                </div>
+                <div class="stat-value">{{ "{:,}".format(library_stats.total_directories) }}</div>
+                <div class="stat-label">Folders</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-pie-chart"></i>File Types</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container">
+                        <canvas id="fileTypeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-building"></i> Top Publishers</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container tall">
+                        <canvas id="publishersChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reading Stats Row -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0"><i class="bi bi-book-half me-2"></i>Reading Stats</h5>
+        <select class="form-select form-select-sm" id="readingStatsYear" style="width: auto;">
+            <option value="all">All Time</option>
+        </select>
+    </div>
+    <div class="row g-3 mb-4">
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon warning">
+                    <i class="bi bi-book"></i>
+                </div>
+                <div class="stat-value" id="statIssuesRead">{{ "{:,}".format(library_stats.total_read) }}</div>
+                <div class="stat-label">Issues Read</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon primary">
+                    <i class="bi bi-files"></i>
+                </div>
+                <div class="stat-value" id="statPagesRead">{{ "{:,}".format(reading_totals.total_pages) }}</div>
+                <div class="stat-label">Total Pages Read</div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="stat-card">
+                <div class="stat-icon danger">
+                    <i class="bi bi-stopwatch"></i>
+                </div>
+                {% set hours = reading_totals.total_time // 3600 %}
+                {% set minutes = (reading_totals.total_time % 3600) // 60 %}
+                <div class="stat-value" id="statTimeReading">{{ hours }}h {{ minutes }}m</div>
+                <div class="stat-label">Total Time Reading</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Goal, streaks and this week -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-4">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-bullseye"></i>Reading Goal <span id="goalYearLabel" class="text-muted fw-normal"></span></h3>
+                </div>
+                <div class="section-card-body text-center">
+                    <svg class="goal-dial" viewBox="0 0 120 120" role="img" aria-labelledby="goalHeadline">
+                        <circle class="goal-dial-track" cx="60" cy="60" r="52"></circle>
+                        <circle class="goal-dial-progress" id="goalDialProgress" cx="60" cy="60" r="52"
+                            transform="rotate(-90 60 60)"></circle>
+                        <text class="goal-dial-value" id="goalDialValue" x="60" y="60" text-anchor="middle">&ndash;</text>
+                        <text class="goal-dial-caption" id="goalDialCaption" x="60" y="78" text-anchor="middle"></text>
+                    </svg>
+                    <div class="fw-semibold mt-2" id="goalHeadline">Loading&hellip;</div>
+                    <div class="text-muted small mb-3" id="goalDetail"></div>
+                    <button class="btn btn-sm btn-outline-secondary" id="editGoalBtn" type="button">
+                        <i class="bi bi-bullseye me-1" aria-hidden="true"></i>Set a goal
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3">
+            <div class="d-flex flex-lg-column gap-3 h-100">
+                <div class="stat-card flex-fill">
+                    <div class="stat-icon warning">
+                        <i class="bi bi-fire"></i>
+                    </div>
+                    <div class="stat-value" id="statCurrentStreak">&ndash;</div>
+                    <div class="stat-label">Day Streak</div>
+                </div>
+                <div class="stat-card flex-fill">
+                    <div class="stat-icon success">
+                        <i class="bi bi-trophy"></i>
+                    </div>
+                    <div class="stat-value" id="statLongestStreak">&ndash;</div>
+                    <div class="stat-label">Longest Streak</div>
+                    <div class="stat-note" id="statLongestStreakRange"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-calendar-week"></i>This Week</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="d-flex align-items-baseline gap-3">
+                        <div><span class="week-count" id="weekThisCount">&ndash;</span> <span class="text-muted small">this week</span></div>
+                        <div><span class="week-count week-count-muted" id="weekLastCount">&ndash;</span> <span class="text-muted small">last week</span></div>
+                    </div>
+                    <div class="text-muted small mb-2" id="weekCompareNote"></div>
+                    <div class="chart-container week-chart">
+                        <canvas id="weekCompareChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Five weeks by series, and what is open now -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-7">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-bar-chart-steps"></i>Last Five Weeks by Series</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container" id="fiveWeekContainer">
+                        <canvas id="fiveWeekChart"></canvas>
+                    </div>
+                    {{ empty_state('Nothing read in the last five weeks', icon='bi-bar-chart', id='fiveWeekEmpty', hidden=True, compact=True) }}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-bookmark"></i>Open Now</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="open-now-grid" class="recently-read-grid open-now-grid"></div>
+                    {{ empty_state('Nothing in progress', icon='bi-bookmark', id='open-now-empty', hidden=True, compact=True) }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reading clock: when the reading happens -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-5">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-clock"></i>Reading Clock</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container" id="clockContainer">
+                        <canvas id="readingClockChart"></canvas>
+                    </div>
+                    {{ empty_state('No reading times yet', message='Read in the CLU reader and your hours will appear here.', icon='bi-clock', id='clockEmpty', hidden=True, compact=True) }}
+                    <div class="text-muted small text-center mt-2" id="clockPeak"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-calendar3-week"></i>Days of the Week</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container" id="weekdayContainer">
+                        <canvas id="weekdayChart"></canvas>
+                    </div>
+                    <div class="text-muted small mt-2" id="clockSourceNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reading Heatmap & Publishers ChartGraph -->
+    <div class="row g-4 mb-4">
+        <div class="col-lg-5">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-calendar3"></i> Comics Read per Month</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="reading-heatmap" class="reading-heatmap"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-7">
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-activity"></i>Reading Activity</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container">
+                        <canvas id="readingHistoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recently Read Section -->
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <div class="section-card">
+                <div class="section-card-header">
+                    <div class="float-end">
+                        <a href="{{ url_for('insights.timeline') }}" class="btn btn-outline-secondary">
+                            <i class="bi bi-graph-up-arrow me-1"></i>Timeline
+                        </a>
+                    </div>
+                    <h3><i class="bi bi-clock-history"></i>Recently Finished</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="recently-read-grid" class="recently-read-grid">
+                        <!-- Loaded via JavaScript -->
+                    </div>
+                    {{ empty_state('No recently read comics', icon='bi-journal-x', id='recently-read-empty', hidden=True, compact=True) }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reading Trends Section -->
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Reading Trends</h5>
+        <div class="d-flex align-items-center gap-2">
+            <select class="form-select form-select-sm" id="trendsYearFilter" style="width: auto;">
+                <option value="all">All Time</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" id="backfillMetadataBtn"
+                title="Re-scan all read comics for metadata">
+                <i class="bi bi-arrow-repeat me-1"></i>Backfill Metadata
+            </button>
+        </div>
+    </div>
+    <div class="row g-4 mb-4">
+        <div class="col-md-6 col-lg-3">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-pencil"></i> Top Writers</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="topWritersList" class="trends-list">
+                        <div class="text-center text-muted py-3">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-brush"></i> Top Artists</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="topPencillersList" class="trends-list">
+                        <div class="text-center text-muted py-3">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-people"></i> Top Characters</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="topCharactersList" class="trends-list">
+                        <div class="text-center text-muted py-3">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="section-card h-100">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-building"></i> Top Publishers</h3>
+                </div>
+                <div class="section-card-body">
+                    <div id="topPublishersList" class="trends-list">
+                        <div class="text-center text-muted py-3">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Constellation: who appears with whom in what was read -->
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <div class="section-card">
+                <div class="section-card-header d-flex justify-content-between align-items-center">
+                    <h3><i class="bi bi-stars"></i>Constellation</h3>
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Constellation of">
+                        <input type="radio" class="btn-check" name="constellationKind" id="constellationCharacters"
+                            value="characters" autocomplete="off" checked>
+                        <label class="btn btn-outline-secondary" for="constellationCharacters">Characters</label>
+                        <input type="radio" class="btn-check" name="constellationKind" id="constellationCreators"
+                            value="creators" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="constellationCreators">Creators</label>
+                    </div>
+                </div>
+                <div class="section-card-body">
+                    <div id="constellationCanvas" class="constellation-canvas"></div>
+                    <div class="text-muted small mt-2" id="constellationNote"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top 20 Series by Issue Count -->
+    <div class="row g-4 mb-4">
+        <div class="col-12 col-sm-6">
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-collection"></i> Top 20 Series by Issue Count</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container" style="height: 500px;">
+                        <canvas id="topSeriesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top 20 Largest Comics -->
+
+        <div class="col-12 col-sm-6">
+            <div class="section-card">
+                <div class="section-card-header">
+                    <h3><i class="bi bi-file-earmark-zip"></i> Top 20 Largest Comics</h3>
+                </div>
+                <div class="section-card-body">
+                    <div class="chart-container" style="height: 500px;">
+                        <canvas id="largestComicsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Wrapped Modal -->
     <div class="modal fade" id="wrappedModal" tabindex="-1" aria-labelledby="wrappedModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="wrappedModalLabel">
-                        <i class="bi bi-gift me-2" aria-hidden="true"></i>CLU Wrapped
+                        <i class="bi bi-gift me-2"></i>Your Year Wrapped
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
@@ -61,26 +427,6 @@
                     <!-- Year Selection -->
                     <div id="wrappedYearSelect" class="text-center py-4">
                         <h4 class="mb-4">Select a year to generate your Wrapped</h4>
-                        <div class="d-flex justify-content-center gap-4 flex-wrap mb-4" id="wrappedCardOpts">
-                            <div>
-                                <div class="small text-body-secondary mb-1" id="wrStyleLabel">Style</div>
-                                <div class="btn-group" role="radiogroup" aria-labelledby="wrStyleLabel">
-                                    {% for v, l in (('theme', 'Theme'), ('wall', 'Cover wall'), ('panel', 'Panel')) %}
-                                    <input type="radio" class="btn-check" name="wrStyle" id="wrStyle-{{ v }}" value="{{ v }}" autocomplete="off">
-                                    <label class="btn btn-outline-secondary" for="wrStyle-{{ v }}">{{ l }}</label>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            <div>
-                                <div class="small text-body-secondary mb-1" id="wrFormatLabel">Format</div>
-                                <div class="btn-group" role="radiogroup" aria-labelledby="wrFormatLabel">
-                                    {% for v, l in (('story', 'Story'), ('square', 'Square')) %}
-                                    <input type="radio" class="btn-check" name="wrFormat" id="wrFormat-{{ v }}" value="{{ v }}" autocomplete="off">
-                                    <label class="btn btn-outline-secondary" for="wrFormat-{{ v }}">{{ l }}</label>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                        </div>
                         <div class="d-flex justify-content-center gap-2 flex-wrap" id="yearButtonsContainer">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -88,44 +434,89 @@
                         </div>
                     </div>
 
-                    <!-- Loading State -->
-                    <div id="wrappedLoading" class="text-center py-5" style="display: none;">
-                        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
-                            <span class="visually-hidden">Generating...</span>
-                        </div>
-                        <p class="text-muted">Generating your Wrapped images...</p>
-                    </div>
-
-                    <!-- Carousel -->
-                    <div id="wrappedCarousel" class="carousel slide" style="display: none;" data-bs-ride="false">
-                        <div class="carousel-indicators">
-                            <button type="button" data-bs-target="#wrappedCarousel" data-bs-slide-to="0"
-                                class="active"></button>
-                            <button type="button" data-bs-target="#wrappedCarousel" data-bs-slide-to="1"></button>
-                            <button type="button" data-bs-target="#wrappedCarousel" data-bs-slide-to="2"></button>
-                        </div>
-                        <div class="carousel-inner" id="wrappedCarouselInner">
-                            <!-- Slides will be inserted here -->
-                        </div>
-                        <button class="carousel-control-prev" type="button" data-bs-target="#wrappedCarousel"
-                            data-bs-slide="prev">
-                            <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Previous</span>
-                        </button>
-                        <button class="carousel-control-next" type="button" data-bs-target="#wrappedCarousel"
-                            data-bs-slide="next">
-                            <span class="carousel-control-next-icon" aria-hidden="true"></span>
-                            <span class="visually-hidden">Next</span>
-                        </button>
-                    </div>
                 </div>
-                <div class="modal-footer" id="wrappedFooter" style="display: none;">
-                    <button type="button" class="btn btn-outline-secondary" id="wrappedBackBtn">
-                        <i class="bi bi-arrow-left me-1"></i>Choose Another Year
-                    </button>
-                    <a href="#" class="btn btn-success" id="wrappedDownloadBtn">
-                        <i class="bi bi-download me-1"></i>Download All
+            </div>
+        </div>
+    </div>
+
+    {% include 'partials/wrapped_story.html' %}
+
+    <!-- Reading Goal Modal -->
+    <div class="modal fade" id="goalModal" tabindex="-1" aria-labelledby="goalModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <form class="modal-content" id="goalForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="goalModalLabel">
+                        <i class="bi bi-bullseye me-2"></i>Reading goal for <span id="goalModalYear"></span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <label for="goalInput" class="form-label">Issues to read this year</label>
+                    <input type="number" class="form-control" id="goalInput" min="1" max="100000" step="1"
+                        inputmode="numeric" required>
+                    <div class="form-text" id="goalSuggestion"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-danger me-auto" id="clearGoalBtn">Remove goal</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Day Modal: one day's reading on a time ruler -->
+    <div class="modal fade" id="dayModal" tabindex="-1" aria-labelledby="dayModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="dayModalLabel">
+                        <i class="bi bi-calendar-day me-2"></i><span id="dayModalTitle"></span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="text-muted small mb-3" id="daySummary"></div>
+                    <div class="day-ruler" id="dayRuler" role="img" aria-label="Reading through the day">
+                        <div class="day-ruler-track" id="dayRulerTrack"></div>
+                        <div class="day-ruler-ticks" aria-hidden="true">
+                            <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
+                        </div>
+                    </div>
+                    <div class="day-ruler-legend small text-muted mb-3" id="dayRulerLegend"></div>
+                    <div class="list-group" id="dayList"></div>
+                </div>
+                <div class="modal-footer">
+                    <a class="btn btn-outline-secondary me-auto" id="dayTimelineLink" href="#">
+                        <i class="bi bi-graph-up-arrow me-1" aria-hidden="true"></i>Open month in Timeline
                     </a>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backfill Confirmation Modal -->
+    <div class="modal fade" id="backfillConfirmModal" tabindex="-1" aria-labelledby="backfillConfirmModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="backfillConfirmModalLabel">
+                        <i class="bi bi-arrow-repeat me-2"></i>Backfill Metadata
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>This will re-scan all read comics for metadata (writer, artist, characters, publisher).</p>
+                    <p class="text-muted mb-0">This may take a while depending on how many comics you've read.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmBackfillBtn">
+                        <i class="bi bi-check-lg me-1"></i>Continue
+                    </button>
                 </div>
             </div>
         </div>
@@ -143,7 +534,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-muted mb-3">These issues were skipped while reading credits from ComicInfo:</p>
+                    <p class="text-muted mb-3">The following issues were skipped during metadata backfill:</p>
                     <div id="skippedIssuesList" class="list-group"></div>
                 </div>
                 <div class="modal-footer">
@@ -157,123 +548,17 @@
 {% endblock %}
 
 {% block scripts %}
+<script type="application/json" id="insightsData">{{ {
+    'file_types': file_types,
+    'top_publishers': top_publishers,
+    'reading_history': reading_history,
+    'largest_comics': largest_comics,
+    'top_series': top_series,
+    'reading_heatmap': reading_heatmap
+} | tojson }}</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="{{ asset('js/clu-constellation.js') }}"></script>
+<script src="{{ asset('js/clu-wrapped-story.js') }}"></script>
 <script src="{{ asset('js/insights.js') }}"></script>
-<script>
-    // ==========================================
-    // Wrapped Feature
-    // ==========================================
-
-    const wrappedModal = document.getElementById('wrappedModal');
-    const yearButtonsContainer = document.getElementById('yearButtonsContainer');
-    const wrappedYearSelect = document.getElementById('wrappedYearSelect');
-    const wrappedLoading = document.getElementById('wrappedLoading');
-    const wrappedCarousel = document.getElementById('wrappedCarousel');
-    const wrappedCarouselInner = document.getElementById('wrappedCarouselInner');
-    const wrappedFooter = document.getElementById('wrappedFooter');
-    const wrappedBackBtn = document.getElementById('wrappedBackBtn');
-    const wrappedDownloadBtn = document.getElementById('wrappedDownloadBtn');
-
-    // Remembered per user: pick, save, and the next generated card uses it.
-    fetch('/api/wrapped/card-prefs').then(r => r.json()).then(p => {
-        const s = document.getElementById('wrStyle-' + p.style), f = document.getElementById('wrFormat-' + p.format);
-        if (s) s.checked = true;
-        if (f) f.checked = true;
-    }).catch(() => {});
-    document.getElementById('wrappedCardOpts').addEventListener('change', () => {
-        const pick = n => (document.querySelector(`input[name="${n}"]:checked`) || {}).value;
-        fetch('/api/wrapped/card-prefs', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({style: pick('wrStyle'), format: pick('wrFormat')})
-        }).catch(() => CLU.toast('Could not save your card choice', 'error'));
-    });
-
-    let selectedYear = null;
-
-    // Load available years when modal opens
-    wrappedModal.addEventListener('show.bs.modal', async function () {
-        resetWrappedModal();
-        try {
-            const response = await fetch('/api/wrapped/years');
-            const data = await response.json();
-
-            if (data.years && data.years.length > 0) {
-                yearButtonsContainer.innerHTML = data.years.map(year =>
-                    `<button class="btn btn-outline-primary btn-lg wrapped-year-btn" data-year="${year}">${year}</button>`
-                ).join('');
-
-                // Add click handlers
-                document.querySelectorAll('.wrapped-year-btn').forEach(btn => {
-                    btn.addEventListener('click', () => generateWrapped(parseInt(btn.dataset.year)));
-                });
-            } else {
-                yearButtonsContainer.replaceChildren(CLU.emptyState({ icon: 'bi-book', title: 'No reading data yet', message: 'Read a comic to generate your Wrapped.', compact: true }));
-            }
-        } catch (error) {
-            console.error('Error loading years:', error);
-            yearButtonsContainer.innerHTML = '<p class="text-danger">Error loading years. Please try again.</p>';
-        }
-    });
-
-    function resetWrappedModal() {
-        wrappedYearSelect.style.display = 'block';
-        wrappedLoading.style.display = 'none';
-        wrappedCarousel.style.display = 'none';
-        wrappedFooter.style.display = 'none';
-        wrappedCarouselInner.innerHTML = '';
-    }
-
-    async function generateWrapped(year) {
-        selectedYear = year;
-        wrappedYearSelect.style.display = 'none';
-        wrappedLoading.style.display = 'block';
-
-        try {
-            // Pre-generate all images by loading them
-            const slidePromises = [];
-            for (let i = 1; i <= 3; i++) {
-                slidePromises.push(loadImage(`/api/wrapped/${year}/image/${i}`));
-            }
-
-            const images = await Promise.all(slidePromises);
-
-            // Build carousel
-            wrappedCarouselInner.innerHTML = images.map((imgSrc, idx) => `
-                <div class="carousel-item ${idx === 0 ? 'active' : ''}">
-                    <div class="d-flex justify-content-center">
-                        <img src="${imgSrc}" class="img-fluid rounded shadow" alt="Wrapped Slide ${idx + 1}"
-                             style="max-height: 70vh; object-fit: contain;">
-                    </div>
-                </div>
-            `).join('');
-
-            // Update download link
-            wrappedDownloadBtn.href = `/api/wrapped/${year}/download`;
-
-            // Show carousel
-            wrappedLoading.style.display = 'none';
-            wrappedCarousel.style.display = 'block';
-            wrappedFooter.style.display = 'flex';
-
-            // Reinitialize carousel
-            const carousel = new bootstrap.Carousel(wrappedCarousel);
-
-        } catch (error) {
-            console.error('Error generating wrapped:', error);
-            wrappedLoading.innerHTML = '<p class="text-danger">Error generating images. Please try again.</p>';
-        }
-    }
-
-    function loadImage(url) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve(url);
-            img.onerror = () => reject(new Error(`Failed to load ${url}`));
-            img.src = url;
-        });
-    }
-
-    // Back button handler
-    wrappedBackBtn.addEventListener('click', resetWrappedModal);
-
-</script>
 {% endblock %}
