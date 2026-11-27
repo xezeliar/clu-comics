@@ -219,8 +219,11 @@ def series_issues():
     show = request.args.get("show", "all")
     q = (request.args.get("q") or "").strip()
     data = ls.series_issues(record, state, owner, show=show, q=q,
-                            page=_int_arg("page", 1), per_page=per_page)
+                            page=_int_arg("page", 1), per_page=per_page,
+                            volume=request.args.get("volume", ""))
     base = [("name", name), ("publisher", publisher)]
+    if data["volume"]:
+        base.append(("volume", data["volume"]))
 
     def link(**changes):
         args = dict(show=data["show"] if data["show"] != "all" else "", q=q,
@@ -229,6 +232,9 @@ def series_issues():
         args.update(changes)
         return _url("series_index.series_issues", base + sorted(args.items()))
 
+    for v in data["volumes"] or []:
+        v["thumbnail_url"] = url_for("get_thumbnail", path=v["cover_path"])
+        v["href"] = _url("series_index.series_issues", [*base, ("volume", v["name"])])
     for row in data["rows"]:
         if row.get("gap"):
             continue
@@ -237,6 +243,7 @@ def series_issues():
     top_credits = _top_credits(record)
     return render_template(
         "series_issues.html", record=record, data=data, owner=owner, q=q,
+        all_volumes_href=_url("series_index.series_issues", [("name", name), ("publisher", publisher)]),
         view="table" if request.args.get("view") == "table" else "grid",
         link=link, page_sizes=ls.PAGE_SIZES,
         series_page=url_for("series.series_view", slug=record["slug"]) if record["slug"] else None,

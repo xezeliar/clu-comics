@@ -499,7 +499,7 @@ def _natural_key(text):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", text)]
 
 
-def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAULT_PER_PAGE):
+def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAULT_PER_PAGE, volume=""):
     """Rows for the issue list: issues and (owner, tracked or not) gap runs.
 
     A gap run is one slot, however many numbers it covers, so a sparse run
@@ -513,12 +513,18 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
         page_no, total = state["progress"].get(f["path"], (0, 0))
         issues.append(dict(f, status=st, page_no=page_no, page_total=total,
                            sort=number_sort_key(f["number"])))
-    # A series spread over several folders (Batman/Vol.1 ... Vol.4) is shown one
-    # folder at a time. Gap runs are computed over the merged numbers, so they
-    # mean nothing across volumes and are dropped.
+    # A series spread over several folders (Batman/Vol.1 ... Vol.4) opens on a
+    # picker of those folders; ``volume`` names the one being viewed. Gap runs
+    # are computed over the merged numbers, so they mean nothing across volumes
+    # and are dropped.
     for i in issues:
         i["group"] = _folder_name(i["path"])
-    grouped = len({i["group"] for i in issues}) > 1
+    multi = len({i["group"] for i in issues}) > 1
+    if multi and volume:
+        issues = [i for i in issues if i["group"] == volume]
+    else:
+        volume = ""
+    grouped = multi and not volume
     gaps = [{"gap": True, "first": a, "last": b, "count": b - a + 1,
              "sort": number_sort_key(str(a))} for a, b in record["gap_runs"]] if owner and not grouped else []
 
@@ -565,6 +571,18 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
     if grouped:
         rows = sorted(rows, key=lambda r: (_natural_key(r.get("group", "")), r["sort"]))
 
+    volumes = None
+    if grouped and show == "all" and not text:
+        volumes = []
+        for name in sorted({i["group"] for i in issues}, key=_natural_key):
+            mine = sorted((i for i in issues if i["group"] == name), key=lambda i: i["sort"])
+            years = [y for y in (_year(i.get("year")) for i in mine) if y]
+            volumes.append({
+                "name": name, "count": len(mine), "cover_path": mine[0]["path"],
+                "n_read": sum(1 for i in mine if i["status"] == "read"),
+                "years": "" if not years else str(min(years)) if min(years) == max(years)
+                else f"{min(years)}–{max(years)}"})
+
     total_slots = len(rows)
     pages = max(1, -(-total_slots // per_page))
     page = min(max(1, page), pages)
@@ -579,7 +597,7 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
         "first": start + 1 if page_rows else 0, "last": start + len(page_rows),
         "issues_on_page": [r for r in page_rows if not r.get("gap")],
         "matching_paths": [i["path"] for i in pool],
-        "continue": cont, "grouped": grouped,
+        "continue": cont, "grouped": grouped, "volumes": volumes, "volume": volume,
         "all_read": bool(issues) and all(i["status"] == "read" for i in issues),
     }
 

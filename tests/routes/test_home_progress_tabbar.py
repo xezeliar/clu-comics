@@ -93,7 +93,7 @@ class TestTabBar:
         html = client.get("/collection").get_data(as_text=True)
         nav = html[html.index('class="clu-tabbar"'):]
         nav = nav[:nav.index("</nav>")]
-        for label in ("Home", "Library", "Reading", "Settings"):
+        for label in ("Home", "Series", "Reading", "Settings"):
             assert f"<span>{label}</span>" in nav
         # /collection is the Home page's browse view, so Home is the active tab
         assert '<a href="/" class="active" aria-current="page">' in nav

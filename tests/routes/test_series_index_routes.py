@@ -267,15 +267,26 @@ class TestVolumeFolders:
                       ci_number=n, ci_year=year)
         return db_connection
 
-    def test_issues_are_grouped_by_folder_in_natural_order(self, client, volumes):
+    def test_series_opens_on_a_picker_of_its_volume_folders(self, client, volumes):
         body = _body(client, self.URL)
-        assert body.count('class="sp-group"') == 2
+        assert 'id="volumesGrid"' in body and 'id="issuesGrid"' not in body
         assert body.index("Vol.1 - 1940") < body.index("Vol.2 - 2011")
+        assert "volume=Vol.1+-+1940" in body
+
+    def test_a_volume_lists_only_its_own_issues(self, client, volumes):
+        body = _body(client, self.URL + "&volume=Vol.2+-+2011")
+        assert 'id="issuesGrid"' in body and 'id="volumesGrid"' not in body
+        assert body.count('class="sp-card" data-path') == 2
+        assert "Vol.1 - 1940/" not in body and "Vol.2 - 2011/" in body
+        assert 'class="sp-group"' not in body
+
+    def test_a_filter_lists_issues_across_volumes_under_headings(self, client, volumes):
+        body = _body(client, self.URL + "&show=unread")
+        assert 'id="volumesGrid"' not in body and body.count('class="sp-group"') == 2
 
     def test_no_gap_cards_across_merged_volumes(self, client, volumes):
-        # #2 is "missing" only if the volumes are merged; per folder it is a gap too,
-        # but the run is computed over the merged numbers, so it is not shown.
-        assert "not in your library" not in _body(client, self.URL)
+        assert "not in your library" not in _body(client, self.URL + "&show=unread")
 
-    def test_single_folder_series_has_no_headings(self, client, library):
-        assert 'class="sp-group"' not in _body(client, "/series/issues?name=Batman&publisher=DC")
+    def test_single_folder_series_has_no_picker(self, client, library):
+        body = _body(client, "/series/issues?name=Batman&publisher=DC")
+        assert 'id="volumesGrid"' not in body and 'class="sp-group"' not in body

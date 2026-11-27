@@ -19,6 +19,7 @@
   {% if slot == 'crumbs' %}
     <li class="breadcrumb-item"><a href="{{ url_for('series_index.series_index') }}">Series</a></li>
     {% if record.publisher %}<li class="breadcrumb-item"><a href="{{ url_for('series_index.series_index', publisher=record.publisher) }}">{{ record.publisher }}</a></li>{% endif %}
+    {% if data.volume %}<li class="breadcrumb-item"><a href="{{ all_volumes_href }}">{{ record.name }}</a></li><li class="breadcrumb-item active" aria-current="page">{{ data.volume }}</li>{% endif %}
   {% elif slot == 'count' %}
     {% if data.jump and data.jump.gap and not data.jump.found %}
       <span class="clu-toolbar-count" id="issuesCount">#{{ data.jump.number }} · not in your library</span>
@@ -85,7 +86,20 @@
      data-matching="{{ data.matching_paths | tojson | forceescape }}"
      data-untagged="{{ (record.files | selectattr('untagged') | map(attribute='path') | list) | tojson | forceescape }}"
      data-owner="{{ 'true' if owner else 'false' }}">
-{% if data.rows %}
+{% if data.volumes %}
+  <ul class="sp-grid" id="volumesGrid">
+    {% for v in data.volumes %}
+    <li class="sp-card">
+      <a class="sp-tile" href="{{ v.href }}" aria-label="{{ v.name }}, {{ v.count }} {{ 'issue' if v.count == 1 else 'issues' }}">
+        <span class="sp-cover"><img src="{{ v.thumbnail_url }}" alt="" loading="lazy" decoding="async">
+          <span class="sp-num" aria-hidden="true">{{ v.count }}</span></span>
+        <span class="sp-title" title="{{ v.name }}">{{ v.name }}</span>
+        <span class="sp-meta">{{ [v.years, (v.n_read ~ ' read') if v.n_read else ''] | select | join(' · ') }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+{% elif data.rows %}
   {% if view == 'table' %}
   <div class="table-responsive border rounded-3">
     <table class="table table-sm table-hover mb-0 sp-table">

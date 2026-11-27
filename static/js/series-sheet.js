@@ -12,7 +12,6 @@
 (function () {
     'use strict';
 
-    const esc = (s) => CLU.escapeHtml(s == null ? '' : String(s));
     const $ = (id) => document.getElementById(id);
     const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const CREDIT_ROLES = [
@@ -136,10 +135,10 @@
     function draw() {
         const n = issues.length;
         track.innerHTML = issues.map((it, i) => {
-            const label = `Issue ${esc(num(it.number))}, ${i + 1} of ${n}`;
+            const label = `Issue ${CLU.escapeHtml(num(it.number))}, ${i + 1} of ${n}`;
             const body = it.owned
-                ? `<div class="ss-cover"><img loading="lazy" src="${esc(it.thumb_url || '')}" alt="" data-i="${i}"><span class="ss-num">#${esc(num(it.number))}</span></div>`
-                : `<div class="ss-miss"><b>#${esc(num(it.number))}</b>Not in library</div>`;
+                ? `<div class="ss-cover"><img loading="lazy" src="${CLU.escapeHtml(it.thumb_url || '')}" alt="" data-i="${i}"><span class="ss-num">#${CLU.escapeHtml(num(it.number))}</span></div>`
+                : `<div class="ss-miss"><b>#${CLU.escapeHtml(num(it.number))}</b>Not in library</div>`;
             return `<div class="ss-sl" role="group" aria-roledescription="slide" aria-label="${label}">${body}</div>`;
         }).join('');
         track.querySelectorAll('img[data-i]').forEach((img) => {
@@ -235,14 +234,14 @@
         const summary = extra && extra.summary;
         const credits = extra && extra.credits
             ? CREDIT_ROLES.filter(([k]) => extra.credits[k]).map(([k, label]) =>
-                `<div><dt>${label}</dt><dd>${esc(extra.credits[k])}</dd></div>`).join('')
+                `<div><dt>${label}</dt><dd>${CLU.escapeHtml(extra.credits[k])}</dd></div>`).join('')
             : '';
 
-        let html = `<h3>Issue #${esc(n)}${title ? `: ${esc(title)}` : ''}</h3>`
-            + `<div class="ss-meta">${date ? `<span>${esc(fmtDate(date))}</span>` : ''}`
+        let html = `<h3>Issue #${CLU.escapeHtml(n)}${title ? `: ${CLU.escapeHtml(title)}` : ''}</h3>`
+            + `<div class="ss-meta">${date ? `<span>${CLU.escapeHtml(fmtDate(date))}</span>` : ''}`
             + `<span class="ss-chip" data-s="${st}">${chip}</span></div>`;
         if (summary) {
-            html += `<p class="ss-desc" id="seriesSheetDesc">${esc(summary)}</p>`
+            html += `<p class="ss-desc" id="seriesSheetDesc">${CLU.escapeHtml(summary)}</p>`
                 + '<button type="button" class="btn btn-link ss-more" id="seriesSheetMore" aria-expanded="false" aria-controls="seriesSheetDesc">More</button>';
         }
         if (it.owned) {
