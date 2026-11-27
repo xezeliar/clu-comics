@@ -16,7 +16,7 @@
 # docker-compose.yaml must use the same image name; it uses :latest.
 
 IMAGE ?= xezeliars/comic-utils-web
-TAG   ?= 7.4+xezeliar.20261127
+TAG   ?= 7.4.xezeliar.20261127
 REF   := $(IMAGE):$(TAG)
 ARGS  ?=
 

@@ -1,7 +1,7 @@
 version: '3.9'
 services:
     comic-utils:
-        image: xezeliars/comic-utils-web:7.2.1.20261116.1.0.0  
+        image: xezeliars/comic-utils-web:7.4.xezeliar.20261127  
 
         container_name: comic-utils
         logging:
