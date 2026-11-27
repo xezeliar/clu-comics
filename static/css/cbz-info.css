@@ -109,23 +109,39 @@
     #cbzInfoModal .ci-hint .ci-c { display: none; }
     #cbzInfoModal .ci-hint .ci-t { display: inline; }
     #cbzInfoModal .ci-ib { width: 2.75rem; height: 2.75rem; }
+    /* Small grey type is the hardest thing to read on a tablet or phone. */
+    #cbzInfoModal .ci-row dt, #cbzInfoModal .ci-g h6 { font-size: .9375rem; }
+    #cbzInfoModal .ci-row dd, #cbzInfoModal .ci-sub { font-size: 1rem; }
+    #cbzInfoModal .ci-hint, #cbzInfoModal .ci-fn, #cbzInfoModal .ci-pg, #cbzInfoModal .ci-file { font-size: .875rem; }
     #cbzInfoModal .ci-pen { opacity: 1; width: 2.75rem; height: 2.75rem; margin: -.5rem -.5rem -.5rem 0; }
 }
 
-/* Phone: modal-fullscreen-sm-down; cover beside the page controls, labels above values */
+/* Tablet portrait (an iPad Air is 820px): Bootstrap's modal-lg only widens at
+   992px, so the dialog stayed 500px and the 14.5rem preview column left the
+   fields about 60px, wrapping "Batman" to "Batma/n". Widen the dialog and move
+   the preview above the fields, as on a phone. */
+@media (min-width: 576px) and (max-width: 991.98px) {
+    #cbzInfoModal .modal-dialog { max-width: min(46rem, calc(100vw - 2rem)); }
+}
+
+@media (max-width: 991.98px) {
+    #cbzInfoModal .ci-body { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+    #cbzInfoModal .ci-side { order: -1; display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .5rem .9rem; align-items: start; }
+    #cbzInfoModal #cbzPreviewContainer { grid-row: 1 / 3; min-height: 0; }
+    #cbzInfoModal .ci-pg { grid-column: 2; flex-wrap: wrap; }
+    #cbzInfoModal .ci-pg > span { margin-inline: 0 auto; text-align: left; }
+    #cbzInfoModal .ci-file { grid-column: 2; border: 0; padding: 0; }
+}
+
+/* Phone: modal-fullscreen-sm-down; labels above values */
 @media (max-width: 575.98px) {
     #cbzInfoModal .ci-hd { flex-wrap: wrap; }
     #cbzInfoModal .ci-id { flex: 1 1 0; }
     #cbzInfoModal .ci-id .modal-title { font-size: 1.1rem; }
     #cbzInfoModal .ci-nav { order: -1; flex-basis: 100%; }
     #cbzInfoModal .ci-x { margin-left: auto; }
-    #cbzInfoModal .ci-body { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
-    #cbzInfoModal .ci-side { order: -1; display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .5rem .9rem; align-items: start; }
-    #cbzInfoModal #cbzPreviewContainer { grid-row: 1 / 3; min-height: 0; }
-    #cbzInfoModal .ci-pg { grid-column: 2; flex-wrap: wrap; }
-    #cbzInfoModal .ci-file { grid-column: 2; border: 0; padding: 0; }
     #cbzInfoModal .ci-dl { grid-template-columns: minmax(0, 1fr); }
-    #cbzInfoModal .ci-row dt { grid-column: 1; padding: 0; font-size: .8125rem; }
+    #cbzInfoModal .ci-row dt { grid-column: 1; padding: 0; }
     #cbzInfoModal .ci-row dd { grid-column: 1; }
     #cbzInfoModal .ci-v { min-height: 2.75rem; padding-block: .55rem; margin-block: -.35rem; }
     #cbzInfoModal .ci-ib, #cbzInfoModal .ci-file summary, #cbzInfoModal .ci-del,

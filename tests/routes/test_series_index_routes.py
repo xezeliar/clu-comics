@@ -252,3 +252,30 @@ def test_cbz_info_links_to_the_issue_page():
     assert "_setIssueLink(data.issue_url)" in js and "_guardPendingEdits(function () { window.location.href = url; })" in js
     src = (root / "routes/metadata.py").read_text(encoding="utf-8")
     assert 'metadata["issue_url"] = _issue_page_url(file_path)' in src
+
+
+# ---- a series spread over volume folders ----------------------------------------
+
+class TestVolumeFolders:
+    URL = "/series/issues?name=Batman&publisher=DC"
+
+    @pytest.fixture
+    def volumes(self, db_connection):
+        for folder, year in (("Vol.2 - 2011", "2011"), ("Vol.1 - 1940", "1940")):
+            for n in ("1", "3"):
+                _file(db_connection, f"/data/DC/Batman/{folder}", f"Batman {n}.cbz",
+                      ci_number=n, ci_year=year)
+        return db_connection
+
+    def test_issues_are_grouped_by_folder_in_natural_order(self, client, volumes):
+        body = _body(client, self.URL)
+        assert body.count('class="sp-group"') == 2
+        assert body.index("Vol.1 - 1940") < body.index("Vol.2 - 2011")
+
+    def test_no_gap_cards_across_merged_volumes(self, client, volumes):
+        # #2 is "missing" only if the volumes are merged; per folder it is a gap too,
+        # but the run is computed over the merged numbers, so it is not shown.
+        assert "not in your library" not in _body(client, self.URL)
+
+    def test_single_folder_series_has_no_headings(self, client, library):
+        assert 'class="sp-group"' not in _body(client, "/series/issues?name=Batman&publisher=DC")

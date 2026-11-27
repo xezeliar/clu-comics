@@ -4627,6 +4627,7 @@ document.addEventListener('click', (e) => {
     const path = modal.dataset.path;
     const run = {
         'read': () => openReaderForFile(path),
+        'issue-page': () => { window.location.href = CLU.url('/comic/by-path?path=' + encodeURIComponent(path)); },
         'folder': () => loadDirectory(path.substring(0, path.lastIndexOf('/'))),
         'read-date': () => openSetReadDateModal(path, readIssuesSet.has(path)),
         'unread': () => markIssueAsUnread(path),

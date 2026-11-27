@@ -489,6 +489,16 @@ def _years_label(record):
 SHOWS = ("all", "unread", "read", "untagged", "gaps")
 
 
+def _folder_name(path):
+    """Name of the folder a file sits in (either separator)."""
+    head = path[:max(path.rfind("/"), path.rfind("\\"))]
+    return head[max(head.rfind("/"), head.rfind("\\")) + 1:]
+
+
+def _natural_key(text):
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", text)]
+
+
 def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAULT_PER_PAGE):
     """Rows for the issue list: issues and (owner, tracked or not) gap runs.
 
@@ -503,8 +513,14 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
         page_no, total = state["progress"].get(f["path"], (0, 0))
         issues.append(dict(f, status=st, page_no=page_no, page_total=total,
                            sort=number_sort_key(f["number"])))
+    # A series spread over several folders (Batman/Vol.1 ... Vol.4) is shown one
+    # folder at a time. Gap runs are computed over the merged numbers, so they
+    # mean nothing across volumes and are dropped.
+    for i in issues:
+        i["group"] = _folder_name(i["path"])
+    grouped = len({i["group"] for i in issues}) > 1
     gaps = [{"gap": True, "first": a, "last": b, "count": b - a + 1,
-             "sort": number_sort_key(str(a))} for a, b in record["gap_runs"]] if owner else []
+             "sort": number_sort_key(str(a))} for a, b in record["gap_runs"]] if owner and not grouped else []
 
     counts = {
         "all": len(issues),
@@ -546,6 +562,9 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
     else:
         rows = pool
 
+    if grouped:
+        rows = sorted(rows, key=lambda r: (_natural_key(r.get("group", "")), r["sort"]))
+
     total_slots = len(rows)
     pages = max(1, -(-total_slots // per_page))
     page = min(max(1, page), pages)
@@ -560,7 +579,7 @@ def series_issues(record, state, owner, show="all", q="", page=1, per_page=DEFAU
         "first": start + 1 if page_rows else 0, "last": start + len(page_rows),
         "issues_on_page": [r for r in page_rows if not r.get("gap")],
         "matching_paths": [i["path"] for i in pool],
-        "continue": cont,
+        "continue": cont, "grouped": grouped,
         "all_read": bool(issues) and all(i["status"] == "read" for i in issues),
     }
 

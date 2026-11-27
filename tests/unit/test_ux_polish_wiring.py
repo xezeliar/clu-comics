@@ -75,7 +75,7 @@ def test_home_shelf_issue_cards_have_a_more_actions_menu():
     # Capture phase, so the card's own onclick never opens the reader.
     assert "closest('.dashboard-card [data-clu-more]')" in js
     assert 'id="issueActionsModal"' in html
-    for act in ("read", "folder", "read-date", "unread", "list"):
+    for act in ("read", "issue-page", "folder", "read-date", "unread", "list"):
         assert f'data-act="{act}"' in html and f"'{act}':" in js
     # Long-press and right-click reach the same button.
     assert "'.grid-item, .dashboard-card'" in gestures and "[data-clu-more]" in gestures
