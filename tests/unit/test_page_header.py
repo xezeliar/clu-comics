@@ -27,8 +27,8 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 TEMPLATES = PROJECT_ROOT / "templates"
 
 # Pages that extend base.html but have their own shell on purpose: the login
-# card, the setup wizards, and index.html (not rendered by any route).
-EXEMPT = {"login.html", "setup.html", "setup_owner.html", "index.html"}
+# card and the setup wizards.
+EXEMPT = {"login.html", "setup.html", "setup_owner.html"}
 
 # Cover grids: these use the whole window width.
 WIDE_PAGES = {
@@ -39,6 +39,7 @@ WIDE_PAGES = {
     "to_read.html",
     "series_index.html",
     "series_issues.html",
+    "recent.html",
 }
 
 

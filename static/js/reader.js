@@ -19,6 +19,10 @@ let currentComicSiblings = [];  // All comic files in current folder
 let currentComicIndex = -1;     // Index of current comic in siblings
 let savedReadingPosition = null;  // Track saved reading position for current comic
 let readingStartTime = null;      // Start time of current reading session
+// Opaque id for this open of the reader, sent with each save so the server can
+// group them into one reading session. It carries no time: the server stamps
+// sessions with its own clock, and nothing here feeds the time accounting.
+let readerSessionId = null;
 let accumulatedTime = 0;          // Total time spent reading prior to this session
 let pageEdgeColors = new Map();   // Cache of extracted edge colors per page index
 
@@ -249,7 +253,7 @@ function getReaderCurrentIndex() {
 
 /** URL of one page image. */
 function readerPageUrl(pageNum) {
-    return `/api/read/${encodeFilePath(currentComicPath)}/page/${pageNum}`;
+    return CLU.url(`/api/read/${encodeFilePath(currentComicPath)}/page/${pageNum}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -527,8 +531,20 @@ function _readerPositionPayload() {
         comic_path: currentComicPath,
         page_number: getReaderCurrentIndex() + 1,
         total_pages: currentComicPageCount,
-        time_spent: _readerTotalTime()
+        time_spent: _readerTotalTime(),
+        session_id: readerSessionId
     };
+}
+
+/** A fresh id for one open of the reader (see `readerSessionId`). */
+function _newReaderSessionId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    // randomUUID needs a secure context; CLU is often served over plain HTTP.
+    let id = '';
+    for (let i = 0; i < 32; i++) id += Math.floor(Math.random() * 16).toString(16);
+    return id;
 }
 
 /**
@@ -617,7 +633,8 @@ function markCurrentComicFinished() {
         body: JSON.stringify({
             path,
             page_count: currentComicPageCount,
-            time_spent: _readerTotalTime()
+            time_spent: _readerTotalTime(),
+            session_id: readerSessionId
         })
     }).then(() => {
         _markPathAsRead(path);
@@ -691,6 +708,7 @@ function openComicReader(filePath) {
     savedReadingPosition = null;
     readingStartTime = Date.now();
     accumulatedTime = 0;
+    readerSessionId = _newReaderSessionId();
     pageEdgeColors = new Map();
     suppressProgressOnNextChange = false;
     lastPersistedPage = null;

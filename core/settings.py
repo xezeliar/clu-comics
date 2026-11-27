@@ -1,8 +1,7 @@
 """Typed access to the settings that used to live in config.ini.
 
 ``user_preferences`` is the only store. ``SETTINGS_SCHEMA`` is the one table
-mapping a legacy ini key to its preference key, type and default; the one-time
-import (``core.config.migrate_ini_to_user_preferences``), the save routes and
+mapping a legacy ini key to its preference key, type and default; the save routes and
 every reader all go through it, so they cannot disagree about a name or a
 default.
 
@@ -38,7 +37,7 @@ def _s(pref, typ, default, category):
 SETTINGS_SCHEMA = {
     # file processing
     # Whether monitor.py runs and owns WATCH. Was the MONITOR env var, which
-    # core.config.seed_monitor_from_env imports once (default off).
+    # no longer read (default off).
     "MONITOR_ENABLED": _s("monitor_enabled", _B, False, "file_processing"),
     # Home-page setup checklist hidden for good (Dismiss on the card).
     "ONBOARDING_DISMISSED": _s("onboarding_dismissed", _B, False, "system"),
@@ -129,6 +128,10 @@ SETTINGS_SCHEMA = {
     "THEME_DARK": _s("theme_dark", _S, "darkly", "personalization"),
     "THEME_OLED": _s("theme_oled", _B, False, "personalization"),
     "THEME_ACCENT": _s("theme_accent", _S, "", "personalization"),
+    # Site-default Wrapped style (core/wrapped_styles.py); users pick their
+    # own in the Wrapped viewer. Blank = each recap's own default. Never in
+    # an ini.
+    "WRAPPED_STYLE": _s("wrapped_style", _S, "", "personalization"),
     # Site-default page width (core/page_width.py); users override it on
     # /account. Never in an ini.
     "PAGE_WIDTH": _s("page_width", _S, "auto", "personalization"),
@@ -155,8 +158,9 @@ SETTINGS_SCHEMA = {
     "MYLAR_IMPORT_LAST_RUN": _s("mylar_import_last_run", _S, "", "onboarding"),
 }
 
-# ini keys that are *not* plain preferences, or that stay out of the schema on
-# purpose. The import handles each of these itself (or deliberately skips it).
+# Legacy ini keys that are *not* plain preferences, or that stay out of the
+# schema on purpose. The config.ini import is gone; the list remains as the
+# record of where each key went.
 #   CACHE_DIR      a fixed path (core.config.CACHE_DIR), not a setting
 #   WATCH/TARGET   already migrated, see core.config.get_watch_dir
 #   TIMEZONE       migrated by init_db

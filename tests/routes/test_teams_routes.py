@@ -1,4 +1,4 @@
-"""Routes: /teams, /teams/<name>, the person-art image route, /api/insights/who,
+"""Routes: /teams, /teams/<name>, the person-art image route, /api/reading-who,
 and the `art` key on the people grids."""
 
 import os
@@ -149,7 +149,7 @@ class TestInsightsWho:
         return library
 
     def test_shape_and_counts(self, client, reads):
-        d = client.get("/api/insights/who?year=all&limit=8").get_json()
+        d = client.get("/api/reading-who?year=all&limit=8").get_json()
         assert set(d) == {"teams", "characters", "writers", "publishers"}
         assert d["teams"] == {"total": 1, "items": [
             {"name": "Justice League", "count": 1, "art": None,
@@ -164,13 +164,13 @@ class TestInsightsWho:
         assert d["publishers"]["items"][0]["href"] == "/browse/publisher/DC"
 
     def test_year_and_limit(self, client, reads):
-        d = client.get("/api/insights/who?year=2023&limit=1").get_json()
+        d = client.get("/api/reading-who?year=2023&limit=1").get_json()
         assert "teams" not in d
         assert d["characters"] == {"total": 1, "items": [
             {"name": "Spawn", "count": 1, "art": None, "href": "/characters/Spawn"}]}
 
     def test_empty_history_omits_every_section(self, client, library):
-        assert client.get("/api/insights/who").get_json() == {}
+        assert client.get("/api/reading-who").get_json() == {}
 
     def test_not_login_exempt(self, client, db_connection, monkeypatch):
         from core.database import create_user
@@ -178,7 +178,7 @@ class TestInsightsWho:
         monkeypatch.delenv("CLU_PASSWORD", raising=False)
         create_user("owner", password="ownerpass", role="owner")
         create_user("reader", password="readerpass", role="reader")
-        assert client.get("/api/insights/who").status_code == 401
+        assert client.get("/api/reading-who").status_code == 401
         # the Homepage widget's exact path stays exempt
         assert client.get("/api/insights").status_code == 200
 

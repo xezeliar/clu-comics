@@ -18,7 +18,7 @@ from core.database import (
     current_user_id, db_conn, delete_reading_position,
     get_issues_for_series, get_new_arrival_counts, get_wanted_marks, unmark_issue_read,
 )
-from helpers.collection import normalize_issue_number
+from helpers.collection import issue_match_key
 from helpers.library import is_valid_library_path
 
 series_shelf_bp = Blueprint('series_shelf', __name__)
@@ -121,7 +121,7 @@ def dashboard_series_issues(series_id):
     issues, have = [], set()
     for f in files:
         num = f['ci_number'] if f['ci_number'] is not None else ''
-        have.add(normalize_issue_number(num))
+        have.add(issue_match_key(num))
         item = {
             'number': str(num), 'owned': True, 'path': f['path'],
             'title': f['ci_title'] or None, 'date': None,
@@ -134,16 +134,16 @@ def dashboard_series_issues(series_id):
     # Missing = released issues of the series that no file covers. The Wanted
     # cache skips Not-monitored series, so read the issues table instead.
     monitored = bool(s['monitored'])
-    marks = set() if monitored else {normalize_issue_number(n) for n in get_wanted_marks(series_id)}
+    marks = set() if monitored else {issue_match_key(n) for n in get_wanted_marks(series_id)}
     today = date.today().isoformat()
     for w in get_issues_for_series(series_id):
         when = w['store_date'] or w['cover_date']
-        if normalize_issue_number(w['number']) in have or (when and when > today):
+        if issue_match_key(w['number']) in have or (when and when > today):
             continue
         issues.append({
             'number': str(w['number'] or ''), 'owned': False,
             'title': w['name'] or None, 'date': when or None, 'read': False,
-            'wanted': monitored or normalize_issue_number(w['number']) in marks,
+            'wanted': monitored or issue_match_key(w['number']) in marks,
         })
     issues.sort(key=lambda i: _sort_key(i['number']))
     return jsonify({

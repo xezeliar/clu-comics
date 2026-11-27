@@ -90,5 +90,4 @@ def test_hooks_are_wired():
     assert "CLU.readerOpened(modal)" in reader and "CLU.readerClosing(modal)" in reader
     status = _read("templates/status.html")
     assert "CLU.flip(root" in status and "li.dataset.flipKey = row.key" in status
-    insights = _read("static/js/insights.js")
-    assert "data-clu-count" in insights and "CLU.countUp" in insights
+    # Insights is upstream's page now; it does not use the count-up hook.

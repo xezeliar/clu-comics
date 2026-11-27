@@ -2,6 +2,7 @@
 import io
 import json
 import zipfile
+from unittest.mock import patch
 
 from core.database import (
     LEGACY_TOKEN_DIGEST_PREFIX,
@@ -148,8 +149,11 @@ class TestDebugPackage:
         # /data (publishers, series) are not: only their count.
         data = tmp_path / "data"
         (data / "Marvel").mkdir(parents=True)
-        monkeypatch.setattr("core.config.get_data_dir", lambda: str(data))
-        resp = client.get("/api/admin/debug-package")
+        # patch(), not monkeypatch: the app fixture already patches this name,
+        # and monkeypatch (set up first by autouse fixtures) undoes after it,
+        # re-installing this test's mock for every later test.
+        with patch("core.config.get_data_dir", return_value=str(data)):
+            resp = client.get("/api/admin/debug-package")
         assert b"Marvel" not in resp.data
         with zipfile.ZipFile(io.BytesIO(resp.data)) as zf:
             payload = json.loads(zf.read("preflight.json"))

@@ -349,7 +349,7 @@ _EXEMPT_PREFIXES = (
 # path is its help page. Matched exactly: the queue's status, cancel, retry,
 # dismiss and clear endpoints are used by the logged-in Status page and go
 # through the normal login and role check (core.auth.required_role_for_request).
-# /api/insights (Homepage widget, own bearer-token check) is exact: /api/insights/who
+# /api/insights (Homepage widget, own bearer-token check) is exact: a path under it
 # is per-user data and stays gated.
 _EXEMPT_PATHS = frozenset({"/download", "/api/insights"})
 

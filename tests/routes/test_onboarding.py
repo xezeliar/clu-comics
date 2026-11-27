@@ -58,4 +58,3 @@ def test_empty_states_name_a_next_step():
     assert "No indexers yet" in _read("config.html")
     assert "No downloads yet" in _read("weekly_packs.html")
     assert "No recommendations yet" in _read("collection.html")
-    assert "No reading data yet" in _read("insights.html")
