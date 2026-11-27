@@ -25,6 +25,28 @@
     }
 }
 
+/* A folder heading inside a series that spans several folders (Vol.1, Vol.2...). */
+.sp-group {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--bs-border-color);
+    padding-bottom: .25rem;
+}
+
+.sp-group:not(:first-child) {
+    margin-top: .75rem;
+}
+
+.sp-group h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.sp-group-row th {
+    background: var(--bs-tertiary-bg);
+    font-weight: 600;
+}
+
 .sp-card {
     position: relative;
     min-width: 0;

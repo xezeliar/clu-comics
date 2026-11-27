@@ -95,7 +95,11 @@
         {% if owner %}<th scope="col" class="text-end">Size</th><th scope="col">ComicInfo</th><th scope="col">File</th><th scope="col"><span class="visually-hidden">Actions</span></th>{% endif %}
       </tr></thead>
       <tbody>
+      {% set cur = namespace(group=none) %}
       {% for r in data.rows %}
+        {% if data.grouped and not r.gap and r.group != cur.group %}{% set cur.group = r.group %}
+        <tr class="sp-group-row"><th scope="rowgroup" colspan="{{ 9 if owner else 5 }}">{{ r.group }}</th></tr>
+        {% endif %}
         {% if r.gap %}
         <tr class="is-gap"><td class="sp-sel-col" hidden></td>
           <td class="text-end fw-semibold">{{ r.first }}{% if r.last != r.first %}–{{ r.last }}{% endif %}</td>
@@ -123,7 +127,11 @@
   </div>
   {% else %}
   <ul class="sp-grid" id="issuesGrid">
+    {% set cur = namespace(group=none) %}
     {% for r in data.rows %}
+      {% if data.grouped and not r.gap and r.group != cur.group %}{% set cur.group = r.group %}
+      <li class="sp-group"><h2>{{ r.group }}</h2></li>
+      {% endif %}
       {% if r.gap %}
       <li class="sp-card">
         <div class="sp-gap">
